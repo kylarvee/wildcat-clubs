@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/*
+ * Wildcat Clubs design tokens. Weber State purple carries the brand; everything
+ * else is a quiet neutral so club colors and data stand out.
+ * Use the Tailwind names (bg-brand, text-ink-2, border-line…) — never raw hex in components.
+ */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-brand: #492365;
+  --color-brand-600: #5b2d7e;
+  --color-brand-700: #3b1c52;
+  --color-brand-50: #f5f0fa;
+  --color-brand-100: #ebe1f4;
+  --color-brand-200: #d6c3e8;
+
+  --color-ink: #17131c;
+  --color-ink-2: #4a4453;
+  --color-ink-3: #77707f;
+  --color-line: #e7e3ec;
+  --color-line-2: #d6d0dd;
+  --color-surface: #ffffff;
+  --color-canvas: #f8f7fa;
+  --color-muted: #f2f0f5;
+
+  --color-success: #15803d;
+  --color-success-50: #ecfdf3;
+  --color-warning: #b45309;
+  --color-warning-50: #fffbeb;
+  --color-danger: #b91c1c;
+  --color-danger-50: #fef2f2;
+  --color-info: #1d4ed8;
+  --color-info-50: #eff6ff;
+
+  --radius-card: 14px;
+  --shadow-card: 0 1px 2px rgb(23 19 28 / 0.04), 0 1px 3px rgb(23 19 28 / 0.06);
+  --shadow-pop: 0 10px 30px -10px rgb(23 19 28 / 0.25), 0 4px 10px -4px rgb(23 19 28 / 0.1);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--color-brand-100);
+}
+
+/* Rendered rich text (RichContent) and the editor share these styles. */
+.prose-wc {
+  line-height: 1.65;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.prose-wc > * + * {
+  margin-top: 0.75em;
+}
+.prose-wc h1 { font-size: 1.6rem; font-weight: 700; line-height: 1.25; margin-top: 1.2em; }
+.prose-wc h2 { font-size: 1.3rem; font-weight: 650; line-height: 1.3; margin-top: 1.1em; }
+.prose-wc h3 { font-size: 1.1rem; font-weight: 650; margin-top: 1em; }
+.prose-wc a { color: var(--color-brand-600); text-decoration: underline; text-underline-offset: 2px; }
+.prose-wc ul { list-style: disc; padding-left: 1.4em; }
+.prose-wc ol { list-style: decimal; padding-left: 1.4em; }
+.prose-wc ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
+.prose-wc ul[data-type="taskList"] li { display: flex; gap: 0.5em; align-items: flex-start; }
+.prose-wc blockquote { border-left: 3px solid var(--color-brand-200); padding-left: 1em; color: var(--color-ink-2); }
+.prose-wc code { background: var(--color-muted); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; font-family: var(--font-mono); }
+.prose-wc pre { background: #1d1923; color: #f4f2f7; padding: 1em; border-radius: 10px; overflow-x: auto; }
+.prose-wc pre code { background: transparent; padding: 0; color: inherit; }
+.prose-wc hr { border: 0; border-top: 1px solid var(--color-line); margin: 1.5em 0; }
+.prose-wc img { max-width: 100%; border-radius: 10px; }
+.prose-wc table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
+.prose-wc th, .prose-wc td { border: 1px solid var(--color-line); padding: 0.4em 0.6em; text-align: left; vertical-align: top; }
+.prose-wc th { background: var(--color-muted); font-weight: 600; }
+.prose-wc mark { background: #fde68a; padding: 0 0.1em; border-radius: 2px; }
+.prose-wc iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }
+
+/* FullCalendar theme hooks (CalendarView). */
+.fc {
+  --fc-border-color: var(--color-line);
+  --fc-today-bg-color: var(--color-brand-50);
+  --fc-button-bg-color: #ffffff;
+  --fc-button-border-color: var(--color-line-2);
+  --fc-button-text-color: var(--color-ink);
+  --fc-button-hover-bg-color: var(--color-muted);
+  --fc-button-hover-border-color: var(--color-line-2);
+  --fc-button-active-bg-color: var(--color-brand-50);
+  --fc-button-active-border-color: var(--color-brand-200);
+  --fc-event-border-color: transparent;
+  --fc-page-bg-color: #ffffff;
+  font-size: 0.875rem;
+}
+.fc .fc-button { font-weight: 500; text-transform: none; box-shadow: none !important; padding: 0.35em 0.75em; }
+.fc .fc-toolbar-title { font-size: 1.1rem; font-weight: 650; }
+.fc .fc-button-primary:not(:disabled).fc-button-active { color: var(--color-brand); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

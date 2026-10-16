@@ -1,0 +1,11 @@
+{
+  "name": "wildcat-clubs",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix apps/web run dev",
+    "db:reset": "npm --prefix apps/web run db:reset",
+    "mobile": "npm --prefix apps/mobile run start",
+    "typecheck": "npm --prefix apps/web run typecheck",
+    "test": "npm --prefix apps/web test"
+  }
+}

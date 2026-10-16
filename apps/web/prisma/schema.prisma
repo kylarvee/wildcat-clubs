@@ -1,0 +1,1497 @@
+// Wildcat Clubs — the data lake.
+//
+// Every input on the platform lands in one of these tables before any surface
+// (web page, mobile app, calendar feed, AI assistant, Google sync) uses it.
+// Writes go through src/lib/domain/* only; each write appends to ActivityLog.
+// See ARCHITECTURE.md → "Data ownership" for which tool owns which table.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Institution reference data (admins manage; sysadmins manage terms + config)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model College {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  shortName   String
+  slug        String       @unique
+  departments Department[]
+  majors      Major[]
+  clubs       Club[]
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  collegeId String?
+  college   College? @relation(fields: [collegeId], references: [id])
+  majors    Major[]
+  clubs     Club[]
+  faculty   User[]   @relation("UserDepartment")
+  createdAt DateTime @default(now())
+}
+
+/// Majors, minors and disciplines. A club's focus and a student's majors/minors both point here.
+model Major {
+  id           String      @id @default(cuid())
+  name         String      @unique
+  collegeId    String?
+  college      College?    @relation(fields: [collegeId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  students     UserMajor[]
+  clubs        Club[]
+}
+
+model Building {
+  id      String  @id @default(cuid())
+  code    String  @unique
+  name    String
+  campus  String  @default("Ogden")
+  address String?
+  lat     Float?
+  lng     Float?
+  events  Event[]
+}
+
+enum TermKind {
+  FALL
+  SPRING
+  SUMMER
+}
+
+/// The academic calendar. Activity, pilot periods, retention and recurring tests are measured against it.
+model Term {
+  id                String           @id @default(cuid())
+  name              String           @unique
+  kind              TermKind
+  academicYear      String // "2026-2027"
+  startsOn          DateTime
+  endsOn            DateTime
+  countsForActivity Boolean          @default(true)
+  budgetItems       BudgetItem[]
+  fundingRequests   FundingRequest[]
+}
+
+/// Sysadmin-only settings. Keys and defaults live in src/lib/config.
+model SystemConfig {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// People
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Set from the email domain at first sign-in: mail.weber.edu → STUDENT, weber.edu → FACULTY_STAFF.
+enum UserKind {
+  STUDENT
+  FACULTY_STAFF
+}
+
+enum PlatformRole {
+  USER
+  ADMIN
+  SYSADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  ALUMNI
+  DEACTIVATED
+}
+
+model User {
+  id                   String       @id @default(cuid())
+  email                String       @unique
+  name                 String
+  handle               String       @unique
+  pronouns             String?
+  avatarUrl            String?
+  avatarColor          String       @default("#4b2e83")
+  kind                 UserKind
+  platformRole         PlatformRole @default(USER)
+  status               UserStatus   @default(ACTIVE)
+  headline             String? // one-line description on the profile
+  aboutHtml            String?
+  jobTitle             String? // faculty/staff title
+  departmentId         String?
+  department           Department?  @relation("UserDepartment", fields: [departmentId], references: [id])
+  classYear            Int? // expected graduation year (students)
+  graduatedAt          DateTime?
+  linkedinUrl          String?
+  calendarToken        String       @unique @default(cuid())
+  subscribeUniversity  Boolean      @default(true) // university-wide events on my calendar
+  emailNotifications   Boolean      @default(true)
+  appPromptDismissedAt DateTime?
+  hasMobileApp         Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  lastSeenAt           DateTime?
+
+  majors               UserMajor[]
+  sessions             Session[]
+  pushTokens           PushToken[]
+  experiences          Experience[]
+  educations           Education[]
+  projects             Project[]
+  memberships          Membership[]
+  roleAssignments      RoleAssignment[]       @relation("RoleHolder")
+  rolesAssigned        RoleAssignment[]       @relation("RoleAssigner")
+  attendances          Attendance[]           @relation("Attendee")
+  attendanceRecorded   Attendance[]           @relation("AttendanceRecorder")
+  subscriptions        CalendarSubscription[]
+  reviews              Review[]
+  reviewFlags          ReviewFlag[]
+  notifications        Notification[]
+  tasksAssigned        Task[]                 @relation("TaskAssignee")
+  tasksCreated         Task[]                 @relation("TaskCreator")
+  tasksCompleted       Task[]                 @relation("TaskCompleter")
+  clubsCreated         Club[]                 @relation("ClubCreator")
+  eventsCreated        Event[]
+  filesCreated         FileItem[]             @relation("FileCreator")
+  filesOwned           FileItem[]             @relation("FileOwner")
+  fileGrants           FileGrant[]
+  conversationMembers  ConversationMember[]
+  messages             Message[]
+  announcements        Announcement[]
+  policies             Policy[]
+  testsCreated         Test[]
+  testAttempts         TestAttempt[]          @relation("Taker")
+  testGrades           TestAttempt[]          @relation("Grader")
+  testAssignments      TestAssignment[]
+  complaints           Complaint[]
+  complaintNotes       ComplaintNote[]
+  complaintAccess      ComplaintAccessLog[]
+  candidacies          ElectionCandidate[]    @relation("Candidate")
+  nominations          ElectionCandidate[]    @relation("Nominator")
+  votes                Vote[]
+  electionsCreated     Election[]
+  advisorInvitesSent   AdvisorInvite[]        @relation("Inviter")
+  advisorInvites       AdvisorInvite[]        @relation("Invitee")
+  constitutionDrafts   ConstitutionDraft[]
+  clubDocuments        ClubDocument[]         @relation("DocAuthor")
+  budgetItems          BudgetItem[]
+  fundingRequests      FundingRequest[]       @relation("FundingSubmitter")
+  fundingDecisions     FundingRequest[]       @relation("FundingDecider")
+  invoices             Invoice[]
+  aiConversations      AiConversation[]
+  activity             ActivityLog[]
+  clubDecisions        ClubDecision[]
+  cohostRequests       EventCohost[]          @relation("CohostRequester")
+  cohostDecisions      EventCohost[]          @relation("CohostDecider")
+}
+
+model UserMajor {
+  userId  String
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  majorId String
+  major   Major   @relation(fields: [majorId], references: [id])
+  isMinor Boolean @default(false)
+
+  @@id([userId, majorId])
+}
+
+enum ClientKind {
+  WEB
+  MOBILE
+}
+
+model Session {
+  id         String     @id @default(cuid())
+  tokenHash  String     @unique
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client     ClientKind @default(WEB)
+  createdAt  DateTime   @default(now())
+  expiresAt  DateTime
+  lastUsedAt DateTime   @default(now())
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String // ios | android | web
+  createdAt DateTime @default(now())
+}
+
+enum ExperienceSource {
+  MANUAL
+  LINKEDIN_IMPORT
+}
+
+/// Experience the user adds themselves. Club roles are NOT stored here — the
+/// profile reads them from RoleAssignment so the two can never drift.
+model Experience {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  organization String
+  location     String?
+  startDate    DateTime
+  endDate      DateTime?
+  description  String?
+  source       ExperienceSource @default(MANUAL)
+  createdAt    DateTime         @default(now())
+}
+
+/// Education beyond the WSU majors/minors already on the user.
+model Education {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school      String
+  degree      String?
+  field       String?
+  startYear   Int?
+  endYear     Int?
+  description String?
+}
+
+/// A project or contribution. When tied to a club role it shows on the club's
+/// role history and on the profile under that role.
+model Project {
+  id               String          @id @default(cuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clubId           String?
+  club             Club?           @relation(fields: [clubId], references: [id])
+  roleAssignmentId String?
+  roleAssignment   RoleAssignment? @relation(fields: [roleAssignmentId], references: [id])
+  title            String
+  descriptionHtml  String?
+  url              String?
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt        DateTime        @default(now())
+  files            ProjectFile[]
+}
+
+model ProjectFile {
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileId    String
+  file      FileItem @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, fileId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clubs
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ClubType {
+  SPONSORED
+  AFFILIATE
+  REGISTERED
+  COLLEGE_AMBASSADORS // the college-level ambassador org (created by admins)
+}
+
+/// Where the club sits. COLLEGE requires collegeId.
+enum ClubScope {
+  COLLEGE
+  UNIVERSITY
+  INDEPENDENT
+  SPORTS
+}
+
+enum ClubStatus {
+  DRAFT
+  SUBMITTED
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+  RETIRED
+}
+
+enum JoinPolicy {
+  OPEN
+  APPROVAL
+}
+
+enum SuccessionMethod {
+  SENIORITY
+  MEMBER_VOTE
+  LEADERSHIP_VOTE
+}
+
+model Club {
+  id                      String           @id @default(cuid())
+  slug                    String           @unique
+  name                    String
+  type                    ClubType
+  status                  ClubStatus       @default(DRAFT)
+  scope                   ClubScope        @default(INDEPENDENT)
+  collegeId               String?
+  college                 College?         @relation(fields: [collegeId], references: [id])
+  departmentId            String?
+  department              Department?      @relation(fields: [departmentId], references: [id])
+  requestedDepartmentName String? // "Other" department typed by the founder; an admin adds it to the list
+  focusMajorId            String?
+  focusMajor              Major?           @relation(fields: [focusMajorId], references: [id])
+  focusOther              String? // discipline not in the majors list
+  shortDescription        String           @default("")
+  descriptionHtml         String?
+  logoUrl                 String?
+  logoColor               String           @default("#4b2e83")
+  contactEmail            String? // the club's Google account; Drive/Calendar/Chat sync runs as this
+  joinPolicy              JoinPolicy       @default(OPEN)
+  successionMethod        SuccessionMethod @default(SENIORITY)
+  autoApproveCohosts      Boolean          @default(false)
+  createdById             String
+  createdBy               User             @relation("ClubCreator", fields: [createdById], references: [id])
+  createdAt               DateTime         @default(now())
+  submittedAt             DateTime?
+  approvedAt              DateTime?
+  retiredAt               DateTime?
+  retiredReason           String?
+  googleDriveFolderId     String?
+  googleCalendarId        String?
+  googleChatSpaceId       String?
+
+  documents            ClubDocument[]
+  decisions            ClubDecision[]
+  advisorInvites       AdvisorInvite[]
+  memberships          Membership[]
+  positions            Position[]
+  roleAssignments      RoleAssignment[]       @relation("RoleClub")
+  ambassadorPlacements RoleAssignment[]       @relation("RoleViaOrg")
+  events               Event[]
+  cohostings           EventCohost[]
+  attendances          Attendance[]
+  subscriptions        CalendarSubscription[]
+  reviews              Review[]
+  budgetItems          BudgetItem[]
+  fundingRequests      FundingRequest[]
+  files                FileItem[]
+  conversations        Conversation[]
+  announcements        Announcement[]
+  elections            Election[]
+  tests                Test[]
+  projects             Project[]
+  complaints           Complaint[]
+  tasks                Task[]
+  activity             ActivityLog[]
+
+  @@index([status])
+}
+
+enum ClubDecisionAction {
+  SUBMITTED
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+  RETIRED
+  REINSTATED
+  DEPARTMENT_ADDED
+  DOCUMENT_APPROVED
+  DOCUMENT_REJECTED
+}
+
+/// The review trail between founders and WSUSA.
+model ClubDecision {
+  id     String             @id @default(cuid())
+  clubId String
+  club   Club               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  action ClubDecisionAction
+  note   String?
+  byId   String
+  by     User               @relation(fields: [byId], references: [id])
+  at     DateTime           @default(now())
+}
+
+enum ClubDocumentKind {
+  CONSTITUTION
+  BYLAWS
+  OTHER
+}
+
+enum ClubDocumentSource {
+  BUILDER
+  CUSTOM_UPLOAD
+}
+
+enum ClubDocumentStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  SUPERSEDED
+  REJECTED
+}
+
+model ClubDocument {
+  id          String             @id @default(cuid())
+  clubId      String
+  club        Club               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  kind        ClubDocumentKind
+  title       String
+  version     Int                @default(1)
+  source      ClubDocumentSource
+  status      ClubDocumentStatus
+  draftId     String?
+  draft       ConstitutionDraft? @relation(fields: [draftId], references: [id])
+  contentHtml String? // rendered text of builder output (for in-app reading + search)
+  fileId      String?
+  file        FileItem?          @relation(fields: [fileId], references: [id])
+  createdById String
+  createdBy   User               @relation("DocAuthor", fields: [createdById], references: [id])
+  createdAt   DateTime           @default(now())
+  decidedAt   DateTime?
+}
+
+/// Owned by a person, not a club, so one founder can apply it to several clubs.
+/// `data` holds the chosen modules and filled-in fields (see src/lib/constitution).
+model ConstitutionDraft {
+  id               String           @id @default(cuid())
+  ownerId          String
+  owner            User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title            String
+  data             Json
+  successionMethod SuccessionMethod @default(SENIORITY)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  documents        ClubDocument[]
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+model AdvisorInvite {
+  id          String       @id @default(cuid())
+  clubId      String
+  club        Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  token       String       @unique @default(cuid())
+  status      InviteStatus @default(PENDING)
+  invitedById String
+  invitedBy   User         @relation("Inviter", fields: [invitedById], references: [id])
+  inviteeId   String? // set when the email matches an account
+  invitee     User?        @relation("Invitee", fields: [inviteeId], references: [id])
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Membership, roles, org chart
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MembershipStatus {
+  PENDING // waiting on the club's approval gate
+  ACTIVE
+  LEFT
+  ALUMNI // graduated or stepped down to alumni; history stays
+  REMOVED
+  DECLINED
+}
+
+enum MembershipSource {
+  REGISTER
+  CHECKIN
+  ADVISOR
+  FOUNDER
+  IMPORT
+}
+
+model Membership {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clubId        String
+  club          Club             @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  status        MembershipStatus
+  source        MembershipSource
+  internalTitle String? // club-defined secondary title ("Lead Mentor", "Pledge Class 2025")
+  requestedAt   DateTime         @default(now())
+  joinedAt      DateTime?
+  endedAt       DateTime?
+
+  @@unique([userId, clubId])
+  @@index([clubId, status])
+}
+
+/// Rank order lives in src/lib/authz (MEMBER 0 < AMBASSADOR = OFFICER 1 < VP 2 < PRESIDENT 3 < ADVISOR 4).
+enum ClubRole {
+  MEMBER
+  AMBASSADOR
+  OFFICER
+  VP
+  PRESIDENT
+  ADVISOR
+}
+
+/// An org-chart seat: "President", "Treasurer", "Club Representative Ambassador"…
+model Position {
+  id                 String           @id @default(cuid())
+  clubId             String
+  club               Club             @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  role               ClubRole
+  name               String
+  responsibilities   String[] // one line each
+  defaultPermissions String[] // club capabilities granted by default when someone takes this seat
+  maxHolders         Int              @default(1)
+  sortOrder          Int              @default(0)
+  isCore             Boolean          @default(false) // President / VP seats can't be deleted
+  archivedAt         DateTime?
+  assignments        RoleAssignment[]
+  elections          Election[]
+
+  @@index([clubId])
+}
+
+enum RoleEndReason {
+  SUCCEEDED
+  RESIGNED
+  GRADUATED
+  REMOVED
+  TERM_ENDED
+  CLUB_RETIRED
+}
+
+/// Every role anyone has ever held. Never deleted — ended. This is the role history.
+model RoleAssignment {
+  id           String         @id @default(cuid())
+  clubId       String
+  club         Club           @relation("RoleClub", fields: [clubId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User           @relation("RoleHolder", fields: [userId], references: [id], onDelete: Cascade)
+  positionId   String?
+  position     Position?      @relation(fields: [positionId], references: [id])
+  role         ClubRole
+  permissions  String[] // capabilities for OFFICER / AMBASSADOR seats (set at promotion)
+  viaClubId    String? // ambassadors placed by a College Ambassadors org
+  viaClub      Club?          @relation("RoleViaOrg", fields: [viaClubId], references: [id])
+  startedAt    DateTime       @default(now())
+  endedAt      DateTime?
+  endReason    RoleEndReason?
+  assignedById String?
+  assignedBy   User?          @relation("RoleAssigner", fields: [assignedById], references: [id])
+  projects     Project[]
+
+  @@index([clubId, endedAt])
+  @@index([userId, endedAt])
+}
+
+enum RequirementKind {
+  TEST
+  TRAINING
+}
+
+enum RenewalPeriod {
+  NONE
+  SEMESTER
+  ACADEMIC_YEAR
+  ANNUAL
+}
+
+/// What officers and up must complete (tests, trainings). Fulfillment is computed
+/// from TestAttempt / Attendance, never stored, so it can't disagree with them.
+model RoleRequirement {
+  id              String          @id @default(cuid())
+  name            String
+  description     String?
+  appliesTo       ClubRole[]
+  kind            RequirementKind
+  testId          String?
+  test            Test?           @relation(fields: [testId], references: [id])
+  trainingEventId String?
+  trainingEvent   Event?          @relation(fields: [trainingEventId], references: [id])
+  renewal         RenewalPeriod   @default(ACADEMIC_YEAR)
+  graceDays       Int             @default(30) // 0 = strict gate
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Events, calendars, attendance
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EventStatus {
+  DRAFT // on the club's idea list, not on any calendar
+  SCHEDULED
+  CANCELLED
+}
+
+enum Recurrence {
+  NONE
+  DAILY
+  WEEKLY // on recurrenceWeekdays
+  MONTHLY
+  SEMESTERLY
+  ACADEMIC_YEARLY
+  YEARLY
+}
+
+enum LocationType {
+  CAMPUS
+  ADDRESS
+  VIRTUAL
+  TBD
+}
+
+enum EventKind {
+  MEETING
+  SOCIAL
+  WORKSHOP
+  SERVICE
+  COMPETITION
+  FUNDRAISER
+  TRAINING
+  OTHER
+}
+
+enum Visibility {
+  PUBLIC // anyone, including logged-out visitors and the public ICS feed
+  UNIVERSITY // any signed-in WSU account
+  MEMBERS // club members only
+}
+
+/// An event definition. Single events have one occurrence; recurring ones many.
+/// clubId = null means a university (admin) event such as an officer training.
+model Event {
+  id                 String       @id @default(cuid())
+  clubId             String?
+  club               Club?        @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  title              String
+  descriptionHtml    String?
+  kind               EventKind    @default(MEETING)
+  status             EventStatus  @default(DRAFT)
+  visibility         Visibility   @default(PUBLIC)
+  startsAt           DateTime? // first occurrence (null while a draft)
+  durationMinutes    Int          @default(60)
+  allDay             Boolean      @default(false)
+  recurrence         Recurrence   @default(NONE)
+  recurrenceInterval Int          @default(1)
+  recurrenceWeekdays Int[] // 0 = Sunday … 6 = Saturday
+  recurrenceUntil    DateTime?
+  recurrenceCount    Int?
+  locationType       LocationType @default(TBD)
+  buildingId         String?
+  building           Building?    @relation(fields: [buildingId], references: [id])
+  room               String?
+  address            String?
+  lat                Float?
+  lng                Float?
+  virtualUrl         String? // Google Meet or other link
+  allowSelfCheckIn   Boolean      @default(true)
+  cohostAllClubs     Boolean      @default(false)
+  googleEventId      String?
+  createdById        String
+  createdBy          User         @relation(fields: [createdById], references: [id])
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  occurrences  EventOccurrence[]
+  cohosts      EventCohost[]
+  attachments  EventAttachment[]
+  costItems    BudgetItem[]
+  requirements RoleRequirement[]
+
+  @@index([clubId, status])
+}
+
+enum OccurrenceStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+/// One meeting on the calendar. Attendance and check-in QR codes hang off occurrences.
+model EventOccurrence {
+  id            String           @id @default(cuid())
+  eventId       String
+  event         Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  startsAt      DateTime
+  endsAt        DateTime
+  status        OccurrenceStatus @default(SCHEDULED)
+  roomOverride  String?
+  note          String?
+  checkinCode   String           @unique // short code printed under the QR and typed in by hand
+  checkinSecret String // signs the rotating QR token
+  attendances   Attendance[]
+
+  @@index([startsAt])
+  @@index([eventId, startsAt])
+}
+
+enum CohostStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+model EventCohost {
+  id            String       @id @default(cuid())
+  eventId       String
+  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  clubId        String
+  club          Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  status        CohostStatus @default(PENDING)
+  requestedById String
+  requestedBy   User         @relation("CohostRequester", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?        @relation("CohostDecider", fields: [decidedById], references: [id])
+  createdAt     DateTime     @default(now())
+  decidedAt     DateTime?
+
+  @@unique([eventId, clubId])
+}
+
+model EventAttachment {
+  eventId String
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fileId  String
+  file    FileItem @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, fileId])
+}
+
+model CalendarSubscription {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clubId    String
+  club      Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, clubId])
+}
+
+enum CheckInMethod {
+  QR
+  SELF
+  MANUAL
+}
+
+/// The only attendance input. Written by the Attendance Tool (QR scan, in-app
+/// self check-in, or a leader's manual add). Everything else reads it.
+model Attendance {
+  id           String          @id @default(cuid())
+  occurrenceId String
+  occurrence   EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User            @relation("Attendee", fields: [userId], references: [id], onDelete: Cascade)
+  clubId       String? // host club (null for university events); denormalized for fast stats
+  club         Club?           @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  method       CheckInMethod
+  checkedInAt  DateTime        @default(now())
+  recordedById String?
+  recordedBy   User?           @relation("AttendanceRecorder", fields: [recordedById], references: [id])
+
+  @@unique([occurrenceId, userId])
+  @@index([clubId, checkedInAt])
+  @@index([userId, checkedInAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reviews
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Review {
+  id           String       @id @default(cuid())
+  clubId       String
+  club         Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating       Int // 1–5
+  body         String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  hiddenAt     DateTime?
+  hiddenReason String?
+  flags        ReviewFlag[]
+
+  @@unique([clubId, userId])
+}
+
+model ReviewFlag {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Funding & budgeting
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum FundingSource {
+  UNIVERSITY
+  WSUSA
+  COLLEGE
+  DEPARTMENT
+}
+
+/// One cost line. Event costs (eventId set) are entered in the Events Builder;
+/// general costs (eventId null) in the Budget tool. Both live here.
+model BudgetItem {
+  id            String               @id @default(cuid())
+  clubId        String
+  club          Club                 @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  eventId       String?
+  event         Event?               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  termId        String
+  term          Term                 @relation(fields: [termId], references: [id])
+  description   String
+  category      String               @default("Supplies")
+  quantity      Float                @default(1)
+  unitCostCents Int
+  perOccurrence Boolean              @default(true) // event items: multiply by the event's occurrences in the term
+  fundingSource FundingSource
+  createdById   String
+  createdBy     User                 @relation(fields: [createdById], references: [id])
+  createdAt     DateTime             @default(now())
+  requestItems  FundingRequestItem[]
+}
+
+enum FundingStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_APPROVED
+  DENIED
+  WITHDRAWN
+}
+
+model FundingRequest {
+  id                   String               @id @default(cuid())
+  clubId               String
+  club                 Club                 @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  termId               String
+  term                 Term                 @relation(fields: [termId], references: [id])
+  title                String
+  justification        String?
+  fundingSource        FundingSource
+  amountRequestedCents Int                  @default(0)
+  amountApprovedCents  Int?
+  status               FundingStatus        @default(DRAFT)
+  submittedById        String
+  submittedBy          User                 @relation("FundingSubmitter", fields: [submittedById], references: [id])
+  submittedAt          DateTime?
+  decidedById          String?
+  decidedBy            User?                @relation("FundingDecider", fields: [decidedById], references: [id])
+  decidedAt            DateTime?
+  decisionNote         String?
+  createdAt            DateTime             @default(now())
+  items                FundingRequestItem[]
+  invoices             Invoice[]
+}
+
+/// Snapshot of a cost line at submission so later edits don't rewrite history.
+model FundingRequestItem {
+  id            String         @id @default(cuid())
+  requestId     String
+  request       FundingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  budgetItemId  String?
+  budgetItem    BudgetItem?    @relation(fields: [budgetItemId], references: [id], onDelete: SetNull)
+  description   String
+  eventTitle    String?
+  quantity      Float
+  unitCostCents Int
+  occurrences   Int            @default(1)
+  totalCents    Int
+}
+
+enum InvoiceStatus {
+  OPEN
+  PROCESSED
+}
+
+model Invoice {
+  id          String         @id @default(cuid())
+  number      String         @unique
+  requestId   String
+  request     FundingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  amountCents Int
+  status      InvoiceStatus  @default(OPEN)
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  processedAt DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Files (Google Drive mirror)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Who can see an item. INHERIT takes the parent folder's setting (club root = MEMBERS).
+enum FileVisibility {
+  INHERIT
+  PUBLIC
+  MEMBERS
+  LEADERS
+}
+
+/// A file or folder. clubId set = club files; ownerId set (no club) = a person's
+/// own uploads (profile projects); both null = university files (policies, tests).
+model FileItem {
+  id          String         @id @default(cuid())
+  clubId      String?
+  club        Club?          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  ownerId     String?
+  owner       User?          @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      FileItem?      @relation("FileTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    FileItem[]     @relation("FileTree")
+  isFolder    Boolean        @default(false)
+  name        String
+  mimeType    String?
+  sizeBytes   Int?
+  storageKey  String? // local storage path (mock Drive)
+  driveFileId String? // Google Drive id when sync is on
+  visibility  FileVisibility @default(INHERIT)
+  featured    Boolean        @default(false) // listed under Resources on the club page
+  createdById String
+  createdBy   User           @relation("FileCreator", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  trashedAt   DateTime?
+
+  grants        FileGrant[]
+  eventLinks    EventAttachment[]
+  projectLinks  ProjectFile[]
+  clubDocuments ClubDocument[]
+  policies      Policy[]
+
+  @@index([clubId, parentId])
+}
+
+model FileGrant {
+  id      String   @id @default(cuid())
+  fileId  String
+  file    FileItem @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canEdit Boolean  @default(false)
+
+  @@unique([fileId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Messaging & announcements (Google Chat mirror)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ConversationType {
+  CLUB // the club group chat — participants are the club's active members
+  DIRECT
+  LEADERS_GROUP
+}
+
+model Conversation {
+  id            String               @id @default(cuid())
+  type          ConversationType
+  clubId        String?
+  club          Club?                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  title         String?
+  createdAt     DateTime             @default(now())
+  lastMessageAt DateTime             @default(now())
+  googleSpaceId String?
+  members       ConversationMember[]
+  messages      Message[]
+
+  @@index([clubId])
+}
+
+/// Explicit members for DIRECT and LEADERS_GROUP; read markers for everyone.
+model ConversationMember {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body           String
+  createdAt      DateTime     @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  @@index([conversationId, createdAt])
+}
+
+enum AnnouncementAudience {
+  PUBLIC
+  MEMBERS
+  LEADERS
+}
+
+/// clubId null = a university-wide announcement from an admin.
+model Announcement {
+  id        String               @id @default(cuid())
+  clubId    String?
+  club      Club?                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User                 @relation(fields: [authorId], references: [id])
+  title     String
+  bodyHtml  String
+  audience  AnnouncementAudience @default(MEMBERS)
+  pinned    Boolean              @default(false)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([clubId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Policy, tests, training requirements
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Where a policy shows up across the app. GENERAL = only in the policy library.
+enum PolicyPlacement {
+  GENERAL
+  CLUB_CREATION
+  MEMBERSHIP
+  OFFICER_ROLES
+  EVENTS
+  FUNDING
+  FILES
+  MESSAGING
+  REVIEWS
+  COMPLAINTS
+}
+
+enum PolicyStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Policy {
+  id             String            @id @default(cuid())
+  slug           String            @unique
+  title          String
+  summary        String
+  bodyHtml       String? // written in the in-app editor…
+  documentFileId String? // …or an uploaded document shown in the previewer
+  documentFile   FileItem?         @relation(fields: [documentFileId], references: [id])
+  placements     PolicyPlacement[]
+  status         PolicyStatus      @default(DRAFT)
+  version        Int               @default(1)
+  effectiveAt    DateTime?
+  authorId       String
+  author         User              @relation(fields: [authorId], references: [id])
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Who a test is assigned to. ROLE_REQUIREMENT tests are assigned through RoleRequirement.
+enum TestAudience {
+  ROLE_REQUIREMENT
+  CLUB_MEMBERS
+  ALL_STUDENTS
+  SELECTED_USERS
+  OPEN // anyone may take it; nobody is assigned
+}
+
+enum TestRecurrence {
+  ONE_OFF
+  WEEKLY
+  MONTHLY
+  SEMESTER
+  ACADEMIC_YEAR
+  ANNUAL
+}
+
+/// clubId null = a university (admin) test.
+model Test {
+  id               String            @id @default(cuid())
+  clubId           String?
+  club             Club?             @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  title            String
+  introHtml        String            @default("")
+  timeLimitMinutes Int? // null = unlimited (the clock still runs)
+  passingPercent   Int               @default(80)
+  maxAttempts      Int? // null = unlimited
+  status           TestStatus        @default(DRAFT)
+  audience         TestAudience      @default(OPEN)
+  recurrence       TestRecurrence    @default(ONE_OFF)
+  dueDays          Int               @default(30) // days to finish after being assigned / a cycle starts
+  closesAt         DateTime? // one-off deadline
+  /// [{ trigger: "PASSED"|"FAILED"|"MISSED_DEADLINE", action: "NOTIFY_TAKER"|"NOTIFY_ADVISOR"|"NOTIFY_ADMINS"|"CREATE_ADMIN_TASK" }]
+  automations      Json              @default("[]")
+  createdById      String
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  questions        TestQuestion[]
+  attempts         TestAttempt[]
+  assignments      TestAssignment[]
+  requirements     RoleRequirement[]
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  SHORT_ANSWER
+  LONG_ANSWER
+}
+
+model TestQuestion {
+  id               String       @id @default(cuid())
+  testId           String
+  test             Test         @relation(fields: [testId], references: [id], onDelete: Cascade)
+  order            Int
+  type             QuestionType
+  promptHtml       String
+  /// [{ id, text }] for choice questions
+  options          Json         @default("[]")
+  correctOptionIds String[]
+  modelAnswer      String? // what a correct open answer looks like (for reviewers and AI assist)
+  points           Int          @default(1)
+  answers          TestAnswer[]
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  COMPLETED
+  MISSED
+  EXCUSED
+}
+
+/// One person owing one test in one cycle. Created when someone becomes subject
+/// to the test (role promotion, recurring cycle, direct assignment).
+model TestAssignment {
+  id         String           @id @default(cuid())
+  testId     String
+  test       Test             @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycleKey   String // "once", "2026-2027", "Fall 2026", "2026-10", "2026-W42"
+  dueAt      DateTime
+  status     AssignmentStatus @default(ASSIGNED)
+  createdAt  DateTime         @default(now())
+  resolvedAt DateTime?
+
+  @@unique([testId, userId, cycleKey])
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  NEEDS_REVIEW // has open answers waiting on a human
+  GRADED
+}
+
+model TestAttempt {
+  id            String        @id @default(cuid())
+  testId        String
+  test          Test          @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User          @relation("Taker", fields: [userId], references: [id], onDelete: Cascade)
+  cycleKey      String
+  startedAt     DateTime      @default(now())
+  deadlineAt    DateTime? // startedAt + time limit
+  submittedAt   DateTime?
+  autoSubmitted Boolean       @default(false)
+  status        AttemptStatus @default(IN_PROGRESS)
+  scorePercent  Float?
+  passed        Boolean?
+  gradedById    String?
+  gradedBy      User?         @relation("Grader", fields: [gradedById], references: [id])
+  gradedAt      DateTime?
+  answers       TestAnswer[]
+
+  @@index([testId, userId])
+}
+
+model TestAnswer {
+  id                String       @id @default(cuid())
+  attemptId         String
+  attempt           TestAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId        String
+  question          TestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOptionIds String[]
+  text              String? // HTML from the editor for open answers
+  pointsAwarded     Float?
+  aiSuggestedPoints Float?
+  aiFeedback        String?
+  aiModel           String?
+  reviewerComment   String?
+
+  @@unique([attemptId, questionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Elections
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ElectionStatus {
+  NOMINATING
+  VOTING
+  CLOSED
+  APPLIED
+  CANCELLED
+}
+
+model Election {
+  id             String              @id @default(cuid())
+  clubId         String
+  club           Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  positionId     String
+  position       Position            @relation(fields: [positionId], references: [id])
+  title          String
+  method         SuccessionMethod // MEMBER_VOTE or LEADERSHIP_VOTE
+  status         ElectionStatus      @default(NOMINATING)
+  votingOpensAt  DateTime
+  votingClosesAt DateTime
+  winnerId       String?
+  createdById    String
+  createdBy      User                @relation(fields: [createdById], references: [id])
+  createdAt      DateTime            @default(now())
+  appliedAt      DateTime?
+  candidates     ElectionCandidate[]
+  votes          Vote[]
+}
+
+model ElectionCandidate {
+  id            String   @id @default(cuid())
+  electionId    String
+  election      Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation("Candidate", fields: [userId], references: [id], onDelete: Cascade)
+  statement     String?
+  nominatedById String
+  nominatedBy   User     @relation("Nominator", fields: [nominatedById], references: [id])
+  createdAt     DateTime @default(now())
+  votes         Vote[]
+
+  @@unique([electionId, userId])
+}
+
+/// Ballots are secret: no screen ever joins voterId to candidateId.
+model Vote {
+  id          String            @id @default(cuid())
+  electionId  String
+  election    Election          @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  voterId     String
+  voter       User              @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   ElectionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+
+  @@unique([electionId, voterId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Anonymous complaints — admins only, never shared, never sent to AI
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ComplaintStatus {
+  NEW
+  IN_REVIEW
+  REFERRED
+  RESOLVED
+  CLOSED
+}
+
+model Complaint {
+  id           String               @id @default(cuid())
+  caseCode     String               @unique // the reporter's receipt for checking status
+  isAnonymous  Boolean
+  reporterId   String? // ALWAYS null when isAnonymous
+  reporter     User?                @relation(fields: [reporterId], references: [id])
+  category     String
+  subject      String
+  body         String
+  clubId       String?
+  club         Club?                @relation(fields: [clubId], references: [id])
+  incidentDate DateTime?
+  status       ComplaintStatus      @default(NEW)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  notes        ComplaintNote[]
+  accessLog    ComplaintAccessLog[]
+}
+
+model ComplaintNote {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  body        String
+  createdAt   DateTime  @default(now())
+}
+
+/// Every time an admin opens a report (and, for anonymous ones, acknowledged the notice).
+model ComplaintAccessLog {
+  id                    String    @id @default(cuid())
+  complaintId           String
+  complaint             Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  adminId               String
+  admin                 User      @relation(fields: [adminId], references: [id])
+  acknowledgedAnonymity Boolean
+  at                    DateTime  @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tasks & notifications — the "ball in your court" inbox
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TaskKind {
+  PERSONAL // a to-do you wrote yourself
+  CLUB // assigned by club leaders
+  APPROVAL // something waits on your decision
+  REQUIREMENT // a test or training you owe
+  INVOICE // make sure funding goes through in the university's system
+}
+
+/// USER = one person; ADMINS = any admin can pick it up; CLUB = club leaders who hold `capability`.
+enum TaskAssigneeType {
+  USER
+  ADMINS
+  CLUB
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+model Task {
+  id            String           @id @default(cuid())
+  kind          TaskKind
+  title         String
+  description   String?
+  assigneeType  TaskAssigneeType
+  assigneeId    String?
+  assignee      User?            @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  clubId        String?
+  club          Club?            @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  capability    String? // for CLUB tasks: who in the club can act on it
+  href          String?
+  dueAt         DateTime?
+  status        TaskStatus       @default(OPEN)
+  sourceType    String? // "membership", "cohost", "funding", "invoice", "club", "testAssignment", …
+  sourceId      String?
+  createdById   String?
+  createdBy     User?            @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt     DateTime         @default(now())
+  completedAt   DateTime?
+  completedById String?
+  completedBy   User?            @relation("TaskCompleter", fields: [completedById], references: [id])
+
+  @@index([assigneeId, status])
+  @@index([sourceType, sourceId])
+  @@index([clubId, status])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  title     String
+  body      String?
+  href      String?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([userId, readAt])
+}
+
+enum OutboxChannel {
+  EMAIL
+  PUSH
+}
+
+enum OutboxStatus {
+  SENT
+  MOCKED // integration off: recorded here instead of sent
+  FAILED
+}
+
+/// Every email and push the platform sends (or would send, in mock mode).
+model OutboxMessage {
+  id        String        @id @default(cuid())
+  channel   OutboxChannel
+  to        String
+  subject   String?
+  body      String
+  href      String?
+  status    OutboxStatus
+  error     String?
+  createdAt DateTime      @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI assistant
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiConversation {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String      @default("New conversation")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  messages  AiMessage[]
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant
+  content        Json // Anthropic content blocks
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  createdAt      DateTime       @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The activity stream — every domain write appends one row
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ActivityLog {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  actorId    String? // null for system jobs and anonymous complaints
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String // "attendance.checkin", "club.approved", "role.assigned", …
+  entityType String
+  entityId   String
+  clubId     String?
+  club       Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  data       Json?
+  /// true only for actions safe to show on a profile or club feed
+  isPublic   Boolean  @default(false)
+
+  @@index([clubId, at])
+  @@index([actorId, at])
+  @@index([action, at])
+}
