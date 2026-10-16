@@ -31,7 +31,9 @@ export function CheckInSuccess({
   className?: string;
 }) {
   const { club, occurrence } = result;
-  const fresh = result.status === "CHECKED_IN";
+  // A check-in from the last couple of minutes is "fresh" even when the page
+  // re-rendered from the server after the action (it then sees the row as existing).
+  const fresh = result.status === "CHECKED_IN" || Date.now() - new Date(result.checkedInAt).getTime() < 120_000;
   const review = result.reviewProgress;
 
   return (

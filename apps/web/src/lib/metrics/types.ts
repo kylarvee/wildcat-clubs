@@ -78,7 +78,7 @@ export type ClubListMetrics = {
   clubId: string;
   registeredMembers: number;
   activeMembers: number;
-  retentionRate: number | null; // latest complete month vs. the one before (month retention)
+  retentionRate: number | null; // month retention: last complete month vs. the one before (falls back across empty months)
   avgRating: number | null;
   reviewCount: number;
   activityScore: number;

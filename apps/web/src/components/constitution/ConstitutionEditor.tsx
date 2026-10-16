@@ -492,12 +492,16 @@ function AdoptDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<AdoptResult[] | null>(null);
+  // Reset only when the dialog opens. After adopting, the server refresh hands us a
+  // new `clubs` array; reacting to that would wipe the "Adopted" confirmation.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       setSelected(new Set(defaultClubId && clubs.some((c) => c.id === defaultClubId) ? [defaultClubId] : clubs.length === 1 ? [clubs[0].id] : []));
       setError(null);
       setResults(null);
     }
+    wasOpen.current = open;
   }, [open, defaultClubId, clubs]);
 
   const join = joinPolicyOf(data);

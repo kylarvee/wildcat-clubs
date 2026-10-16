@@ -607,30 +607,39 @@ const clubListMap = cache(async (key: string, atMs: number): Promise<Map<string,
   const out = new Map<string, ClubListMetrics>();
   if (ids.length === 0) return out;
 
-  // Month retention compares the last complete month with the one before it.
-  const [before, lastMonth] = P.lastBuckets("month", at, 3);
-  const [reviews, retention, scores] = await Promise.all([
+  // Month retention for the list: the last complete month vs. the one before. Clubs
+  // rarely meet over summer or breaks, so when that earlier month had nobody, fall
+  // back to the current month vs. last month, then to the pair before.
+  const buckets = P.lastBuckets("month", at, 4); // [m-3, m-2, m-1, current]
+  const [reviews, attendRows, scores] = await Promise.all([
     db.review.groupBy({ by: ["clubId"], where: { clubId: { in: ids }, hiddenAt: null }, _avg: { rating: true }, _count: { _all: true } }),
-    db.$queryRaw<{ club_id: string; previous: number; retained: number }[]>`
-      WITH co AS (${clubOccurrences({ clubs: ids, from: before.start, to: new Date(lastMonth.end.getTime() - 1) })}),
-      per AS (
-        SELECT co.club_id, a."userId" AS user_id,
-               bool_or(co.starts_at < ${ts(lastMonth.start)}) AS in_before,
-               bool_or(co.starts_at >= ${ts(lastMonth.start)}) AS in_last
-          FROM co JOIN "Attendance" a ON a."occurrenceId" = co.occurrence_id
-         GROUP BY co.club_id, a."userId"
-      )
-      SELECT club_id,
-             (count(*) FILTER (WHERE in_before))::int AS previous,
-             (count(*) FILTER (WHERE in_before AND in_last))::int AS retained
-        FROM per GROUP BY club_id`,
+    db.$queryRaw<{ club_id: string; user_id: string; starts_at: Date }[]>`
+      SELECT DISTINCT co.club_id, a."userId" AS user_id, co.starts_at
+        FROM (${clubOccurrences({ clubs: ids, from: buckets[0].start, to: at })}) co
+        JOIN "Attendance" a ON a."occurrenceId" = co.occurrence_id`,
     db.$queryRaw<{ club_id: string; n: number }[]>`
       SELECT co.club_id, count(*)::int AS n
         FROM (${clubOccurrences({ clubs: ids, from: new Date(atMs - 30 * DAY_MS), to: new Date(atMs + 30 * DAY_MS), liveOnly: true })}) co
        GROUP BY co.club_id`,
   ]);
   const reviewBy = new Map(reviews.map((r) => [r.clubId, r]));
-  const retentionBy = new Map(retention.map((r) => [r.club_id, r]));
+  const attendeesBy = new Map<string, Set<string>[]>();
+  for (const row of attendRows) {
+    const i = buckets.findIndex((b) => row.starts_at >= b.start && row.starts_at < b.end);
+    if (i < 0) continue;
+    const sets = attendeesBy.get(row.club_id) ?? buckets.map(() => new Set<string>());
+    sets[i].add(row.user_id);
+    attendeesBy.set(row.club_id, sets);
+  }
+  const retentionBy = new Map<string, { previous: number; retained: number }>();
+  for (const [clubId, sets] of attendeesBy) {
+    // Preference order of [previous, later] month pairs.
+    for (const [p, l] of [[1, 2], [2, 3], [0, 1]] as const) {
+      if (sets[p].size === 0) continue;
+      retentionBy.set(clubId, { previous: sets[p].size, retained: [...sets[p]].filter((u) => sets[l].has(u)).length });
+      break;
+    }
+  }
   const scoreBy = new Map(scores.map((r) => [r.club_id, r.n]));
 
   for (const [id, a] of activity) {
