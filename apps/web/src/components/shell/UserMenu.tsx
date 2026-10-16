@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarCheck, LayoutDashboard, LogOut, Settings, Shield, User, Users, Wrench, Flag } from "lucide-react";
+import { CalendarCheck, Flag, Gavel, GraduationCap, LayoutDashboard, LogOut, Settings, Shield, User, Users, Wrench } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
 import { signOut } from "@/app/login/actions";
@@ -12,7 +12,7 @@ export function UserMenu({
   isSysadmin,
   personas,
 }: {
-  user: { name: string; email: string; handle: string; avatarColor: string; avatarUrl: string | null };
+  user: { name: string; email: string; handle: string; avatarColor: string; avatarUrl: string | null; kind: "STUDENT" | "FACULTY_STAFF" };
   isAdmin: boolean;
   isSysadmin: boolean;
   personas: boolean;
@@ -36,6 +36,14 @@ export function UserMenu({
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/me/attendance"><CalendarCheck className="h-4 w-4" /> My attendance</Link>
+        </DropdownMenuItem>
+        {user.kind === "FACULTY_STAFF" ? (
+          <DropdownMenuItem asChild>
+            <Link href="/advisor"><GraduationCap className="h-4 w-4" /> Advising</Link>
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem asChild>
+          <Link href="/constitution"><Gavel className="h-4 w-4" /> Constitution builder</Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/settings"><Settings className="h-4 w-4" /> Settings</Link>

@@ -249,6 +249,8 @@ export type HistorySeat = {
   roleLabel: string;
   archivedAt: Date | null;
   current: boolean;
+  /** When the seat started needing a holder: the later of its creation and the club's approval (null for role groups). */
+  openedAt: Date | null;
   terms: HistoryTerm[];
 };
 
@@ -258,7 +260,8 @@ export type HistorySeat = {
  * page; alumni and retired clubs keep all of it.
  */
 export async function roleHistoryData(clubId: string): Promise<HistorySeat[]> {
-  const [positions, assignments] = await Promise.all([
+  const [club, positions, assignments] = await Promise.all([
+    db.club.findUnique({ where: { id: clubId }, select: { approvedAt: true } }),
     db.position.findMany({ where: { clubId } }),
     db.roleAssignment.findMany({
       where: { clubId, role: { not: "MEMBER" } },
@@ -306,6 +309,7 @@ export async function roleHistoryData(clubId: string): Promise<HistorySeat[]> {
     roleLabel: ROLE_LABEL[p.role],
     archivedAt: p.archivedAt,
     current: !p.archivedAt,
+    openedAt: club?.approvedAt ? (club.approvedAt > p.createdAt ? club.approvedAt : p.createdAt) : null,
     terms: assignments.filter((a) => a.positionId === p.id).map(toTerm),
   }));
   const seatIds = new Set(positions.map((p) => p.id));
@@ -321,6 +325,7 @@ export async function roleHistoryData(clubId: string): Promise<HistorySeat[]> {
       roleLabel: ROLE_LABEL[role],
       archivedAt: null,
       current: true,
+      openedAt: null,
       terms,
     });
   }

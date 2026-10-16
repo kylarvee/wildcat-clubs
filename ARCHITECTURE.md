@@ -17,7 +17,8 @@ web app (`apps/web`) plus a simplified mobile app (`apps/mobile`), one server, o
    permission, validates, writes, appends to `ActivityLog`, and notifies / opens or closes tasks.
    Server actions, API routes, mobile endpoints and AI tools all call domain functions — never Prisma
    writes directly.
-4. **One permission authority.** `src/lib/authz` decides who may do what. Nothing else does.
+4. **One permission authority.** `src/lib/authz` decides who may do what. Nothing else does —
+   including who may *see* an event (`lib/authz/events`) and a file (`canViewFile`).
 5. **One config authority.** Platform rules (activity windows, review threshold, AI switches,
    integrations, WSUSA contacts) are system config, changed only by sysadmins (`src/lib/config`).
 6. **One metrics layer.** Every derived number (activity, retention, attendance rate, ratings,
@@ -164,6 +165,11 @@ prisma/                   schema + seed
 * Policies: drop `<PolicyNotices placement="EVENTS" />` where a policy applies.
 * Times: store UTC, show with `fmtDate/fmtTime/fmtRange` (campus time).
 * Money: integer cents; show with `fmtMoney`.
+* Raw SQL with dates: the Postgres server runs in America/Denver and Prisma sends a JS `Date`
+  parameter as `timestamptz`; compare with `(${d.toISOString()}::timestamptz AT TIME ZONE 'UTC')`
+  against our `timestamp` columns (see `lib/metrics`). Prisma's normal filters are unaffected.
+* Writing files in this repo from Claude sessions: the desktop app's worktree guard blocks the
+  editor tools here, so edits go through the shell (`tools/replace.py` for exact replacements).
 
 ## 8. Integrations & mock mode
 

@@ -2,7 +2,6 @@ import "server-only";
 import type { Prisma, Recurrence, Visibility } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { getClubAccess, isAdmin } from "@/lib/authz";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtRange } from "@/lib/time";
 
@@ -20,66 +19,9 @@ import { fmtRange } from "@/lib/time";
  * and events of clubs that aren't approved yet only to that club's leaders.
  */
 
-const PUBLIC_CLUB_STATUSES = ["APPROVED", "RETIRED"] as const;
-
-/** Club ids where the viewer is an active member or holds a current role. */
-async function viewerClubIds(actor: Actor): Promise<string[]> {
-  const [memberships, roles] = await Promise.all([
-    db.membership.findMany({ where: { userId: actor.id, status: "ACTIVE" }, select: { clubId: true } }),
-    db.roleAssignment.findMany({ where: { userId: actor.id, endedAt: null }, select: { clubId: true } }),
-  ]);
-  return [...new Set([...memberships, ...roles].map((r) => r.clubId))];
-}
-
-/** Prisma filter for scheduled events the viewer may see. */
-export async function visibleEventsWhere(actor: Actor | null): Promise<Prisma.EventWhereInput> {
-  const base: Prisma.EventWhereInput = { status: { not: "DRAFT" } };
-  if (isAdmin(actor)) return base;
-  const clubIsPublic: Prisma.EventWhereInput = { OR: [{ clubId: null }, { club: { status: { in: [...PUBLIC_CLUB_STATUSES] } } }] };
-  if (!actor) return { AND: [base, clubIsPublic, { visibility: "PUBLIC" }] };
-  const mine = await viewerClubIds(actor);
-  return {
-    AND: [
-      base,
-      clubIsPublic,
-      {
-        OR: [
-          { visibility: { in: ["PUBLIC", "UNIVERSITY"] } },
-          { visibility: "MEMBERS", clubId: null },
-          { visibility: "MEMBERS", clubId: { in: mine } },
-          { visibility: "MEMBERS", cohosts: { some: { clubId: { in: mine }, status: "APPROVED" } } },
-        ],
-      },
-    ],
-  };
-}
-
-type EventGate = {
-  clubId: string | null;
-  visibility: Visibility;
-  status: "DRAFT" | "SCHEDULED" | "CANCELLED";
-  club: { status: string } | null;
-  cohosts: { clubId: string; status: string }[];
-};
-
-export type EventAccess = { ok: true } | { ok: false; reason: "signin" | "members" | "hidden" };
-
-/** Whether `actor` may see this event, and if not, what would let them. */
-export async function eventAccess(actor: Actor | null, event: EventGate): Promise<EventAccess> {
-  if (isAdmin(actor)) return { ok: true };
-  const hostAccess = actor && event.clubId ? await getClubAccess(actor, event.clubId) : null;
-  if (event.status === "DRAFT") return hostAccess?.capabilities.has("events") ? { ok: true } : { ok: false, reason: "hidden" };
-  if (event.club && !(PUBLIC_CLUB_STATUSES as readonly string[]).includes(event.club.status) && !hostAccess?.isLeader) return { ok: false, reason: "hidden" };
-  if (event.visibility === "PUBLIC") return { ok: true };
-  if (!actor) return { ok: false, reason: "signin" };
-  if (event.visibility === "UNIVERSITY" || !event.clubId) return { ok: true };
-  if (hostAccess?.isMember) return { ok: true };
-  for (const c of event.cohosts) {
-    if (c.status !== "APPROVED") continue;
-    if ((await getClubAccess(actor, c.clubId))?.isMember) return { ok: true };
-  }
-  return { ok: false, reason: "members" };
-}
+// Event visibility is decided by lib/authz/events (the one rule for every surface).
+import { visibleEventsWhere, eventAccess, type EventAccess } from "@/lib/authz/events";
+export { visibleEventsWhere, eventAccess, type EventAccess };
 
 type LocationFields = {
   locationType: "CAMPUS" | "ADDRESS" | "VIRTUAL" | "TBD";

@@ -8,7 +8,8 @@ import { ClubLogo } from "@/components/ui/avatar";
 import { Switch, toast } from "@/components/ui/misc";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CopyField } from "@/components/calendar/CopyField";
-import { setClubSubscriptionAction, setUniversityCalendarAction } from "@/app/calendar/actions";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { resetCalendarLinkAction, setClubSubscriptionAction, setUniversityCalendarAction } from "@/app/calendar/actions";
 
 export type MyCalendarClub = { id: string; name: string; slug: string; logoColor: string; logoUrl: string | null; subscribed: boolean };
 
@@ -131,6 +132,18 @@ export function MyCalendar({
               </a>
             </div>
             <CopyField value={feed.https} label="Your private calendar link" hint="Anyone with this link can see your calendar, including members-only events. Don't post it publicly." />
+            <ConfirmDialog
+              trigger={<button type="button" className="text-sm font-medium text-brand-600 hover:underline">Reset private link</button>}
+              title="Reset your private calendar link?"
+              description="Your current link stops working right away. Re-subscribe in Google or Apple Calendar with the new one."
+              confirmLabel="Reset link"
+              danger
+              onConfirm={async () => {
+                const r = await resetCalendarLinkAction();
+                if (r.ok) toast.success("New private link ready. Re-subscribe with it.");
+                else toast.error(r.error);
+              }}
+            />
           </CardBody>
         </Card>
 

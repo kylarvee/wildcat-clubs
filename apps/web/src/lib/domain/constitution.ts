@@ -261,6 +261,9 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
       version: 0,
       source: "CUSTOM_UPLOAD",
       status: "PENDING_APPROVAL",
+      statedSuccessionMethod: v.successionMethod ?? null,
+      statedJoinPolicy: v.joinPolicy ?? null,
+      note: v.note ?? null,
       fileId: file.id,
       createdById: actor.id,
     },
@@ -275,7 +278,6 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
     source: { type: "clubDocument", id: doc.id },
     createdById: actor.id,
   });
-  // The stated settings ride on the activity row; decideCustomDocument reads them back from the lake.
   await logActivity({ actorId: actor.id, action: "constitution.custom_submitted", entityType: "clubDocument", entityId: doc.id, clubId: club.id, data: { kind: v.kind, successionMethod: v.successionMethod, joinPolicy: v.joinPolicy, note: v.note ?? null } });
   await notifyAdmins({
     kind: "constitution.custom_submitted",
@@ -289,13 +291,8 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
 
 /** The succession method / join policy a club stated when it uploaded a custom document. */
 export async function statedSettings(docId: string): Promise<{ successionMethod: SuccessionMethod | null; joinPolicy: JoinPolicy | null; note: string | null }> {
-  const row = await db.activityLog.findFirst({ where: { action: "constitution.custom_submitted", entityType: "clubDocument", entityId: docId }, orderBy: { at: "desc" }, select: { data: true } });
-  const d = (row?.data ?? {}) as { successionMethod?: string; joinPolicy?: string; note?: string | null };
-  return {
-    successionMethod: d.successionMethod === "SENIORITY" || d.successionMethod === "MEMBER_VOTE" || d.successionMethod === "LEADERSHIP_VOTE" ? d.successionMethod : null,
-    joinPolicy: d.joinPolicy === "OPEN" || d.joinPolicy === "APPROVAL" ? d.joinPolicy : null,
-    note: d.note ?? null,
-  };
+  const d = await db.clubDocument.findUnique({ where: { id: docId }, select: { statedSuccessionMethod: true, statedJoinPolicy: true, note: true } });
+  return { successionMethod: d?.statedSuccessionMethod ?? null, joinPolicy: d?.statedJoinPolicy ?? null, note: d?.note ?? null };
 }
 
 export async function withdrawCustomDocument(actor: Actor | null, docId: string) {

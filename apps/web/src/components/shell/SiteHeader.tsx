@@ -58,7 +58,7 @@ export async function SiteHeader() {
                 <CountDot n={unread} />
               </Link>
               <UserMenu
-                user={{ name: user.name, email: user.email, handle: user.handle, avatarColor: user.avatarColor, avatarUrl: user.avatarUrl }}
+                user={{ name: user.name, email: user.email, handle: user.handle, avatarColor: user.avatarColor, avatarUrl: user.avatarUrl, kind: user.kind }}
                 isAdmin={can(user, "admin.access")}
                 isSysadmin={can(user, "system.config")}
                 personas={personasEnabled()}

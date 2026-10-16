@@ -10,6 +10,7 @@ import { fmtLongDate } from "@/lib/time";
 import { richToText } from "@/lib/rich/sanitize";
 import { ClubAnnouncements } from "@/components/announcements/ClubAnnouncements";
 import { ClubAttendanceRecord } from "@/components/attendance/ClubAttendanceRecord";
+import { OpenElectionsNotice } from "@/components/elections/OpenElectionsNotice";
 import { OrgChart } from "@/components/org-chart/OrgChart";
 import { PolicyNotices } from "@/components/policies/PolicyNotices";
 import { RichContent } from "@/components/rich/RichContent";
@@ -117,7 +118,8 @@ export default async function ClubPage({ params, searchParams }: Props) {
             Desktop: page on the left; attendance above the details on the right. */}
         <div className="grid gap-x-10 gap-y-10 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-y-0 xl:grid-cols-[minmax(0,1fr)_22rem]">
           {user && isPublic ? (
-            <div className="min-w-0 empty:hidden lg:col-start-2 lg:row-start-1 lg:pb-8">
+            <div className="min-w-0 space-y-4 empty:hidden lg:col-start-2 lg:row-start-1 lg:pb-8">
+              <OpenElectionsNotice clubId={club.id} />
               <ClubAttendanceRecord clubId={club.id} userId={user.id} />
             </div>
           ) : null}

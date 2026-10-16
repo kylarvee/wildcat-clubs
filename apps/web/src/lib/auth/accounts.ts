@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { emailKind } from "@/lib/institution";
 import { logActivity } from "@/lib/lake/activity";
+import { openAdvisorInviteTasks } from "@/lib/domain/advisors";
 
 /**
  * The single path by which accounts come into existence. Google sign-in (web
@@ -38,11 +39,13 @@ export async function findOrCreateUserByEmail(input: { email: string; name: stri
   return user;
 }
 
+/** Links advisor invites sent before this person had an account, and puts them in their task inbox. */
 async function linkPendingInvites(userId: string, email: string) {
   await db.advisorInvite.updateMany({
     where: { email: { equals: email, mode: "insensitive" }, status: "PENDING", inviteeId: null },
     data: { inviteeId: userId },
   });
+  await openAdvisorInviteTasks(userId);
 }
 
 async function uniqueHandle(base: string): Promise<string> {

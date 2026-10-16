@@ -1,7 +1,10 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import { apiRoute, invalid } from "@/lib/domain/kit";
 import { fileUrl, uploadFile } from "@/lib/domain/files";
-import type { FileVisibility } from "@prisma/client";
+import { z } from "zod";
+
+const Visibility = z.enum(["INHERIT", "PUBLIC", "MEMBERS", "LEADERS"]).optional();
+const Scope = z.enum(["club", "user", "university"]).default("club");
 
 /** POST multipart: file, scope (club|user|university), clubId?, parentId?, visibility?, purpose? ("logo" uses the profile capability). */
 export async function POST(req: Request) {
@@ -10,7 +13,9 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw invalid("No file was attached.");
-    const scope = (form.get("scope") as "club" | "user" | "university") ?? "club";
+    const scope = Scope.catch("club").parse(form.get("scope") ?? undefined);
+    const visibility = Visibility.safeParse(form.get("visibility") || undefined);
+    if (!visibility.success) throw invalid("Unknown visibility.");
     const saved = await uploadFile(
       actor,
       {
@@ -20,7 +25,7 @@ export async function POST(req: Request) {
         scope,
         clubId: (form.get("clubId") as string) || null,
         parentId: (form.get("parentId") as string) || null,
-        visibility: ((form.get("visibility") as FileVisibility) || undefined) ?? undefined,
+        visibility: visibility.data,
       },
       { capability: form.get("purpose") === "logo" ? "profile" : "files" },
     );

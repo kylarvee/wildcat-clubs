@@ -9,6 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { getConfig } from "@/lib/config";
+import { occurrenceById, toOccurrenceSummary } from "@/lib/attendance/queries";
+import { canManageOccurrence } from "@/lib/domain/attendance";
+import { OccurrenceAttendance } from "@/components/attendance/OccurrenceAttendance";
 import { loadAttendees, METHOD_LABEL } from "./attendees";
 
 export const metadata: Metadata = { title: "Attendees" };
@@ -23,6 +27,9 @@ export default async function TrainingAttendeesPage({ params }: { params: Promis
   const leaders = occ.attendances.filter((a) => rolesByUser.has(a.userId)).length;
   const cancelled = occ.status === "CANCELLED" || occ.event.status === "CANCELLED";
   const open = !cancelled;
+  // Admins fix mistakes here with the same add/remove tool clubs use.
+  const row = await occurrenceById(occurrenceId);
+  const manage = row ? { summary: toOccurrenceSummary(row, await getConfig(), new Date()), canManage: await canManageOccurrence(user, row) } : null;
 
   return (
     <div className="space-y-6">
@@ -89,6 +96,14 @@ export default async function TrainingAttendeesPage({ params }: { params: Promis
           </TBody>
         </Table>
       )}
+      {manage?.canManage ? (
+        <details className="rounded-[var(--radius-card)] border border-line bg-surface p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-ink">Add or remove people</summary>
+          <div className="mt-4">
+            <OccurrenceAttendance occurrence={manage.summary} memberClubId={null} canManage />
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

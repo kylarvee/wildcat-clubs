@@ -5,6 +5,7 @@ import { MINUTES_ITEMS } from "../data/text";
 import { addDays, human, minDate, monthDay, ymd } from "../lib/dates";
 import { addFile, addFolder, addPdf } from "./filehelp";
 import { mayGraduation } from "./reference";
+import { defaultDraftData } from "@/lib/constitution/templates";
 
 /**
  * Club Files (a folder tree per club with minutes, flyers, featured resources,
@@ -60,8 +61,9 @@ function constitutionBlocks(club: ClubM): { constitution: PdfBlock[]; bylaws: Pd
 const toHtml = (blocks: PdfBlock[]) =>
   blocks.map((b) => `${b.heading ? `<h3>${b.heading.replace(" - ", " — ")}</h3>` : ""}${b.text ? `<p>${b.text}</p>` : ""}${b.bullets ? `<ul>${b.bullets.map((x) => `<li>${x}</li>`).join("")}</ul>` : ""}`).join("");
 
-function emptyDraftData(): Prisma.InputJsonValue {
-  return { constitution: { modules: [], fields: {} }, bylaws: { modules: [], fields: {} } };
+/** The constitution builder's own default draft, so seeded drafts open exactly as new ones do. */
+function builderDraftData(succession: "SENIORITY" | "MEMBER_VOTE" | "LEADERSHIP_VOTE"): Prisma.InputJsonValue {
+  return defaultDraftData({ successionMethod: succession }) as unknown as Prisma.InputJsonValue;
 }
 
 function clubDocuments(ctx: Ctx, club: ClubM, folderId: string, scope: { clubId: string; dir: string }, opts: { draftId?: string | null; v2?: boolean }) {
@@ -191,7 +193,7 @@ export function buildFiles(ctx: Ctx) {
   const frank = ctx.p("frank").id;
   const draft = (ownerId: string, title: string, succession: "SENIORITY" | "MEMBER_VOTE" | "LEADERSHIP_VOTE", createdAt: Date, updatedAt: Date) => {
     const id = ctx.id();
-    ctx.rows.drafts.push({ id, ownerId, title, data: emptyDraftData(), successionMethod: succession, createdAt, updatedAt });
+    ctx.rows.drafts.push({ id, ownerId, title, data: builderDraftData(succession), successionMethod: succession, createdAt, updatedAt });
     return id;
   };
   const bg = ctx.club("boardgames");
@@ -235,7 +237,9 @@ export function buildFiles(ctx: Ctx) {
     "application/pdf", { parentId: tFolder, createdById: tPres, createdAt: addDays(NOW, -4.2) });
   const customDocId = ctx.id();
   ctx.rows.documents.push({
-    id: customDocId, clubId: theatre.id, kind: "BYLAWS", title: "Theatre Guild Bylaws (custom, 2026)", version: 2, source: "CUSTOM_UPLOAD", status: "PENDING_APPROVAL",
+    // Pending uploads stay unnumbered (version 0) until WSUSA approves them.
+    id: customDocId, clubId: theatre.id, kind: "BYLAWS", title: "Theatre Guild Bylaws (custom, 2026)", version: 0, source: "CUSTOM_UPLOAD", status: "PENDING_APPROVAL",
+    statedSuccessionMethod: "MEMBER_VOTE", statedJoinPolicy: "OPEN", note: "Adds a Production Manager seat and member votes for officers.",
     draftId: null, contentHtml: null, fileId: customFile, createdById: tPres, createdAt: addDays(NOW, -4.2), decidedAt: null,
   });
   ctx.refs.customDocId = customDocId;

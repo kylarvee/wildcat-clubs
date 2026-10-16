@@ -23,6 +23,8 @@ export const CONFIG_DEFAULTS = {
   "reviews.bombingCount": 3,
   "reviews.bombingMaxRating": 2,
   "reviews.bombingWindowHours": 48,
+  /** Reports from different people on one review before an admin task opens. */
+  "reviews.flagThreshold": 2,
 
   /** Check-in opens this many minutes before an occurrence starts and closes this many after it ends. */
   "checkin.opensMinutesBefore": 30,

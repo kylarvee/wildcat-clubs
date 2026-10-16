@@ -18,13 +18,11 @@ import { notify, notifyAdmins } from "@/lib/domain/notify";
  *  - One review per person per club; writing again updates it.
  *  - `reviews.bombingCount` ratings ≤ `reviews.bombingMaxRating` inside
  *    `reviews.bombingWindowHours` opens one admin task per club.
- *  - Anyone signed in may flag a review once; at REVIEW_FLAG_THRESHOLD flags
+ *  - Anyone signed in may flag a review once; at `reviews.flagThreshold` flags
  *    an admin task opens. Admins act from the admin tool through the
  *    moderation functions below, which close those tasks.
  */
 
-/** Flags on one review before admins are asked to look at it. */
-export const REVIEW_FLAG_THRESHOLD = 2;
 
 const ReviewInput = z.object({
   rating: z.coerce.number().int("Pick a whole number of stars.").min(1, "Pick a rating from 1 to 5 stars.").max(5, "Pick a rating from 1 to 5 stars."),
@@ -140,7 +138,7 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
   await logActivity({ actorId: actor.id, action: "review.flagged", entityType: "review", entityId: reviewId, clubId: review.clubId });
 
   const flags = await db.reviewFlag.count({ where: { reviewId } });
-  if (flags >= REVIEW_FLAG_THRESHOLD) {
+  if (flags >= (await getConfig())["reviews.flagThreshold"]) {
     const open = await db.task.count({ where: { sourceType: "reviewFlag", sourceId: reviewId, status: "OPEN" } });
     if (open === 0) {
       const href = `/admin/reviews?club=${review.clubId}&review=${reviewId}`;

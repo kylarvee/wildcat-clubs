@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { MembershipSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
@@ -147,6 +148,13 @@ export async function unsubscribeCalendar(actor: Actor | null, clubId: string) {
 export async function setUniversityCalendar(actor: Actor | null, on: boolean) {
   assertSignedIn(actor);
   await db.user.update({ where: { id: actor.id }, data: { subscribeUniversity: on } });
+}
+
+/** New private calendar link; the old one stops working (for a link that was shared by mistake). */
+export async function resetCalendarToken(actor: Actor | null) {
+  assertSignedIn(actor);
+  await db.user.update({ where: { id: actor.id }, data: { calendarToken: randomUUID().replace(/-/g, "") } });
+  await logActivity({ actorId: actor.id, action: "calendar.token_reset", entityType: "user", entityId: actor.id });
 }
 
 /** Viewer's relationship to a club, for register/subscribe buttons. */

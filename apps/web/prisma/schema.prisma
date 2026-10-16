@@ -138,57 +138,57 @@ model User {
   createdAt            DateTime     @default(now())
   lastSeenAt           DateTime?
 
-  majors               UserMajor[]
-  sessions             Session[]
-  pushTokens           PushToken[]
-  experiences          Experience[]
-  educations           Education[]
-  projects             Project[]
-  memberships          Membership[]
-  roleAssignments      RoleAssignment[]       @relation("RoleHolder")
-  rolesAssigned        RoleAssignment[]       @relation("RoleAssigner")
-  attendances          Attendance[]           @relation("Attendee")
-  attendanceRecorded   Attendance[]           @relation("AttendanceRecorder")
-  subscriptions        CalendarSubscription[]
-  reviews              Review[]
-  reviewFlags          ReviewFlag[]
-  notifications        Notification[]
-  tasksAssigned        Task[]                 @relation("TaskAssignee")
-  tasksCreated         Task[]                 @relation("TaskCreator")
-  tasksCompleted       Task[]                 @relation("TaskCompleter")
-  clubsCreated         Club[]                 @relation("ClubCreator")
-  eventsCreated        Event[]
-  filesCreated         FileItem[]             @relation("FileCreator")
-  filesOwned           FileItem[]             @relation("FileOwner")
-  fileGrants           FileGrant[]
-  conversationMembers  ConversationMember[]
-  messages             Message[]
-  announcements        Announcement[]
-  policies             Policy[]
-  testsCreated         Test[]
-  testAttempts         TestAttempt[]          @relation("Taker")
-  testGrades           TestAttempt[]          @relation("Grader")
-  testAssignments      TestAssignment[]
-  complaints           Complaint[]
-  complaintNotes       ComplaintNote[]
-  complaintAccess      ComplaintAccessLog[]
-  candidacies          ElectionCandidate[]    @relation("Candidate")
-  nominations          ElectionCandidate[]    @relation("Nominator")
-  votes                Vote[]
-  electionsCreated     Election[]
-  advisorInvitesSent   AdvisorInvite[]        @relation("Inviter")
-  advisorInvites       AdvisorInvite[]        @relation("Invitee")
-  constitutionDrafts   ConstitutionDraft[]
-  clubDocuments        ClubDocument[]         @relation("DocAuthor")
-  budgetItems          BudgetItem[]
-  fundingRequests      FundingRequest[]       @relation("FundingSubmitter")
-  fundingDecisions     FundingRequest[]       @relation("FundingDecider")
-  invoices             Invoice[]
-  aiConversations      AiConversation[]
-  activity             ActivityLog[]
-  clubDecisions        ClubDecision[]
-  cohostRequests       EventCohost[]          @relation("CohostRequester")
-  cohostDecisions      EventCohost[]          @relation("CohostDecider")
+  majors              UserMajor[]
+  sessions            Session[]
+  pushTokens          PushToken[]
+  experiences         Experience[]
+  educations          Education[]
+  projects            Project[]
+  memberships         Membership[]
+  roleAssignments     RoleAssignment[]       @relation("RoleHolder")
+  rolesAssigned       RoleAssignment[]       @relation("RoleAssigner")
+  attendances         Attendance[]           @relation("Attendee")
+  attendanceRecorded  Attendance[]           @relation("AttendanceRecorder")
+  subscriptions       CalendarSubscription[]
+  reviews             Review[]
+  reviewFlags         ReviewFlag[]
+  notifications       Notification[]
+  tasksAssigned       Task[]                 @relation("TaskAssignee")
+  tasksCreated        Task[]                 @relation("TaskCreator")
+  tasksCompleted      Task[]                 @relation("TaskCompleter")
+  clubsCreated        Club[]                 @relation("ClubCreator")
+  eventsCreated       Event[]
+  filesCreated        FileItem[]             @relation("FileCreator")
+  filesOwned          FileItem[]             @relation("FileOwner")
+  fileGrants          FileGrant[]
+  conversationMembers ConversationMember[]
+  messages            Message[]
+  announcements       Announcement[]
+  policies            Policy[]
+  testsCreated        Test[]
+  testAttempts        TestAttempt[]          @relation("Taker")
+  testGrades          TestAttempt[]          @relation("Grader")
+  testAssignments     TestAssignment[]
+  complaints          Complaint[]
+  complaintNotes      ComplaintNote[]
+  complaintAccess     ComplaintAccessLog[]
+  candidacies         ElectionCandidate[]    @relation("Candidate")
+  nominations         ElectionCandidate[]    @relation("Nominator")
+  votes               Vote[]
+  electionsCreated    Election[]
+  advisorInvitesSent  AdvisorInvite[]        @relation("Inviter")
+  advisorInvites      AdvisorInvite[]        @relation("Invitee")
+  constitutionDrafts  ConstitutionDraft[]
+  clubDocuments       ClubDocument[]         @relation("DocAuthor")
+  budgetItems         BudgetItem[]
+  fundingRequests     FundingRequest[]       @relation("FundingSubmitter")
+  fundingDecisions    FundingRequest[]       @relation("FundingDecider")
+  invoices            Invoice[]
+  aiConversations     AiConversation[]
+  activity            ActivityLog[]
+  clubDecisions       ClubDecision[]
+  cohostRequests      EventCohost[]          @relation("CohostRequester")
+  cohostDecisions     EventCohost[]          @relation("CohostDecider")
 }
 
 model UserMajor {
@@ -431,23 +431,27 @@ enum ClubDocumentStatus {
 }
 
 model ClubDocument {
-  id          String             @id @default(cuid())
-  clubId      String
-  club        Club               @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  kind        ClubDocumentKind
-  title       String
-  version     Int                @default(1)
-  source      ClubDocumentSource
-  status      ClubDocumentStatus
-  draftId     String?
-  draft       ConstitutionDraft? @relation(fields: [draftId], references: [id])
-  contentHtml String? // rendered text of builder output (for in-app reading + search)
-  fileId      String?
-  file        FileItem?          @relation(fields: [fileId], references: [id])
-  createdById String
-  createdBy   User               @relation("DocAuthor", fields: [createdById], references: [id])
-  createdAt   DateTime           @default(now())
-  decidedAt   DateTime?
+  id                     String             @id @default(cuid())
+  clubId                 String
+  club                   Club               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  kind                   ClubDocumentKind
+  title                  String
+  version                Int                @default(1)
+  source                 ClubDocumentSource
+  status                 ClubDocumentStatus
+  draftId                String?
+  draft                  ConstitutionDraft? @relation(fields: [draftId], references: [id])
+  contentHtml            String? // rendered text of builder output (for in-app reading + search)
+  /// What a club says its custom document sets; applied when WSUSA approves it.
+  statedSuccessionMethod SuccessionMethod?
+  statedJoinPolicy       JoinPolicy?
+  note                   String?
+  fileId                 String?
+  file                   FileItem?          @relation(fields: [fileId], references: [id])
+  createdById            String
+  createdBy              User               @relation("DocAuthor", fields: [createdById], references: [id])
+  createdAt              DateTime           @default(now())
+  decidedAt              DateTime?
 }
 
 /// Owned by a person, not a club, so one founder can apply it to several clubs.
@@ -547,6 +551,7 @@ model Position {
   maxHolders         Int              @default(1)
   sortOrder          Int              @default(0)
   isCore             Boolean          @default(false) // President / VP seats can't be deleted
+  createdAt          DateTime         @default(now())
   archivedAt         DateTime?
   assignments        RoleAssignment[]
   elections          Election[]

@@ -119,7 +119,9 @@ function SeatHistory({
 }) {
   const live = seat.terms.filter((t) => !t.endedAt);
   const vacantNow = seat.current && !clubRetired && live.length === 0;
-  const from = seat.terms[0]?.startedAt ?? null;
+  // Measure vacancies from when the seat opened, so an empty stretch before its first holder shows too.
+  const firstStart = seat.terms[0]?.startedAt ?? null;
+  const from = seat.openedAt && (!firstStart || seat.openedAt < firstStart) ? seat.openedAt : firstStart;
   const to = seat.archivedAt && seat.archivedAt < clubEnd ? seat.archivedAt : clubEnd;
   const open = !seat.archivedAt && !clubRetired;
 

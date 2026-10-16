@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { can, getClubAccess, isAdmin } from "@/lib/authz";
+import { eventVisibilityWhere } from "@/lib/authz/events";
 import { eventCostSummaries } from "@/lib/domain/events";
 import { KIND_LABEL, locationText, UNIVERSITY_COLOR } from "@/lib/events/labels";
 import { describeSchedule } from "@/lib/events/summary";
@@ -59,17 +60,13 @@ export async function viewerContext(actor: Actor | null): Promise<ViewerContext>
   };
 }
 
+/** Visibility comes from lib/authz/events; the university listing leaves members-only events out even for admins. */
 function visibilityWhere(ctx: ViewerContext, opts: { allowMembers: boolean; publicOnly?: boolean }): Prisma.EventWhereInput {
-  if (opts.publicOnly || !ctx.actor) return { visibility: "PUBLIC" };
-  if (!opts.allowMembers) return { visibility: { in: ["PUBLIC", "UNIVERSITY"] } };
-  if (ctx.admin) return {};
-  return {
-    OR: [
-      { visibility: { in: ["PUBLIC", "UNIVERSITY"] } },
-      { visibility: "MEMBERS", clubId: { in: ctx.memberClubIds } },
-      { visibility: "MEMBERS", cohosts: { some: { status: "APPROVED", clubId: { in: ctx.memberClubIds } } } },
-    ],
-  };
+  if (opts.publicOnly) return eventVisibilityWhere({ signedIn: false, admin: false, memberClubIds: [] });
+  if (!opts.allowMembers) {
+    return { AND: [eventVisibilityWhere({ signedIn: Boolean(ctx.actor), admin: false, memberClubIds: [] }, { includeMembersOnly: false })] };
+  }
+  return eventVisibilityWhere({ signedIn: Boolean(ctx.actor), admin: ctx.admin, memberClubIds: ctx.memberClubIds });
 }
 
 function scopeWhere(scope: FeedScope, ctx: ViewerContext): Prisma.EventWhereInput {

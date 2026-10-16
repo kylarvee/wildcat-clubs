@@ -23,6 +23,7 @@ export default async function ManageLayout({ children, params }: { children: Rea
     { key: "profile", label: "Club profile", href: `${base}/profile`, locked: !has("profile") },
     { key: "members", label: "Members", href: `${base}/members`, locked: !has("roster") },
     { key: "org-chart", label: "Org chart", href: `${base}/org-chart` },
+    { key: "history", label: "Role history", href: `/clubs/${club.slug}/history` },
     ...(approved
       ? ([
           { key: "events", label: "Events", href: `${base}/events`, locked: !has("events") },
@@ -68,8 +69,8 @@ export default async function ManageLayout({ children, params }: { children: Rea
           Its history, roles and files are kept. Only an administrator can reinstate it.
         </Callout>
       ) : null}
-      <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-        <aside className="lg:sticky lg:top-20 lg:self-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <WorkspaceNav links={links} />
         </aside>
         <div className="min-w-0">{children}</div>

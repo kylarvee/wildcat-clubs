@@ -3,7 +3,8 @@ import { Prisma, type BudgetItem, type Event, type Term } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { can, getClubAccess, isAdmin } from "@/lib/authz";
+import { canViewEvent as canViewEventRule } from "@/lib/authz/events";
+import { can, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
@@ -164,24 +165,9 @@ export async function canManageEvent(actor: Actor | null, event: { clubId: strin
  * Admins see everything.
  */
 export async function canViewEvent(actor: Actor | null, event: { id: string; clubId: string | null; visibility: Event["visibility"]; status: Event["status"] }): Promise<boolean> {
-  if (event.status === "DRAFT") return canManageEvent(actor, event);
-  if (isAdmin(actor)) return true;
-  if (event.clubId) {
-    const club = await db.club.findUnique({ where: { id: event.clubId }, select: { status: true } });
-    if (!club) return false;
-    if (club.status !== "APPROVED" && club.status !== "RETIRED") return canManageEvent(actor, event);
-  }
-  if (event.visibility === "PUBLIC") return true;
-  if (!actor) return false;
-  if (event.visibility === "UNIVERSITY" || !event.clubId) return true;
-  const host = await getClubAccess(actor, event.clubId);
-  if (host?.isMember || host?.isLeader) return true;
-  const cohosts = await db.eventCohost.findMany({ where: { eventId: event.id, status: "APPROVED" }, select: { clubId: true } });
-  for (const c of cohosts) {
-    const a = await getClubAccess(actor, c.clubId);
-    if (a?.isMember || a?.isLeader) return true;
-  }
-  return false;
+  // Drafts: university drafts belong to admins (trainings), club drafts to the club's planners.
+  if (event.status === "DRAFT" && !event.clubId) return canManageEvent(actor, event);
+  return canViewEventRule(actor, event);
 }
 
 /** May this person see the event's expected costs? (host club budget or events holders, admins) */

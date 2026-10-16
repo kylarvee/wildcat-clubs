@@ -18,8 +18,8 @@ export default async function SystemLayout({ children }: { children: React.React
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-brand">System administration</p>
-      <div className="grid gap-6 lg:grid-cols-[210px_1fr]">
-        <aside className="lg:sticky lg:top-20 lg:self-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[210px_minmax(0,1fr)]">
+        <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <SideNav links={links} label="System tools" />
         </aside>
         <div className="min-w-0">{children}</div>

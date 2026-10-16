@@ -90,6 +90,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
       maxHolders: s.maxHolders,
       sortOrder: i,
       isCore: Boolean(s.isCore),
+      createdAt: c.createdAt, // seats exist from founding, so role history can measure vacancies
     })),
   );
   await insertMany("Position", positions, (d) => db.position.createMany({ data: d }), log);

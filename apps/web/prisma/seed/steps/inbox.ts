@@ -112,28 +112,28 @@ function approvalTasks(ctx: Ctx) {
   const bee = ctx.club("beekeeping");
   ctx.rows.tasks.push({
     id: ctx.id(), kind: "APPROVAL", title: `Frank Okafor invited you to advise ${bee.name}`, description: "Accepting makes you the club's advisor, with full permissions in the club. Founders need an accepted advisor before they can submit the club for WSUSA review.",
-    assigneeType: "USER", assigneeId: ctx.p("nathan").id, clubId: bee.id, href: `/invites/${ctx.refs.beeInviteToken}`, status: "OPEN", sourceType: "advisorInvite", sourceId: ctx.refs.beeInviteId,
+    assigneeType: "USER", assigneeId: ctx.p("nathan").id, clubId: bee.id, href: `/advisor/invite/${ctx.refs.beeInviteToken}`, status: "OPEN", sourceType: "advisorInvite", sourceId: ctx.refs.beeInviteId,
     createdById: ctx.p("frank").id, createdAt: addDays(NOW, -3.2),
   });
   // WSUSA queues.
   const bg = ctx.club("boardgames");
   ctx.rows.tasks.push({
     id: ctx.id(), kind: "APPROVAL", title: `Review new club: ${bg.name}`, description: "Registered club · advisor accepted · constitution and bylaws adopted with the builder.",
-    assigneeType: "ADMINS", clubId: bg.id, href: "/admin/clubs", status: "OPEN", sourceType: "club", sourceId: bg.id, createdById: bg.founderId, createdAt: bg.submittedAt!,
+    assigneeType: "ADMINS", clubId: bg.id, href: `/admin/clubs/${bg.id}`, status: "OPEN", sourceType: "club", sourceId: bg.id, createdById: bg.founderId, createdAt: bg.submittedAt!,
   });
   const av = ctx.club("aviation");
   ctx.rows.tasks.push({
     id: ctx.id(), kind: "APPROVAL", title: `Add department "Aviation Technology" for ${av.name}`, description: `${av.name} chose "Other" and typed in Aviation Technology. Add it in Directory and link the club, or pick an existing department.`,
-    assigneeType: "ADMINS", clubId: av.id, href: "/admin/directory", status: "OPEN", sourceType: "departmentRequest", sourceId: av.id, createdById: av.founderId, createdAt: av.submittedAt!,
+    assigneeType: "ADMINS", clubId: av.id, href: `/admin/clubs/${av.id}`, status: "OPEN", sourceType: "departmentRequest", sourceId: av.id, createdById: av.founderId, createdAt: av.submittedAt!,
   });
   ctx.rows.tasks.push({
-    id: ctx.id(), kind: "APPROVAL", title: `Review new club: ${av.name}`, assigneeType: "ADMINS", clubId: av.id, href: "/admin/clubs", status: "DONE", sourceType: "club", sourceId: av.id,
+    id: ctx.id(), kind: "APPROVAL", title: `Review new club: ${av.name}`, assigneeType: "ADMINS", clubId: av.id, href: `/admin/clubs/${av.id}`, status: "DONE", sourceType: "club", sourceId: av.id,
     createdById: av.founderId, createdAt: av.submittedAt!, completedAt: addDays(NOW, -6.3), completedById: ctx.p("alex").id,
   });
   const theatre = ctx.club("theatre");
   ctx.rows.tasks.push({
     id: ctx.id(), kind: "APPROVAL", title: `Approve custom bylaws: ${theatre.name}`, description: "Custom documents replace the builder version once approved.",
-    assigneeType: "ADMINS", clubId: theatre.id, href: "/admin/clubs", status: "OPEN", sourceType: "clubDocument", sourceId: ctx.refs.customDocId,
+    assigneeType: "ADMINS", clubId: theatre.id, href: `/admin/clubs/${theatre.id}#documents`, status: "OPEN", sourceType: "clubDocument", sourceId: ctx.refs.customDocId,
     createdById: ctx.leaderAt(theatre, NOW), createdAt: addDays(NOW, -4.2),
   });
 }
@@ -224,14 +224,14 @@ function personaNotifications(ctx: Ctx) {
   n("elena", "funding.submitted", "Pre-Med Society funding request decided", "Partially approved: MCAT prep books.", `/clubs/${slug("premed")}/manage/budget`, 24 * 20.2, true);
   n("elena", "event.cohost_request", "Pre-Med Society asked Nursing Student Association to co-host “Health Careers Night”", null, `/clubs/${slug("premed")}/manage/events`, 24 * 1.4, false);
   // Nathan
-  n("nathan", "advisor.invited", "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Open the request to accept or decline.", `/invites/${ctx.refs.beeInviteToken}`, 24 * 3.2, false);
+  n("nathan", "advisor.invited", "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Open the request to accept or decline.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 24 * 3.2, false);
   n("nathan", "system.welcome", "Welcome to Wildcat Clubs", "Advisors accept invitations here and get full access to the clubs they advise.", "/dashboard", 24 * 3.3, true);
-  n("nathan", "advisor.reminder", "Reminder: Frank Okafor is waiting on your answer", "Wildcat Beekeeping Society can't be submitted for WSUSA review until an advisor accepts.", `/invites/${ctx.refs.beeInviteToken}`, 5, false);
+  n("nathan", "advisor.reminder", "Reminder: Frank Okafor is waiting on your answer", "Wildcat Beekeeping Society can't be submitted for WSUSA review until an advisor accepts.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 5, false);
   // Alex (admin queues; review-bombing and report alerts are added with those records)
-  n("alex", "club.submitted", "New club submitted: Board Game Guild", null, "/admin/clubs", 24 * 5.1, false);
+  n("alex", "club.submitted", "New club submitted: Board Game Guild", null, `/admin/clubs/${ctx.club("boardgames").id}`, 24 * 5.1, false);
   n("alex", "funding.submitted", "Funding request: Finance & Investment Club — Fall speaker series", null, "/admin/funding", 24 * 5.2, true);
   n("alex", "funding.submitted", "Funding request: Nursing Student Association — Pinning ceremony", null, "/admin/funding", 24 * 1.1, false);
-  n("alex", "document.submitted", "Theatre Guild submitted custom bylaws for approval", null, "/admin/clubs", 24 * 4.2, false);
+  n("alex", "document.submitted", "Theatre Guild submitted custom bylaws for approval", null, `/admin/clubs/${ctx.club("theatre").id}#documents`, 24 * 4.2, false);
   // Sydney
   n("sydney", "system.integrations", "Integrations are in mock mode", "Email, push and Google sync are off — messages are recorded in the outbox.", "/system", 24 * 30, true);
   n("sydney", "system.jobs", "Scheduled jobs ran", "All jobs completed.", "/system", 3, false);
@@ -243,7 +243,7 @@ function outbox(ctx: Ctx) {
   const mail = (to: string, subject: string, body: string, href: string | null, hoursAgo: number, channel: "EMAIL" | "PUSH" = "EMAIL") =>
     ctx.rows.outbox.push({ id: ctx.id(), channel, to, subject, body, href, status: "MOCKED", createdAt: addHours(NOW, -hoursAgo) });
   const e = (k: string) => ctx.p(k).email;
-  mail(e("nathan"), "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Frank Okafor invited you to be the faculty advisor for Wildcat Beekeeping Society on Wildcat Clubs. Sign in with your Weber State account to accept or decline.", `/invites/${ctx.refs.beeInviteToken}`, 24 * 3.2);
+  mail(e("nathan"), "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Frank Okafor invited you to be the faculty advisor for Wildcat Beekeeping Society on Wildcat Clubs. Sign in with your Weber State account to accept or decline.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 24 * 3.2);
   mail(e("frank"), "Board Game Guild is in WSUSA review", "Thanks for submitting Board Game Guild. WSUSA Clubs & Organizations reviews new clubs in about ten business days.", `/clubs/${ctx.club("boardgames").slug}/manage`, 24 * 5.1);
   mail(ctx.person(ctx.club("aviation").founderId).email, "Changes requested: Aviation Club", "WSUSA reviewed Aviation Club and asked for a couple of changes before approval. Open the club workspace to see the note.", `/clubs/${ctx.club("aviation").slug}/manage`, 24 * 6.3);
   for (const a of ctx.admins) mail(a.email, "Possible review bombing: Political Science Society", "3 reviews of 2★ or lower in the last 48 hours.", `/admin/reviews?club=${ctx.club("polisci").id}`, 9);

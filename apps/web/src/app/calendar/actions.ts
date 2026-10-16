@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
-import { setUniversityCalendar, subscribeCalendar, unsubscribeCalendar } from "@/lib/domain/memberships";
+import { resetCalendarToken, setUniversityCalendar, subscribeCalendar, unsubscribeCalendar } from "@/lib/domain/memberships";
 
 /** Calendar subscription toggles on the united calendar. */
 
@@ -12,6 +12,12 @@ export async function setClubSubscriptionAction(clubId: string, on: boolean) {
     revalidatePath("/calendar");
     revalidatePath("/clubs/[slug]", "page");
   }
+  return r;
+}
+
+export async function resetCalendarLinkAction() {
+  const r = await act((a) => resetCalendarToken(a));
+  if (r.ok) revalidatePath("/calendar");
   return r;
 }
 
