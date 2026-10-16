@@ -100,3 +100,15 @@ export const AMBASSADOR_ORG_SEATS: SeatTemplate[] = [
 export function seatsFor(type: ClubType): SeatTemplate[] {
   return type === "COLLEGE_AMBASSADORS" ? AMBASSADOR_ORG_SEATS : CLUB_SEATS;
 }
+
+/** The seat in a regular club that placed ambassadors fill (created on first placement if missing). */
+export const COLLEGE_AMBASSADOR_SEAT = CLUB_SEATS.find((s) => s.role === "AMBASSADOR" && s.name === "College Ambassador")!;
+
+/**
+ * Whether an ambassador-org seat is the "Club Representative Ambassador" one
+ * whose holders get placed into clubs. Matched loosely so an org that renames
+ * it ("Club Rep Ambassadors") keeps working.
+ */
+export function isClubRepSeat(seat: { role: ClubRole; name: string }): boolean {
+  return seat.role === "AMBASSADOR" && /\brep(resentative)?s?\b/i.test(seat.name);
+}

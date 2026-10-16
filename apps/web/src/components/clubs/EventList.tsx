@@ -1,0 +1,83 @@
+import Link from "next/link";
+import { Clock, MapPin, Video } from "lucide-react";
+import type { UpcomingEvent } from "@/lib/clubs/queries";
+import { fmtDate, fmtRange } from "@/lib/time";
+import { Badge } from "@/components/ui/badge";
+import { ClubLogo } from "@/components/ui/avatar";
+import { cn } from "@/components/ui/cn";
+import { EVENT_KIND_LABEL, safeHex } from "@/components/clubs/labels";
+
+/** Upcoming events as date-tile rows (landing page and club pages). */
+export function EventList({ events, showHost = true, className }: { events: UpcomingEvent[]; showHost?: boolean; className?: string }) {
+  return (
+    <ol className={cn("divide-y divide-line overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface shadow-[var(--shadow-card)]", className)}>
+      {events.map((e) => {
+        const color = safeHex(e.host?.logoColor);
+        return (
+          <li key={e.occurrenceId} className="flex gap-4 p-4">
+            <div className="flex w-14 shrink-0 flex-col items-center overflow-hidden rounded-xl border border-line text-center" aria-hidden="true">
+              <span className="w-full py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white" style={{ backgroundColor: color }}>
+                {fmtDate(e.startsAt, "MMM")}
+              </span>
+              <span className="py-1 text-xl font-bold leading-none text-ink">{fmtDate(e.startsAt, "d")}</span>
+              <span className="pb-1 text-[10px] font-medium uppercase text-ink-3">{fmtDate(e.startsAt, "EEE")}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold text-ink">{e.title}</p>
+                {e.happeningNow ? <Badge tone="success">Happening now</Badge> : <Badge>{EVENT_KIND_LABEL[e.kind]}</Badge>}
+              </div>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-2">
+                <Clock className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" />
+                <span>{fmtRange(e.startsAt, e.endsAt, e.allDay)}</span>
+              </p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-ink-2">
+                {e.isVirtual ? <Video className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" /> : <MapPin className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" />}
+                <span className="truncate">{e.location}</span>
+              </p>
+              {showHost ? (
+                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-ink-3">
+                  {e.host ? (
+                    <>
+                      <ClubLogo name={e.host.name} src={e.host.logoUrl} color={e.host.logoColor} size="sm" className="h-5 w-5 rounded-md text-[9px]" />
+                      <Link href={`/clubs/${e.host.slug}`} className="font-medium text-ink-2 hover:text-brand hover:underline">
+                        {e.host.name}
+                      </Link>
+                    </>
+                  ) : (
+                    <span className="font-medium text-ink-2">Weber State University</span>
+                  )}
+                  {e.cohosts.length ? (
+                    <span>
+                      with{" "}
+                      {e.cohosts.map((c, i) => (
+                        <span key={c.id}>
+                          {i > 0 ? ", " : ""}
+                          <Link href={`/clubs/${c.slug}`} className="hover:text-brand hover:underline">
+                            {c.name}
+                          </Link>
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                </p>
+              ) : e.cohosts.length ? (
+                <p className="mt-2 text-sm text-ink-3">
+                  Co-hosted with{" "}
+                  {e.cohosts.map((c, i) => (
+                    <span key={c.id}>
+                      {i > 0 ? ", " : ""}
+                      <Link href={`/clubs/${c.slug}`} className="font-medium text-ink-2 hover:text-brand hover:underline">
+                        {c.name}
+                      </Link>
+                    </span>
+                  ))}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

@@ -15,7 +15,8 @@ import { TZ, campusDate } from "@/lib/time";
  *  SEMESTERLY       once per term that counts for activity, same offset from the term's first day
  *  ACADEMIC_YEARLY  once per academic year, in the same kind of term (fall/spring), same offset
  *
- * Without `until` or `count`, recurrence runs one year past the start.
+ * Without `until` or `count`, recurrence runs one year past the start. With only
+ * a `count`, the count decides (up to MAX_OCCURRENCES, within five years).
  */
 
 export type RecurrenceSpec = {
@@ -33,6 +34,7 @@ export type OccurrenceTimes = { startsAt: Date; endsAt: Date };
 
 export const MAX_OCCURRENCES = 400;
 const DEFAULT_HORIZON_DAYS = 365;
+const COUNT_HORIZON_DAYS = 5 * 366;
 
 type Local = { y: number; m: number; d: number; H: number; M: number; dow: number };
 
@@ -59,7 +61,7 @@ export function expandOccurrences(spec: RecurrenceSpec, terms: Term[] = []): Occ
   const start = local(spec.startsAt);
   const durMs = (spec.allDay ? 24 * 60 : Math.max(5, spec.durationMinutes)) * 60_000;
   const interval = Math.max(1, spec.interval ?? 1);
-  const horizon = spec.until ?? new Date(spec.startsAt.getTime() + DEFAULT_HORIZON_DAYS * 86_400_000);
+  const horizon = spec.until ?? new Date(spec.startsAt.getTime() + (spec.count ? COUNT_HORIZON_DAYS : DEFAULT_HORIZON_DAYS) * 86_400_000);
   const limit = Math.min(spec.count ?? MAX_OCCURRENCES, MAX_OCCURRENCES);
 
   const out: OccurrenceTimes[] = [];
