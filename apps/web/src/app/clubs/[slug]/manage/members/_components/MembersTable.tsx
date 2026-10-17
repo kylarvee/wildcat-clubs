@@ -36,7 +36,20 @@ const STATUS_BADGE: Partial<Record<MemberRow["status"], { label: string; tone: "
 };
 
 /** The roster: search, filters, sortable columns, inline titles and removal. Table on desktop, cards on phones. */
-export function MembersTable({ slug, clubName, rows, canEditTitles }: { slug: string; clubName: string; rows: MemberRow[]; canEditTitles: boolean }) {
+export function MembersTable({
+  slug,
+  clubName,
+  rows,
+  canEditTitles,
+  activeRule,
+}: {
+  slug: string;
+  clubName: string;
+  rows: MemberRow[];
+  canEditTitles: boolean;
+  /** The sysadmin-set "active student" rule (lib/config), so the note matches it. */
+  activeRule: { windowDays: number; recentEvents: number };
+}) {
   const [filter, setFilter] = useState<Filter>("current");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
@@ -250,7 +263,7 @@ export function MembersTable({ slug, clubName, rows, canEditTitles }: { slug: st
             </Table>
           </div>
           <p className="text-xs text-ink-3">
-            Showing {shown.length} of {counts[filter]}. &ldquo;Active&rdquo; means they attended in the last month or at one of the club&apos;s last two events.
+            Showing {shown.length} of {counts[filter]}. &ldquo;Active&rdquo; means they checked in within {activeRule.windowDays} days or at one of the club&apos;s last {activeRule.recentEvents} events.
           </p>
         </>
       )}

@@ -88,7 +88,7 @@ export async function candidateEligibility(userId: string, clubId: string, metho
 
 const electionInclude = {
   club: { select: { id: true, name: true, slug: true } },
-  position: { select: { id: true, name: true, role: true, archivedAt: true, responsibilities: true } },
+  position: { select: { id: true, name: true, role: true, archivedAt: true, responsibilities: true, defaultPermissions: true } },
   _count: { select: { candidates: true, votes: true } },
 } satisfies Prisma.ElectionInclude;
 
@@ -412,13 +412,18 @@ export async function electionResults(electionId: string): Promise<ElectionResul
   };
 }
 
-const ApplyInput = z.object({ winnerCandidateId: z.string().optional().nullable() });
+const ApplyInput = z.object({
+  winnerCandidateId: z.string().optional().nullable(),
+  /** Officer / ambassador seats: what the winner may do (the same setup step as the Org Chart). Defaults to the seat's defaults. */
+  permissions: z.array(z.string()).optional(),
+});
 
 /**
  * Put the winner in the seat through the Org Chart path (roles.assignRole),
  * replacing whoever holds it now. Only someone who could assign the seat's
  * role may apply (so a VP can't apply a President election). Ties: the
  * applier picks among the tied candidates, and that choice is recorded.
+ * A re-elected holder keeps their seat and its permissions.
  */
 export async function applyElectionResult(actor: Actor | null, electionId: string, input: unknown) {
   assertSignedIn(actor);
@@ -456,7 +461,7 @@ export async function applyElectionResult(actor: Actor | null, electionId: strin
       // Re-elected: keep their assignment (and its history); everyone else's term ends.
       for (const h of holders) if (h.userId !== winner.userId) await endRoleAssignment(actor, h.id, "TERM_ENDED", `Election: ${e.title}`);
     } else {
-      await assignRole(actor, { clubId: e.clubId, userId: winner.userId, positionId: e.position.id, replaceAssignmentIds: holders.map((h) => h.id) });
+      await assignRole(actor, { clubId: e.clubId, userId: winner.userId, positionId: e.position.id, permissions: v.permissions, replaceAssignmentIds: holders.map((h) => h.id) });
     }
   } catch (err) {
     await db.election.update({ where: { id: e.id }, data: { status: "CLOSED", winnerId: null, appliedAt: null } });

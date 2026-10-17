@@ -2,9 +2,8 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { fmtDate, inCampusTime } from "@/lib/time";
 import { format } from "date-fns";
+import { toCsv } from "@/lib/attendance/matrix";
 import { loadAttendees, METHOD_LABEL } from "../attendees";
-
-const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 /** Attendee list for one university-event meeting, as CSV (admins). */
 export async function GET(_req: Request, { params }: { params: Promise<{ occurrenceId: string }> }) {
@@ -17,7 +16,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ occurre
     ["Name", "Email", "Leadership roles", "Check-in method", "Checked in (Mountain time)"],
     ...occ.attendances.map((a) => [a.user.name, a.user.email, (rolesByUser.get(a.userId) ?? []).join("; "), METHOD_LABEL[a.method], format(inCampusTime(a.checkedInAt), "yyyy-MM-dd HH:mm")]),
   ];
-  const csv = rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+  // toCsv defuses formulas: names are user-chosen, so "=HYPERLINK(…)" must stay text.
+  const csv = toCsv(rows);
   const name = `${occ.event.title}-${fmtDate(occ.startsAt, "yyyy-MM-dd")}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
   return new Response(csv, {
     headers: {

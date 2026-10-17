@@ -297,14 +297,27 @@ export async function saveRequirement(actor: Actor | null, id: string | null, in
   return { id: row.id };
 }
 
-/** Turn a requirement on or off without editing it. */
+/**
+ * Turn a requirement on or off without editing it. Turning on checks what it
+ * points at the same way saving does: a requirement nobody can meet would
+ * pause every leader it applies to once their grace period ends.
+ */
 export async function setRequirementActive(actor: Actor | null, id: string, active: boolean): Promise<{ id: string }> {
   assertRequirementAdmin(actor);
   const prev = await db.roleRequirement.findUnique({ where: { id } });
   if (!prev) throw notFound("Requirement");
-  if (active && prev.kind === "TEST" && prev.testId) {
-    const t = await db.test.findUnique({ where: { id: prev.testId }, select: { status: true } });
-    if (t?.status !== "PUBLISHED") throw invalid("Its test isn't published, so it can't be turned on. Publish the test first.");
+  if (active && prev.kind === "TEST") {
+    const t = prev.testId ? await db.test.findUnique({ where: { id: prev.testId }, select: { status: true, audience: true } }) : null;
+    if (!t) throw invalid("Its test was deleted, so it can't be turned on. Edit it to choose a test first.");
+    if (t.status !== "PUBLISHED") throw invalid("Its test isn't published, so it can't be turned on. Publish the test first.");
+    // While the requirement was off, the test's audience was free to change.
+    if (t.audience !== "ROLE_REQUIREMENT") throw invalid("Set its test's audience back to “Student leaders (officer requirement)” first, so it isn't also assigned to everyone else.");
+  }
+  if (active && prev.kind === "TRAINING") {
+    // Deleting an event sets trainingEventId to null.
+    const ev = prev.trainingEventId ? await db.event.findUnique({ where: { id: prev.trainingEventId }, select: { status: true } }) : null;
+    if (!ev) throw invalid("Its training was deleted, so it can't be turned on. Edit it to choose a training first.");
+    if (ev.status !== "SCHEDULED") throw invalid("Its training is cancelled or still an idea, so it can't be turned on. Choose a scheduled training first.");
   }
   await db.roleRequirement.update({ where: { id }, data: { active } });
   await logActivity({ actorId: actor.id, action: active ? "requirement.activated" : "requirement.deactivated", entityType: "roleRequirement", entityId: id, data: { name: prev.name } });

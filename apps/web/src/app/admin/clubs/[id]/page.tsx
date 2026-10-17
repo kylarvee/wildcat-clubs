@@ -20,6 +20,7 @@ import { ReviewActions } from "@/components/founding/admin/ReviewActions";
 import { AddDepartmentForm } from "@/components/founding/admin/AddDepartmentForm";
 import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { ReinstateForm } from "@/components/founding/admin/ReinstateForm";
+import { GoogleAccountVerification } from "@/components/founding/admin/GoogleAccountVerification";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
 import { JOIN_LABEL, SCOPE_LABEL, STATUS_LABEL, STATUS_TONE, SUCCESSION_LABEL, TYPE_LABEL } from "@/components/founding/copy";
 
@@ -60,7 +61,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
   });
   if (!club) notFound();
 
-  const [check, documents, leaders, invites, decisions, colleges, members] = await Promise.all([
+  const [check, documents, leaders, invites, decisions, colleges, members, verifier] = await Promise.all([
     foundingChecklist(club.id),
     db.clubDocument.findMany({ where: { clubId: club.id, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } }, orderBy: [{ kind: "asc" }, { createdAt: "desc" }], include: { createdBy: { select: { name: true } } } }),
     db.roleAssignment.findMany({
@@ -72,6 +73,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
     db.clubDecision.findMany({ where: { clubId: club.id }, orderBy: { at: "desc" }, include: { by: { select: { name: true } } } }),
     db.college.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     db.membership.count({ where: { clubId: club.id, status: "ACTIVE" } }),
+    club.googleAccountVerifiedById ? db.user.findUnique({ where: { id: club.googleAccountVerifiedById }, select: { name: true } }) : null,
   ]);
   const pendingDocs = documents.filter((d) => d.status === "PENDING_APPROVAL" && d.kind !== "OTHER");
   const stated = await Promise.all(pendingDocs.map((d) => statedSettings(d.id)));
@@ -145,7 +147,6 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                   { label: "Where it sits", value: `${SCOPE_LABEL[club.scope]}${club.college ? ` · ${club.college.name}` : ""}` },
                   { label: "Department", value: club.department?.name ?? (club.requestedDepartmentName ? `Requested: ${club.requestedDepartmentName}` : "—") },
                   { label: "Focus", value: club.focusMajor?.name ?? club.focusOther ?? "—" },
-                  { label: "Club Google account", value: club.contactEmail ?? "—" },
                   { label: "Members", value: members },
                   { label: "Joining", value: JOIN_LABEL[club.joinPolicy] },
                   { label: "Succession", value: SUCCESSION_LABEL[club.successionMethod] },
@@ -157,6 +158,30 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                 </div>
               ) : (
                 <p className="text-sm text-ink-3">No full description yet.</p>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <div id="google-account" className="scroll-mt-24" />
+            <CardHeader
+              title="Club Google account"
+              description="Google Drive, Calendar and Chat sync run as this account. Verify it only if WSU IT set it up for this club."
+              action={club.contactEmail ? <Badge tone={club.googleAccountVerifiedAt ? "success" : "warning"}>{club.googleAccountVerifiedAt ? "Verified" : "Not verified"}</Badge> : null}
+            />
+            <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {club.contactEmail ? (
+                <>
+                  <p className="min-w-0 text-sm text-ink-2">
+                    <span className="break-all font-medium text-ink">{club.contactEmail}</span>
+                    {club.googleAccountVerifiedAt
+                      ? ` · verified ${fmtLongDate(club.googleAccountVerifiedAt)}${verifier ? ` by ${verifier.name}` : ""}`
+                      : " · Google sync won't use it until you verify it."}
+                  </p>
+                  <GoogleAccountVerification clubId={club.id} email={club.contactEmail} verified={Boolean(club.googleAccountVerifiedAt)} />
+                </>
+              ) : (
+                <p className="text-sm text-ink-3">The club hasn&apos;t added one.</p>
               )}
             </CardBody>
           </Card>

@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 type Row = { id: string; conversationId: string; role: string; content: unknown; model: string | null; createdAt: Date };
-const store: { rows: Row[]; n: number } = { rows: [], n: 0 };
+/** `calls` is what the hourly-limit count returns. */
+const store: { rows: Row[]; n: number; calls: number } = { rows: [], n: 0, calls: 0 };
 
 vi.mock("@/lib/db", () => {
   const pick = (r: Row) => ({ id: r.id, role: r.role, content: structuredClone(r.content), model: r.model, createdAt: r.createdAt });
@@ -29,6 +30,7 @@ vi.mock("@/lib/db", () => {
           const row = store.rows.find((r) => r.id === where.id);
           return row ? pick(row) : null;
         },
+        count: async () => store.calls,
       },
       aiConversation: { update: async () => ({}) },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -131,6 +133,7 @@ const actor = { id: "u1", email: "sam@mail.weber.edu", name: "Sam Rivera", handl
 
 beforeEach(() => {
   store.rows = [];
+  store.calls = 0;
   executed.length = 0;
 });
 
@@ -202,6 +205,30 @@ describe("runTurn", () => {
     await runTurn({ client, actor, thread, mode: { kind: "message", text: "Find clubs about AI" }, emit: () => {} });
     assertValidHistory(requests[1].messages);
     expect(requests[1].messages.map((m) => m.role)).toEqual(["user", "system", "assistant", "user"]);
+  });
+
+  it("runs a confirmed action past the hourly limit but pauses Claude until Try again", async () => {
+    const { client, requests } = scriptedClient([
+      { content: [{ type: "tool_use", id: "t5", name: "join_club", input: { club: "chess" } }], stop_reason: "tool_use" },
+      { content: [{ type: "text", text: "You're in." }], stop_reason: "end_turn" },
+    ]);
+    const thread = new Thread("c5", "New conversation", "u1", []);
+    await runTurn({ client, actor, thread, mode: { kind: "message", text: "Join chess" }, emit: () => {} });
+    expect(await decideAction({ actor, thread, toolUseId: "t5", approve: true, emit: () => {} })).toBe(true);
+    expect(executed).toEqual(["join_club"]);
+
+    store.calls = 1_000;
+    const events: StreamEvent[] = [];
+    await runTurn({ client, actor, thread, mode: { kind: "continue" }, emit: (e) => events.push(e) });
+    expect(requests).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({ type: "notice", retryText: "Try again" }));
+    expect(buildView(thread).items.at(-1)).toMatchObject({ kind: "notice", retryText: "Try again" });
+
+    store.calls = 0;
+    await runTurn({ client, actor, thread, mode: { kind: "retry" }, emit: () => {} });
+    expect(requests).toHaveLength(2);
+    assertValidHistory(requests[1].messages);
+    expect(buildView(thread).items.at(-1)).toMatchObject({ kind: "assistant" });
   });
 
   it("offers a retry after an API error and resends without duplicating the message", async () => {

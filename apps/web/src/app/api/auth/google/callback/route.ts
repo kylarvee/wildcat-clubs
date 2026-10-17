@@ -1,26 +1,40 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { exchangeCode } from "@/lib/auth/google";
+import { exchangeCode, NotUniversityAccount } from "@/lib/auth/google";
 import { findOrCreateUserByEmail } from "@/lib/auth/accounts";
+import { safeNext } from "@/lib/auth/redirect";
 import { signInWeb } from "@/lib/auth/session";
+
+/** Error codes the login page turns into fixed copy (raw exception text never reaches the page). */
+type LoginError = "expired" | "cancelled" | "domain" | "failed";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const jar = await cookies();
-  const saved = jar.get("wc_oauth")?.value;
+  let saved: { state?: unknown; next?: unknown } = {};
+  try {
+    saved = JSON.parse(jar.get("wc_oauth")?.value ?? "{}");
+  } catch {
+    // A mangled cookie is the same as none: the state check below fails.
+  }
   jar.delete("wc_oauth");
-  const { state, next } = saved ? (JSON.parse(saved) as { state: string; next: string }) : { state: "", next: "/dashboard" };
-  if (!state || url.searchParams.get("state") !== state) redirect("/login?error=Sign-in%20expired.%20Please%20try%20again.");
+  const state = typeof saved.state === "string" ? saved.state : "";
+  // Checked again here (not just when the cookie was set) so the redirect never leaves the site.
+  const next = safeNext(typeof saved.next === "string" ? saved.next : null);
+  function fail(error: LoginError): never {
+    redirect(`/login?error=${error}&next=${encodeURIComponent(next)}`);
+  }
+  if (!state || url.searchParams.get("state") !== state) fail("expired");
   const code = url.searchParams.get("code");
-  if (!code) redirect("/login?error=Sign-in%20was%20cancelled.");
-  let dest = "/dashboard";
+  if (!code) fail("cancelled");
   try {
     const identity = await exchangeCode(url.origin, code);
     const user = await findOrCreateUserByEmail({ email: identity.email, name: identity.name, avatarUrl: identity.picture });
     await signInWeb(user.id);
-    if (next.startsWith("/") && !next.startsWith("//")) dest = next;
   } catch (e) {
-    redirect(`/login?error=${encodeURIComponent(e instanceof Error ? e.message : "Sign-in failed")}`);
+    if (e instanceof NotUniversityAccount) fail("domain");
+    console.error("Google sign-in failed", e);
+    fail("failed");
   }
-  redirect(dest);
+  redirect(next);
 }

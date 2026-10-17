@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { calendar_v3 } from "@googleapis/calendar";
 import { db } from "@/lib/db";
 import { integrationLive } from "@/lib/config";
-import { googleJwt, PLATFORM_SENDER } from "@/lib/integrations/google";
+import { CLUB_ACCOUNT_FIELDS, clubGoogleAccount, googleJwt, PLATFORM_SENDER } from "@/lib/integrations/google";
 import { richToText } from "@/lib/rich/sanitize";
 import { splitEventLinks } from "@/lib/events/links";
 import { roomLabel } from "@/lib/events/labels";
@@ -14,13 +14,23 @@ import { TZ } from "@/lib/time";
 /**
  * Google Calendar mirror. The data lake is the source of truth; when a sysadmin
  * turns on "Google Calendar" sync, each club event is copied into the club's own
- * Workspace calendar (running as Club.contactEmail through the service account),
+ * Workspace calendar (running as Club.contactEmail through the service account,
+ * only for approved clubs whose account WSUSA verified — clubGoogleAccount),
  * and university events into the platform account's calendar.
  *
  * One Google event per platform event: the first scheduled occurrence is the
  * start, the rest are RDATEs, so moved, cancelled and semester-based meetings
  * mirror exactly. With sync off every call is a no-op that says so — and no
  * Meet link is ever invented.
+ *
+ * Workspace setup (once, by WSU's Google Workspace admin): add this OAuth scope
+ * to the service account's domain-wide delegation:
+ *   https://www.googleapis.com/auth/calendar
+ * It is the full Calendar scope, broader than the adapter needs, because
+ * university events go on the platform account's primary calendar. Delegation
+ * grants a scope for every user in the domain, so narrowing it to
+ * calendar.app.created (only the calendars this app creates) needs university
+ * events moved to an app-created calendar whose id is stored somewhere first.
  */
 
 const SCOPES = ["https://www.googleapis.com/auth/calendar"];
@@ -36,9 +46,8 @@ export type GoogleSyncResult = {
 export async function googleCalendarReady(clubId: string | null): Promise<{ live: boolean; reason?: string }> {
   if (!(await integrationLive("googleCalendar"))) return { live: false, reason: "Google Calendar sync is off." };
   if (!clubId) return { live: true };
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { contactEmail: true } });
-  if (!club?.contactEmail) return { live: false, reason: "Add the club's Google account email in the club profile to sync its calendar." };
-  return { live: true };
+  const account = clubGoogleAccount(await db.club.findUnique({ where: { id: clubId }, select: CLUB_ACCOUNT_FIELDS }));
+  return account.email ? { live: true } : { live: false, reason: account.reason };
 }
 
 /** Loaded on first use, so mock mode never pulls in the Google client. */
@@ -66,7 +75,7 @@ function loadEvent(eventId: string) {
   return db.event.findUnique({
     where: { id: eventId },
     include: {
-      club: { select: { id: true, name: true, contactEmail: true, googleCalendarId: true } },
+      club: { select: { id: true, name: true, googleCalendarId: true, ...CLUB_ACCOUNT_FIELDS } },
       building: { select: { name: true } },
       occurrences: { where: { status: "SCHEDULED" }, orderBy: { startsAt: "asc" }, select: { startsAt: true, endsAt: true, roomOverride: true } },
     },
@@ -132,12 +141,12 @@ export async function syncEventToGoogle(eventId: string, opts: { createMeet?: bo
   try {
     const e = await loadEvent(eventId);
     if (!e) return { status: "skipped" };
-    const ready = await googleCalendarReady(e.clubId);
-    if (!ready.live) return { status: "off", message: ready.reason };
+    if (!(await integrationLive("googleCalendar"))) return { status: "off", message: "Google Calendar sync is off." };
+    const account = e.club ? clubGoogleAccount(e.club) : { email: PLATFORM_SENDER };
+    if (!account.email) return { status: "off", message: account.reason };
     if (e.status === "DRAFT") return { status: "skipped" };
 
-    const subject = e.club?.contactEmail ?? PLATFORM_SENDER;
-    const cal = await client(subject);
+    const cal = await client(account.email);
     const calendarId = await calendarIdFor(cal, e);
 
     if (e.status === "CANCELLED" || e.occurrences.length === 0) {
@@ -175,11 +184,12 @@ export async function syncEventToGoogle(eventId: string, opts: { createMeet?: bo
 export async function removeEventFromGoogle(e: { googleEventId: string | null; clubId: string | null }): Promise<GoogleSyncResult> {
   if (!e.googleEventId) return { status: "skipped" };
   try {
-    const ready = await googleCalendarReady(e.clubId);
-    if (!ready.live) return { status: "off" };
-    const club = e.clubId ? await db.club.findUnique({ where: { id: e.clubId }, select: { contactEmail: true, googleCalendarId: true } }) : null;
+    if (!(await integrationLive("googleCalendar"))) return { status: "off" };
+    const club = e.clubId ? await db.club.findUnique({ where: { id: e.clubId }, select: { googleCalendarId: true, ...CLUB_ACCOUNT_FIELDS } }) : null;
+    const subject = e.clubId ? clubGoogleAccount(club).email : PLATFORM_SENDER;
+    if (!subject) return { status: "off" };
     if (e.clubId && !club?.googleCalendarId) return { status: "skipped" };
-    const cal = await client(club?.contactEmail ?? PLATFORM_SENDER);
+    const cal = await client(subject);
     await cal.events.delete({ calendarId: club?.googleCalendarId ?? "primary", eventId: e.googleEventId }).catch((err) => {
       if (status(err) !== 404 && status(err) !== 410) throw err;
     });

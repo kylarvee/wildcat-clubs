@@ -154,7 +154,8 @@ export function ContributionDialog({ slug, clubId, assignmentId, seatName, holde
   );
 }
 
-export function RemoveContributionButton({ slug, projectId, title }: { slug: string; projectId: string; title: string }) {
+/** `holderName` is set when someone other than the holder removes it: it leaves the role but stays on their profile (roles.removeRoleContribution). */
+export function RemoveContributionButton({ slug, projectId, title, holderName }: { slug: string; projectId: string; title: string; holderName?: string }) {
   const { pending, run } = useRunAction();
   return (
     <ConfirmDialog
@@ -164,7 +165,11 @@ export function RemoveContributionButton({ slug, projectId, title }: { slug: str
         </Button>
       }
       title={`Remove “${title}”?`}
-      description="It comes off the role history and the profile. Attached files stay wherever they were stored."
+      description={
+        holderName
+          ? `It comes off the role history. It stays on ${holderName}'s profile, where only they can delete it.`
+          : "It comes off the role history and your profile. Attached files stay wherever they were stored."
+      }
       confirmLabel="Remove"
       danger
       onConfirm={() => {

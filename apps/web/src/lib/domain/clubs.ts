@@ -160,7 +160,13 @@ function departmentFields(type: string, departmentId: string | null, requested: 
 
 const ClubTypeInput = z.enum(["SPONSORED", "AFFILIATE", "REGISTERED"], { error: "Choose a club type." });
 const ScopeInput = z.enum(["COLLEGE", "UNIVERSITY", "INDEPENDENT", "SPORTS"], { error: "Choose where your club sits." });
-const NameInput = z.string({ error: "Give your club a name." }).trim().min(3, "Club names need at least 3 characters.").max(100, "Keep the club name under 100 characters.");
+// Names reach email subjects and Google, so control characters (line breaks) become spaces.
+const NameInput = z
+  .string({ error: "Give your club a name." })
+  .overwrite((s) => s.replace(/[\u0000-\u001f\u007f]+/g, " "))
+  .trim()
+  .min(3, "Club names need at least 3 characters.")
+  .max(100, "Keep the club name under 100 characters.");
 const ShortInput = z
   .string({ error: "Add a short description." })
   .trim()
@@ -342,13 +348,84 @@ async function openDepartmentRequest(club: Pick<Club, "id" | "name" | "requested
   });
 }
 
-/** The club's Google account (Drive / Calendar / Chat sync runs as it). */
+/**
+ * The club's Google account. Drive / Calendar / Chat sync runs as it through
+ * domain-wide delegation, so leaders only propose it: sync waits until WSUSA
+ * verifies it (setClubGoogleAccountVerified). A new address starts unverified
+ * and forgets the old account's calendar, Drive folder and Chat space (and the
+ * copies in them), so the next sync builds fresh ones in the new account.
+ */
 export async function setClubContactEmail(actor: Actor | null, input: unknown) {
   const v = parseForm(z.object({ clubId: id, contactEmail: optionalEmail }), input);
   await assertClubCap(actor, v.clubId, "profile");
-  const club = await db.club.update({ where: { id: v.clubId }, data: { contactEmail: v.contactEmail } });
-  await logActivity({ actorId: actor!.id, action: "club.contact_email_set", entityType: "club", entityId: club.id, clubId: club.id });
+  const current = await db.club.findUnique({ where: { id: v.clubId } });
+  if (!current) throw notFound("Club");
+  if (current.contactEmail === v.contactEmail) return current;
+
+  const club = await db.$transaction(async (tx) => {
+    const c = await tx.club.update({
+      where: { id: current.id },
+      data: { contactEmail: v.contactEmail, googleAccountVerifiedAt: null, googleAccountVerifiedById: null, googleCalendarId: null, googleDriveFolderId: null, googleChatSpaceId: null },
+    });
+    await tx.fileItem.updateMany({ where: { clubId: c.id, driveFileId: { not: null } }, data: { driveFileId: null } });
+    await tx.event.updateMany({ where: { clubId: c.id, googleEventId: { not: null } }, data: { googleEventId: null } });
+    await tx.conversation.updateMany({ where: { clubId: c.id, googleSpaceId: { not: null } }, data: { googleSpaceId: null } });
+    await resolveTasks("googleAccount", c.id, actor!.id, tx, "CANCELLED");
+    await logActivity({ actorId: actor!.id, action: "club.contact_email_set", entityType: "club", entityId: c.id, clubId: c.id }, tx);
+    return c;
+  });
+  // Like a department request: WSUSA is asked once they're involved (submission asks for founding clubs).
+  if (club.contactEmail && club.status !== "DRAFT" && club.status !== "CHANGES_REQUESTED") await openGoogleAccountCheck(club, actor!.id);
   return club;
+}
+
+async function openGoogleAccountCheck(club: Pick<Club, "id" | "name" | "contactEmail">, createdById: string) {
+  const open = await db.task.count({ where: { sourceType: "googleAccount", sourceId: club.id, status: "OPEN" } });
+  if (open) return;
+  await createTask({
+    kind: "APPROVAL",
+    title: `Verify ${club.name}'s Google account`,
+    description: `Confirm ${club.contactEmail} is the club's own Workspace account. Drive, Calendar and Chat sync run as it once you verify it.`,
+    assignee: { type: "ADMINS" },
+    clubId: club.id,
+    href: `/admin/clubs/${club.id}#google-account`,
+    source: { type: "googleAccount", id: club.id },
+    createdById,
+  });
+}
+
+const VerifyInput = z.object({ clubId: id, email: z.string().trim().toLowerCase().max(200), verified: z.boolean() });
+
+/**
+ * WSUSA confirms (or withdraws) that the club's Google account is the club's
+ * own, which is what lets Google sync act as it. `email` is the address the
+ * admin checked, so an address changed in the meantime is never verified.
+ */
+export async function setClubGoogleAccountVerified(actor: Actor | null, input: unknown) {
+  assertCan(actor, "admin.clubs");
+  const v = parseForm(VerifyInput, input);
+  const club = await db.club.findUnique({ where: { id: v.clubId }, select: { id: true, name: true, slug: true } });
+  if (!club) throw notFound("Club");
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.club.updateMany({
+      where: { id: club.id, contactEmail: v.email },
+      data: v.verified ? { googleAccountVerifiedAt: new Date(), googleAccountVerifiedById: actor.id } : { googleAccountVerifiedAt: null, googleAccountVerifiedById: null },
+    });
+    if (!claimed.count) throw conflict("The club's Google account changed since you opened this page. Reload to check the new address.");
+    if (v.verified) await resolveTasks("googleAccount", club.id, actor.id, tx);
+    await logActivity({ actorId: actor.id, action: v.verified ? "club.google_account_verified" : "club.google_account_unverified", entityType: "club", entityId: club.id, clubId: club.id }, tx);
+  });
+  if (v.verified) {
+    await notify({
+      userIds: await clubLeaderIds(club.id, ["PRESIDENT", "VP", "ADVISOR"]),
+      kind: "club.google_account_verified",
+      title: `WSUSA verified ${club.name}'s Google account`,
+      body: "When Google sync is on, the club's Drive, Calendar and Chat copies run as this account.",
+      href: `/clubs/${club.slug}/manage/settings`,
+      email: false,
+    });
+  }
+  return { verified: v.verified };
 }
 
 /** Co-host requests from other clubs land on this club's calendar without a leader's approval. */
@@ -463,13 +540,17 @@ export async function submitForReview(actor: Actor | null, clubId: string) {
   const club = await db.club.findUnique({ where: { id: String(clubId) } });
   if (!club) throw notFound("Club");
   if (club.status !== "DRAFT" && club.status !== "CHANGES_REQUESTED") throw conflict(club.status === "SUBMITTED" ? "This club is already with WSUSA for review." : "This club can't be submitted for review.");
+  // Drafts don't hold names, so another club may have taken this one since.
+  await assertNameFree(club.name, club.id);
   const check = await foundingChecklist(club.id);
   if (!check.ready) throw invalid(`Almost there — before submitting: ${check.missing.join("; ")}.`);
 
   const resubmission = club.status === "CHANGES_REQUESTED";
   const now = new Date();
   await db.$transaction(async (tx) => {
-    await tx.club.update({ where: { id: club.id }, data: { status: "SUBMITTED", submittedAt: now } });
+    // Claim the transition, so a double submit can't file two reviews.
+    const claimed = await tx.club.updateMany({ where: { id: club.id, status: club.status }, data: { status: "SUBMITTED", submittedAt: now } });
+    if (!claimed.count) throw conflict("This club is already with WSUSA for review.");
     await tx.clubDecision.create({ data: { clubId: club.id, action: "SUBMITTED", byId: actor!.id, note: resubmission ? "Resubmitted with changes" : null } });
     await createTask(
       {
@@ -487,6 +568,7 @@ export async function submitForReview(actor: Actor | null, clubId: string) {
     await logActivity({ actorId: actor!.id, action: resubmission ? "club.resubmitted" : "club.submitted", entityType: "club", entityId: club.id, clubId: club.id }, tx);
   });
   if (club.requestedDepartmentName && !club.departmentId) await openDepartmentRequest(club, actor!.id);
+  if (club.contactEmail && !club.googleAccountVerifiedAt) await openGoogleAccountCheck(club, actor!.id);
   await notifyAdmins({
     kind: "club.submitted",
     title: `${club.name} ${resubmission ? "was resubmitted" : "was submitted"} for review`,
@@ -542,16 +624,22 @@ export async function decideClub(actor: Actor | null, input: unknown) {
     }
     const advisors = await db.roleAssignment.count({ where: { clubId: club.id, role: "ADVISOR", endedAt: null } });
     if (!advisors) throw invalid("This club no longer has an advisor. Request changes so the founders can invite one.");
+    await assertNameFree(club.name, club.id);
   }
 
   const now = new Date();
   await db.$transaction(async (tx) => {
-    await tx.club.update({ where: { id: club.id }, data: { status: d.status, ...(v.decision === "APPROVE" && !club.approvedAt ? { approvedAt: now } : {}) } });
+    // Claim the decision, so two admins deciding at once can't both write one.
+    const claimed = await tx.club.updateMany({ where: { id: club.id, status: "SUBMITTED" }, data: { status: d.status, ...(v.decision === "APPROVE" && !club.approvedAt ? { approvedAt: now } : {}) } });
+    if (!claimed.count) throw conflict("This club isn't waiting for review — someone may have decided it already.");
     await tx.clubDecision.create({ data: { clubId: club.id, action: d.action, note: v.note, byId: actor.id } });
     await resolveTasks("club", club.id, actor.id, tx);
     await logActivity({ actorId: actor.id, action: `club.${d.status.toLowerCase()}`, entityType: "club", entityId: club.id, clubId: club.id, data: { note: v.note }, isPublic: v.decision === "APPROVE" }, tx);
   });
-  if (v.decision !== "APPROVE") await resolveTasks("departmentRequest", club.id, actor.id, db, "CANCELLED");
+  if (v.decision !== "APPROVE") {
+    await resolveTasks("departmentRequest", club.id, actor.id, db, "CANCELLED");
+    await resolveTasks("googleAccount", club.id, actor.id, db, "CANCELLED");
+  }
 
   const title =
     v.decision === "APPROVE"
@@ -605,9 +693,12 @@ export async function addDepartmentForClub(actor: Actor | null, clubId: string, 
 // ─── Retire & reinstate ──────────────────────────────────────────────────────
 
 /**
- * Retires a club: roles end (CLUB_RETIRED), members become alumni, future
- * meetings are cancelled, open requests close. History, files and role
- * history stay. Presidents, advisors and admins (access.canRetire).
+ * Retires a club: roles end (CLUB_RETIRED) — for a College Ambassadors org,
+ * its placements in other clubs too — members become alumni, future meetings
+ * are cancelled, open requests close (funding withdrawn, pending documents
+ * superseded, their tasks cancelled). Approved invoices and review moderation
+ * stay open for WSUSA. History, files and role history stay. Presidents,
+ * advisors and admins (access.canRetire).
  */
 export async function retireClub(actor: Actor | null, input: unknown) {
   assertSignedIn(actor);
@@ -624,14 +715,24 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   const members = await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE" }, select: { userId: true } });
   const now = new Date();
   await db.$transaction(async (tx) => {
-    await tx.roleAssignment.updateMany({ where: { clubId: club.id, endedAt: null }, data: { endedAt: now, endReason: "CLUB_RETIRED" } });
+    // Claim the transition first, so a double retire can't write two decisions.
+    const claimed = await tx.club.updateMany({ where: { id: club.id, status: { not: "RETIRED" } }, data: { status: "RETIRED", retiredAt: now, retiredReason: v.reason } });
+    if (!claimed.count) throw conflict("This club is already retired.");
     // endedAt = retiredAt marks who retirement moved, so a reinstatement can bring exactly them back.
+    await tx.roleAssignment.updateMany({ where: { OR: [{ clubId: club.id }, { viaClubId: club.id }], endedAt: null }, data: { endedAt: now, endReason: "CLUB_RETIRED" } });
     await tx.membership.updateMany({ where: { clubId: club.id, status: "ACTIVE" }, data: { status: "ALUMNI", endedAt: now } });
     await tx.membership.updateMany({ where: { clubId: club.id, status: "PENDING" }, data: { status: "DECLINED", endedAt: now } });
     await tx.eventOccurrence.updateMany({ where: { event: { clubId: club.id }, status: "SCHEDULED", startsAt: { gt: now } }, data: { status: "CANCELLED", note: "Cancelled — the club retired." } });
     await tx.advisorInvite.updateMany({ where: { clubId: club.id, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
-    await tx.task.updateMany({ where: { clubId: club.id, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now, completedById: actor.id } });
-    await tx.club.update({ where: { id: club.id }, data: { status: "RETIRED", retiredAt: now, retiredReason: v.reason } });
+    // Requests WSUSA hasn't decided close with the club, so nothing gets approved for a retired club.
+    await tx.fundingRequest.updateMany({ where: { clubId: club.id, status: "SUBMITTED" }, data: { status: "WITHDRAWN", decidedAt: now, decidedById: null, decisionNote: "The club retired." } });
+    await tx.clubDocument.updateMany({ where: { clubId: club.id, status: "PENDING_APPROVAL" }, data: { status: "SUPERSEDED", decidedAt: now } });
+    // Approved money still has to be paid out, and review moderation isn't the club's to close.
+    // (sourceType: null is spelled out: SQL's NOT IN never matches the club's own to-dos, which have no source.)
+    await tx.task.updateMany({
+      where: { clubId: club.id, status: "OPEN", OR: [{ sourceType: null }, { sourceType: { notIn: ["invoice", "reviewFlag", "reviewBombing"] } }] },
+      data: { status: "CANCELLED", completedAt: now, completedById: actor.id },
+    });
     await tx.clubDecision.create({ data: { clubId: club.id, action: "RETIRED", note: v.reason, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.retired", entityType: "club", entityId: club.id, clubId: club.id, data: { reason: v.reason, previousStatus: club.status }, isPublic: true }, tx);
   });
@@ -656,22 +757,33 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
   const retiredAt = club.retiredAt;
   const status: ClubStatus = club.approvedAt ? "APPROVED" : "DRAFT";
 
-  const [roles, memberships] = await Promise.all([
-    db.roleAssignment.findMany({ where: { clubId: club.id, endReason: "CLUB_RETIRED", endedAt: retiredAt, user: { status: "ACTIVE" } }, orderBy: { startedAt: "asc" } }),
+  const [ended, memberships] = await Promise.all([
+    // The club's own roles, plus (for an ambassador org) its placements in clubs that are still running.
+    db.roleAssignment.findMany({
+      where: { OR: [{ clubId: club.id }, { viaClubId: club.id, club: { status: "APPROVED" } }], endReason: "CLUB_RETIRED", endedAt: retiredAt, user: { status: "ACTIVE" } },
+      orderBy: { startedAt: "asc" },
+    }),
     db.membership.findMany({ where: { clubId: club.id, status: "ALUMNI", endedAt: retiredAt, user: { status: "ACTIVE" } }, select: { id: true, userId: true } }),
   ]);
+  // A placement only comes back if its ambassador is still a member of that club.
+  const placements = ended.filter((r) => r.clubId !== club.id);
+  const stillMembers = placements.length
+    ? await db.membership.findMany({ where: { status: "ACTIVE", OR: placements.map((r) => ({ userId: r.userId, clubId: r.clubId })) }, select: { userId: true, clubId: true } })
+    : [];
+  const roles = ended.filter((r) => r.clubId === club.id || stillMembers.some((m) => m.userId === r.userId && m.clubId === r.clubId));
   await db.$transaction(async (tx) => {
-    await tx.club.update({ where: { id: club.id }, data: { status, retiredAt: null, retiredReason: null } });
+    const claimed = await tx.club.updateMany({ where: { id: club.id, status: "RETIRED" }, data: { status, retiredAt: null, retiredReason: null } });
+    if (!claimed.count) throw conflict("Only retired clubs can be reinstated.");
     await tx.membership.updateMany({ where: { id: { in: memberships.map((m) => m.id) } }, data: { status: "ACTIVE", endedAt: null } });
     await tx.clubDecision.create({ data: { clubId: club.id, action: "REINSTATED", note: v.note, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.reinstated", entityType: "club", entityId: club.id, clubId: club.id, data: { status, restoredRoles: roles.length, restoredMembers: memberships.length }, isPublic: true }, tx);
   });
   // Leaders get their seats back as new assignments, so the role history shows the gap.
   for (const r of roles) {
-    await grantRole({ clubId: club.id, userId: r.userId, role: r.role, positionId: r.positionId, permissions: r.permissions, viaClubId: r.viaClubId, assignedById: actor.id });
+    await grantRole({ clubId: r.clubId, userId: r.userId, role: r.role, positionId: r.positionId, permissions: r.permissions, viaClubId: r.viaClubId, assignedById: actor.id });
   }
   await notify({
-    userIds: memberships.map((m) => m.userId).filter((u) => !roles.some((r) => r.userId === u)),
+    userIds: memberships.map((m) => m.userId).filter((u) => !roles.some((r) => r.clubId === club.id && r.userId === u)),
     kind: "club.reinstated",
     title: `${club.name} is back`,
     body: v.note ?? "WSUSA reinstated the club, and your membership is active again.",

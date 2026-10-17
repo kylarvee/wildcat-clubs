@@ -347,7 +347,14 @@ export function buildGovernance(ctx: Ctx) {
         resolvedAt = when;
       }
     }
-    ctx.rows.testAssignments.push({ id: ctx.id(), testId: quizId, userId: m.userId, cycleKey: "once", dueAt: closesAt, status, createdAt: joined, resolvedAt });
+    const assignmentId = ctx.id();
+    ctx.rows.testAssignments.push({ id: assignmentId, testId: quizId, userId: m.userId, cycleKey: "once", dueAt: closesAt, status, createdAt: joined, resolvedAt });
+    // The inbox task tests.syncAssignments opens with every assignment (closed once they pass).
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "REQUIREMENT", title: "Take: Event Safety Quiz", description: `Assigned by ${robotics.name}.`, assigneeType: "USER", assigneeId: m.userId,
+      clubId: robotics.id, href: `/tests/${quizId}`, dueAt: closesAt, status: status === "COMPLETED" ? "DONE" : "OPEN", sourceType: "testAssignment", sourceId: assignmentId,
+      createdAt: joined, completedAt: resolvedAt, completedById: resolvedAt ? m.userId : null,
+    });
   }
 
   // ─── Funding Rules Refresher (open to anyone) ──────────────────────────────
@@ -364,6 +371,19 @@ export function buildGovernance(ctx: Ctx) {
   for (const u of rng.sample(treasurers, 14)) {
     const when = addDays(fundCreated, rng.float(1, 38));
     attempt(ctx, { testId: fundId, questions: fundQs, userId: u, cycleKey: "once", submittedAt: when, outcome: rng.chance(0.85) ? "pass" : "fail", limitMinutes: null, passing: 70, graderId: null });
+  }
+
+  // Attempts with written answers waiting on a grader get the inbox task tests.finishAttempt opens.
+  for (const a of ctx.rows.attempts.filter((x) => x.status === "NEEDS_REVIEW")) {
+    const test = ctx.rows.tests.find((t) => t.id === a.testId)!;
+    const club = test.clubId ? ctx.clubById.get(test.clubId)! : null;
+    const pending = ctx.rows.answers.filter((x) => x.attemptId === a.id && x.text && x.pointsAwarded == null).length;
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: `Grade: ${test.title} — ${ctx.person(a.userId).name}`, description: `${pending} written answer${pending === 1 ? "" : "s"} to review.`,
+      assigneeType: club ? "CLUB" : "ADMINS", clubId: club?.id ?? null, capability: club ? "tests" : null,
+      href: club ? `/clubs/${club.slug}/manage/tests/${test.id}/review/${a.id}` : `/admin/tests/${test.id}/review/${a.id}`,
+      status: "OPEN", sourceType: "testAttempt", sourceId: a.id as string, createdAt: a.submittedAt as Date,
+    });
   }
 }
 

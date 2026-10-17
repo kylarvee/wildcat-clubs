@@ -4,6 +4,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess } from "@/lib/authz";
+import { canViewEvent } from "@/lib/authz/events";
+import { periodStartFor } from "@/lib/authz/requirements";
 import { getConfig, type Config } from "@/lib/config";
 import { logActivity } from "@/lib/lake/activity";
 import { DomainError, assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -109,11 +111,21 @@ async function reviewProgressFor(userId: string, clubId: string | null) {
   return reviewEligibility(userId, clubId);
 }
 
-/** Closes the REQUIREMENT tasks this training check-in satisfies; returns their names. */
-async function resolveTrainingRequirements(userId: string, eventId: string, completedById: string | null) {
-  const reqs = await db.roleRequirement.findMany({ where: { active: true, kind: "TRAINING", trainingEventId: eventId }, select: { id: true, name: true } });
-  for (const r of reqs) await resolveTasks("requirement", requirementSourceId(r.id, userId), completedById);
-  return reqs.map((r) => r.name);
+/**
+ * Closes the REQUIREMENT tasks this training check-in satisfies; returns their names.
+ * A check-in from before the requirement's current renewal period doesn't count
+ * (lib/authz/requirements), e.g. a leader adding someone to last term's session.
+ */
+async function resolveTrainingRequirements(userId: string, eventId: string, checkedInAt: Date, completedById: string | null) {
+  const reqs = await db.roleRequirement.findMany({ where: { active: true, kind: "TRAINING", trainingEventId: eventId }, select: { id: true, name: true, renewal: true } });
+  const now = new Date();
+  const met: string[] = [];
+  for (const r of reqs) {
+    if (checkedInAt < (await periodStartFor(r.renewal, now))) continue;
+    await resolveTasks("requirement", requirementSourceId(r.id, userId), completedById);
+    met.push(r.name);
+  }
+  return met;
 }
 
 function isUniqueViolation(e: unknown) {
@@ -123,7 +135,12 @@ function isUniqueViolation(e: unknown) {
 // ─── Preview (no side effects) ──────────────────────────────────────────────
 
 export type CheckinPreview =
-  | { found: false; message: string }
+  | {
+      found: false;
+      message: string;
+      /** The code is real, but this viewer may not see the event (yet): log in, or scan the QR at the event. */
+      hidden?: boolean;
+    }
   | {
       found: true;
       occurrence: OccurrenceSummary;
@@ -170,13 +187,27 @@ export async function checkinPreview(actor: Actor | null, rawCode: string, token
     } else scan = "EXPIRED";
   }
 
+  const existing = actor
+    ? await db.attendance.findUnique({ where: { occurrenceId_userId: { occurrenceId: occ.id, userId: actor.id } }, select: { method: true, checkedInAt: true } })
+    : null;
+  // A code alone doesn't show the event: unless you scanned the live QR (you're
+  // in the room) or are already on the list, its title, time and place follow
+  // the event-visibility rule, so members-only details stay with members.
+  const gate = { ...occ.event, cohosts: occ.event.cohosts.map((c) => ({ clubId: c.club.id, status: "APPROVED" })) };
+  if (scan !== "LIVE" && !existing && !(await canViewEvent(actor, gate))) {
+    return {
+      found: false,
+      hidden: true,
+      message: actor
+        ? "This event is for its clubs' members. If you're there, scan the QR code on the screen to check in."
+        : "This event isn't public. Log in to see it and check in.",
+    };
+  }
+
   const base = { found: true as const, occurrence, signedIn: Boolean(actor), pass, scan };
   if (!actor) return { ...base, existing: null, membership: "NONE", ready: false, blocker: null };
 
-  const [existing, membership] = await Promise.all([
-    db.attendance.findUnique({ where: { occurrenceId_userId: { occurrenceId: occ.id, userId: actor.id } }, select: { method: true, checkedInAt: true } }),
-    membershipState(actor, hostClubId(occ)),
-  ]);
+  const membership = await membershipState(actor, hostClubId(occ));
   const done = (blocker: string | null) => ({ ...base, existing, membership, ready: blocker === null && !existing, blocker });
   if (existing) return done(null);
   if (occurrence.cancelled) return done("This event was cancelled, so check-in is closed.");
@@ -270,7 +301,7 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
     }
   }
 
-  const requirementsMet = await resolveTrainingRequirements(actor.id, occ.event.id, actor.id);
+  const requirementsMet = await resolveTrainingRequirements(actor.id, occ.event.id, attendance.checkedInAt, actor.id);
   await logActivity({
     actorId: actor.id,
     action: "attendance.checkin",
@@ -327,7 +358,7 @@ export async function addManual(actor: Actor | null, occurrenceId: string, userI
     throw e;
   }
 
-  const requirementsMet = await resolveTrainingRequirements(person.id, occ.event.id, leader.id);
+  const requirementsMet = await resolveTrainingRequirements(person.id, occ.event.id, checkedInAt, leader.id);
   await logActivity({
     actorId: leader.id,
     action: "attendance.manual_add",

@@ -4,7 +4,7 @@ import { describeRecurrence } from "@/lib/events/summary";
 import { fromFakeUtc, fromInputs, toDateInput, toFakeUtc, toTimeInput, toWallClockIso } from "@/lib/events/wallclock";
 import { defaultFundingSource } from "@/lib/funding/defaults";
 import { toSchedule, whenFrom } from "@/components/events/when";
-import { campusDate } from "@/lib/time";
+import { campusDate, fmtRange } from "@/lib/time";
 
 describe("event links", () => {
   it("round-trips links through the description", () => {
@@ -82,5 +82,21 @@ describe("defaultFundingSource", () => {
     expect(defaultFundingSource({ type: "SPONSORED", departmentId: "d1" })).toBe("DEPARTMENT");
     expect(defaultFundingSource({ type: "AFFILIATE", departmentId: null })).toBe("WSUSA");
     expect(defaultFundingSource(null)).toBe("UNIVERSITY");
+  });
+});
+
+describe("fmtRange", () => {
+  it("names AM and PM on the start when a same-day event crosses noon", () => {
+    expect(fmtRange(campusDate(2026, 10, 17, 10, 0), campusDate(2026, 10, 17, 14, 0))).toBe("Sat, Oct 17 · 10:00 AM – 2:00 PM");
+  });
+  it("names the half of the day once when both ends share it", () => {
+    expect(fmtRange(campusDate(2026, 10, 16, 18, 30), campusDate(2026, 10, 16, 20, 0))).toBe("Fri, Oct 16 · 6:30 – 8:00 PM");
+  });
+  it("shows a one-day all-day event as one day (the end is the next midnight)", () => {
+    expect(fmtRange(campusDate(2026, 10, 20), campusDate(2026, 10, 21), true)).toBe("Tue, Oct 20 · All day");
+    expect(fmtRange(campusDate(2027, 3, 14), campusDate(2027, 3, 15), true)).toBe("Sun, Mar 14 · All day");
+  });
+  it("shows the last day of a multi-day all-day range", () => {
+    expect(fmtRange(campusDate(2026, 10, 20), campusDate(2026, 10, 23), true)).toBe("Oct 20 – Oct 22");
   });
 });

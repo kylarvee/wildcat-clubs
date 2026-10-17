@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth/session";
-import { apiRoute, invalid } from "@/lib/domain/kit";
+import { apiRoute, assertSignedIn, invalid } from "@/lib/domain/kit";
 import { fileUrl, uploadFile } from "@/lib/domain/files";
+import { readUploadForm } from "@/lib/files/upload";
 import { z } from "zod";
 
 const Visibility = z.enum(["INHERIT", "PUBLIC", "MEMBERS", "LEADERS"]).optional();
@@ -13,8 +14,9 @@ const Scope = z.enum(["club", "user", "university"]).default("club");
 export async function POST(req: Request) {
   return apiRoute(async () => {
     const actor = await getCurrentUser();
-    const form = await req.formData().catch(() => null);
-    if (!form) throw invalid("That upload didn't arrive in one piece. Please try again.");
+    // Before reading the body, so signed-out requests can't make us buffer it.
+    assertSignedIn(actor);
+    const form = await readUploadForm(req);
     const file = form.get("file");
     if (!(file instanceof File)) throw invalid("No file was attached.");
     const scope = Scope.catch("club").parse(form.get("scope") ?? undefined);
@@ -24,7 +26,6 @@ export async function POST(req: Request) {
       actor,
       {
         name: file.name,
-        mimeType: file.type,
         bytes: Buffer.from(await file.arrayBuffer()),
         scope,
         clubId: (form.get("clubId") as string) || null,

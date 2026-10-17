@@ -1,9 +1,10 @@
 import "server-only";
 import { cache } from "react";
-import type { Prisma, Visibility } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { isAdmin, ROLE_RANK, type ClubAccess } from "@/lib/authz";
+import { visibleEventsWhere } from "@/lib/authz/events";
 import { canViewFile } from "@/lib/domain/files";
 import { clubListMetrics, type ClubListMetrics } from "@/lib/metrics";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL } from "@/components/clubs/labels";
@@ -347,25 +348,19 @@ export async function upcomingPublicEvents({ days = 14, limit = 6 }: { days?: nu
   return rows.map((o) => toUpcoming(o, now));
 }
 
-/** Visibility levels this viewer may see on a club's events. */
-function visibleLevels(viewer: Actor | null, access: ClubAccess | null): Visibility[] {
-  const levels: Visibility[] = ["PUBLIC"];
-  if (viewer) levels.push("UNIVERSITY");
-  if (access?.isMember || access?.isLeader) levels.push("MEMBERS");
-  return levels;
-}
-
-/** A club's next events (hosted or co-hosted), filtered to what the viewer may see. */
-export async function clubUpcomingEvents(clubId: string, viewer: Actor | null, access: ClubAccess | null, limit = 5): Promise<UpcomingEvent[]> {
+/**
+ * A club's next events (hosted or co-hosted), filtered by THE event-visibility
+ * rule (lib/authz/events) — so a member of the host club also sees its
+ * members-only events on a co-host's page, as on every calendar.
+ */
+export async function clubUpcomingEvents(clubId: string, viewer: Actor | null, limit = 5): Promise<UpcomingEvent[]> {
   const now = new Date();
   const rows = await db.eventOccurrence.findMany({
     where: {
       status: "SCHEDULED",
       endsAt: { gte: now },
       event: {
-        status: "SCHEDULED",
-        visibility: { in: visibleLevels(viewer, access) },
-        OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }],
+        AND: [{ status: "SCHEDULED", OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }] }, await visibleEventsWhere(viewer)],
       },
     },
     orderBy: { startsAt: "asc" },

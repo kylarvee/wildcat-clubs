@@ -6,7 +6,7 @@ const octets = (s: string) => new TextEncoder().encode(s).length;
 
 describe("escapeText", () => {
   it("escapes backslashes, semicolons, commas and newlines", () => {
-    expect(escapeText("a\\b;c,d\ne")).toBe("a\\\\b\;c\\,d\\ne");
+    expect(escapeText("a\\b;c,d\ne")).toBe("a\\\\b\\;c\\,d\\ne");
   });
   it("normalizes CRLF and CR to \\n", () => {
     expect(escapeText("one\r\ntwo\rthree")).toBe("one\\ntwo\\nthree");
@@ -121,7 +121,7 @@ describe("buildCalendar", () => {
     expect(lines[0]).toBe("BEGIN:VCALENDAR");
     expect(lines).toContain("VERSION:2.0");
     expect(lines.some((l) => l.startsWith("PRODID:"))).toBe(true);
-    expect(lines).toContain("X-WR-CALNAME:Wildcat Clubs\\, Robotics\; Club");
+    expect(lines).toContain("X-WR-CALNAME:Wildcat Clubs\\, Robotics\\; Club");
     expect(lines).toContain("X-WR-TIMEZONE:America/Denver");
     expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2);
     expect(ics.match(/END:VEVENT/g)).toHaveLength(2);
@@ -130,5 +130,13 @@ describe("buildCalendar", () => {
 
   it("keeps every physical line within 75 octets", () => {
     for (const l of ics.split(CRLF)) expect(octets(l)).toBeLessThanOrEqual(75);
+  });
+
+  it("always carries the campus VTIMEZONE, so a feed with no events still has a component", () => {
+    const empty = buildCalendar({ name: "Quiet Club", events: [] }).split(CRLF);
+    expect(empty).toContain("BEGIN:VTIMEZONE");
+    expect(empty).toContain("TZID:America/Denver");
+    expect(empty).toContain("END:VTIMEZONE");
+    expect(empty.indexOf("END:VTIMEZONE")).toBeLessThan(empty.indexOf("END:VCALENDAR"));
   });
 });

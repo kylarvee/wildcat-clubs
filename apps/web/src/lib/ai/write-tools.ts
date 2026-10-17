@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { can, CAPABILITIES, getClubAccess, ROLE_LABEL, type Capability } from "@/lib/authz";
 import { joinClub, subscribeCalendar, unsubscribeCalendar } from "@/lib/domain/memberships";
 import { addPersonalTask } from "@/lib/domain/tasks";
+import { updateProfile } from "@/lib/domain/profiles";
 import { addIdea, createEvent, type CreateEventInput } from "@/lib/domain/events";
 import { createClub } from "@/lib/domain/clubs";
 import { inviteAdvisor } from "@/lib/domain/advisors";
@@ -17,6 +18,7 @@ import { KIND_LABEL, VISIBILITY_HINT, VISIBILITY_LABEL, roomLabel } from "@/lib/
 import { describeRecurrence } from "@/lib/events/summary";
 import { expandOccurrences } from "@/lib/events/recurrence";
 import { isHttpUrl } from "@/lib/events/links";
+import { googleCalendarReady } from "@/lib/integrations/google-calendar";
 import { getTerms } from "@/lib/terms";
 import { campusDate, fmtDate, fmtRange } from "@/lib/time";
 import { parseCampusLocal } from "@/lib/roles/datetime";
@@ -188,6 +190,111 @@ const addTaskTool = writeTool({
   },
 });
 
+// ─── update_my_profile ──────────────────────────────────────────────────────
+
+const updateProfileTool = writeTool({
+  name: "update_my_profile",
+  running: "Preparing your profile changes",
+  description:
+    "Change the basics of the person's own profile (the same as Settings → Profile): headline, About, pronouns, LinkedIn link, and majors, minors and class year (students) or title (faculty/staff). Pass only the fields they want changed; everything else stays as it is. Check my_profile first. The card shows each change. Needs confirmation.",
+  schema: z.object({
+    headline: z.string().max(120).optional().describe("One line shown under their name; \"\" clears it"),
+    about: z.string().max(5000).optional().describe("Plain text that replaces their whole About section; a blank line starts a new paragraph; \"\" clears it"),
+    pronouns: z.string().max(30).optional().describe("e.g. \"she/her\"; \"\" clears it"),
+    linkedin_url: z.string().max(300).optional().describe("Their LinkedIn profile link, e.g. https://www.linkedin.com/in/their-name; \"\" clears it"),
+    majors: z
+      .array(z.object({ name: z.string().min(1).max(120).describe("Major name from Weber State's list (directory_lookup kind major)"), minor: z.boolean().optional().describe("true for a minor") }))
+      .max(8)
+      .optional()
+      .describe("Students only: the complete list of majors and minors after the change, including the ones they keep; [] clears it"),
+    class_year: z.number().int().min(1950).max(2100).nullable().optional().describe("Students only: expected graduation year; null clears it"),
+    job_title: z.string().max(120).optional().describe("Faculty/staff only: their title, e.g. \"Associate Professor of Computer Science\"; \"\" clears it"),
+  }),
+  async prepare({ actor }, input) {
+    if (actor.status === "ALUMNI") throw new ToolError("Their profile was retired when they graduated, so it can't be changed.");
+    const student = actor.kind === "STUDENT";
+    if (!student && (input.majors || input.class_year !== undefined)) throw new ToolError("Majors, minors and class year are for student accounts. Faculty and staff can set a title instead.");
+    if (student && input.job_title !== undefined) throw new ToolError("Titles are for faculty and staff accounts. Students list majors, minors and a class year instead.");
+    const u = await db.user.findUnique({
+      where: { id: actor.id },
+      select: {
+        name: true,
+        handle: true,
+        pronouns: true,
+        headline: true,
+        aboutHtml: true,
+        jobTitle: true,
+        classYear: true,
+        linkedinUrl: true,
+        avatarUrl: true,
+        majors: { select: { majorId: true, isMinor: true, major: { select: { name: true } } } },
+      },
+    });
+    if (!u) throw new ToolError("Their account wasn't found.");
+
+    // updateProfile saves every field, so start from what's there and change only what was asked.
+    const text = (given: string | undefined, current: string | null) => (given === undefined ? current : given.trim() || null);
+    const next = {
+      pronouns: text(input.pronouns, u.pronouns),
+      headline: text(input.headline, u.headline),
+      aboutHtml: input.about === undefined ? u.aboutHtml : textToHtml(input.about),
+      linkedinUrl: text(input.linkedin_url, u.linkedinUrl),
+      jobTitle: text(input.job_title, u.jobTitle),
+      classYear: input.class_year === undefined ? u.classYear : input.class_year,
+    };
+    let majors = u.majors.map((m) => ({ majorId: m.majorId, isMinor: m.isMinor, name: m.major.name }));
+    if (input.majors) {
+      majors = [];
+      for (const m of input.majors) {
+        const found = await findMajor(m.name);
+        if (!found) throw new ToolError(`“${m.name.trim()}” doesn't match one major on Weber State's list. Look up the exact name with directory_lookup (kind major).`);
+        if (majors.some((x) => x.majorId === found.id)) throw new ToolError(`${found.name} is listed twice. List each major or minor once.`);
+        majors.push({ majorId: found.id, isMinor: Boolean(m.minor), name: found.name });
+      }
+    }
+
+    const changes: string[] = [];
+    const changed: string[] = [];
+    const line = (field: string, label: string, before: string | null, after: string | null) => {
+      if ((before ?? "") === (after ?? "")) return;
+      changed.push(field);
+      changes.push(!after ? `${label}: cleared (was ${quote(before!, 60)}).` : before ? `${label}: ${quote(before, 60)} → ${quote(after, 80)}.` : `${label}: ${quote(after, 80)}.`);
+    };
+    line("headline", "Headline", u.headline, next.headline);
+    line("pronouns", "Pronouns", u.pronouns, next.pronouns);
+    if (student) {
+      const list = (ms: { name: string; isMinor: boolean }[]) =>
+        [...ms]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((m) => `${m.name} (${m.isMinor ? "minor" : "major"})`)
+          .join(", ");
+      line("majors", "Majors and minors", list(u.majors.map((m) => ({ name: m.major.name, isMinor: m.isMinor }))) || null, list(majors) || null);
+      line("class_year", "Class of", u.classYear?.toString() ?? null, next.classYear?.toString() ?? null);
+    } else line("job_title", "Title", u.jobTitle, next.jobTitle);
+    line("linkedin_url", "LinkedIn", u.linkedinUrl, next.linkedinUrl);
+    const about = input.about?.trim() ?? "";
+    if (input.about !== undefined && (next.aboutHtml ?? "") !== (u.aboutHtml ?? "")) {
+      changed.push("about");
+      changes.push(about ? `About: ${u.aboutHtml ? "your whole About section is replaced with" : "set to"} the text below.` : "About: cleared.");
+    }
+    if (!changes.length) throw new ToolError("Their profile already says that, so there's nothing to change.");
+
+    return {
+      card: {
+        title: "Update your profile",
+        details: [...changes, "Signed-in Weber State accounts can see your profile. You can change it any time in Settings."],
+        ...(about && changed.includes("about") ? { preview: { label: "About", text: about } } : {}),
+        confirmLabel: "Save profile",
+      },
+      async execute() {
+        const r = await updateProfile(actor, { name: u.name, avatarUrl: u.avatarUrl, ...next, majors: student ? majors.map(({ majorId, isMinor }) => ({ majorId, isMinor })) : [] });
+        const href = `/u/${r.handle}`;
+        return { data: { result: "profile updated", changed, profile: href }, outcome: "Saved your profile.", href, revalidate: [href, "/settings"] };
+      },
+    };
+  },
+});
+
 // ─── add_event_idea ─────────────────────────────────────────────────────────
 
 const addIdeaTool = writeTool({
@@ -257,7 +364,7 @@ const createEventTool = writeTool({
         room: z.string().max(60).optional(),
         address: z.string().max(300).optional().describe("Street address (type address)"),
         link: z.string().max(1000).optional().describe("Join link starting with https:// (type online)"),
-        google_meet: z.boolean().optional().describe("Ask Google Calendar for a Meet link (type online)"),
+        google_meet: z.boolean().optional().describe("Ask Google Calendar for a Meet link (type online; only works while the club's Google Calendar sync is on)"),
       })
       .optional()
       .describe("Default: to be decided"),
@@ -289,6 +396,7 @@ const createEventTool = writeTool({
     // Location, resolved the way the Events Builder stores it.
     const loc = input.location ?? { type: "tbd" as const };
     let where = "Location to be decided";
+    let meetNote: string | null = null;
     const location: Pick<CreateEventInput, "locationType" | "buildingId" | "room" | "address" | "virtualUrl" | "createMeetLink"> = { locationType: "TBD", createMeetLink: false };
     if (loc.type === "campus") {
       if (!loc.building) throw new ToolError("Which campus building? (Or use an address or online.)");
@@ -304,7 +412,13 @@ const createEventTool = writeTool({
       if (link && !isHttpUrl(link)) throw new ToolError("The online link needs to be a full link starting with https://.");
       if (!link && !loc.google_meet) throw new ToolError("Online events need the join link, or ask for a Google Meet link.");
       Object.assign(location, { locationType: "VIRTUAL", virtualUrl: link || null, createMeetLink: Boolean(loc.google_meet && !link) });
-      where = link ? `Online (${link})` : "Online — a Google Meet link is added when Google Calendar sync is on";
+      if (link) where = `Online (${link})`;
+      else {
+        // A Meet link is only made while this save mirrors to Google; the request isn't kept for later.
+        const ready = await googleCalendarReady(club.id);
+        where = ready.live ? "Online — a Google Meet link is created when the event is saved" : "Online, with no join link yet";
+        if (!ready.live) meetNote = `A Google Meet link can't be made yet. ${ready.reason ?? "Google Calendar sync is off."} Add a join link in the Events Builder before the event.`;
+      }
     }
 
     const visibility: Visibility = input.visibility === "university" ? "UNIVERSITY" : input.visibility === "members" ? "MEMBERS" : "PUBLIC";
@@ -346,6 +460,7 @@ const createEventTool = writeTool({
         details: [
           when,
           `Where: ${where}.`,
+          ...(meetNote ? [meetNote] : []),
           `Who can see it: ${VISIBILITY_LABEL[visibility]} — ${VISIBILITY_HINT[visibility]}`,
           `Type: ${KIND_LABEL[kind]}. Self check-in: ${allowSelfCheckIn ? "on for members" : "off (QR code or leaders only)"}.`,
           ...(input.description?.trim() ? ["Includes the description you gave."] : []),
@@ -356,8 +471,17 @@ const createEventTool = writeTool({
       async execute() {
         const r = await createEvent(actor, event);
         const google = r.google.status === "failed" ? ` Google Calendar didn't update${r.google.message ? `: ${r.google.message}` : ""}.` : "";
+        // Google makes the Meet link only during a sync that succeeds (sync off or failed → no link).
+        const noJoinLink = location.createMeetLink && r.google.status !== "synced";
         return {
-          data: { result: "event created", event_id: r.id, meetings: meetings.length, link: `/events/${r.id}`, google_calendar: r.google.status },
+          data: {
+            result: "event created",
+            event_id: r.id,
+            meetings: meetings.length,
+            link: `/events/${r.id}`,
+            google_calendar: r.google.status,
+            ...(noJoinLink ? { join_link: "none yet — they need to add one in the Events Builder before the event" } : {}),
+          },
           outcome: `Added ${quote(title, 60)} to ${club.name}'s calendar.${google}`,
           href: `/events/${r.id}`,
           revalidate: [`/clubs/${club.slug}`, `/clubs/${club.slug}/manage/events`, "/calendar", "/dashboard"],
@@ -638,6 +762,7 @@ export const WRITE_TOOLS = [
   subscribeTool,
   unsubscribeTool,
   addTaskTool,
+  updateProfileTool,
   addIdeaTool,
   createEventTool,
   postAnnouncementTool,

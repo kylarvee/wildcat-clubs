@@ -47,4 +47,6 @@ export const KEYS = {
   pushToken: 'wc.pushToken',
   /** "off" when the person switched notifications off on this phone. */
   notifications: 'wc.notifications',
+  /** A sign-out the server never heard about (offline), kept until it does. */
+  pendingSignOut: 'wc.pendingSignOut',
 } as const;

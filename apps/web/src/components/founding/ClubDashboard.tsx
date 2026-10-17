@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import type { Club } from "@prisma/client";
 import type { Capability, ClubAccess } from "@/lib/authz";
+import { getConfig } from "@/lib/config";
 import { db } from "@/lib/db";
 import { clubActivity } from "@/lib/metrics";
 import { DAY_MS, fmtLongDate, fmtRange } from "@/lib/time";
@@ -32,9 +33,9 @@ const TOOLS: { key: string; label: string; desc: string; icon: typeof Users; cap
 export async function ClubDashboard({ club, access }: { club: Club; access: ClubAccess }) {
   const now = new Date();
   const base = `/clubs/${club.slug}/manage`;
-  const [activity, members, pendingJoins, pendingCohosts, upcoming, tasks, taskCount] = await Promise.all([
+  const [activity, cfg, pendingJoins, pendingCohosts, upcoming, tasks, taskCount] = await Promise.all([
     clubActivity(club.id, now),
-    db.membership.count({ where: { clubId: club.id, status: "ACTIVE" } }),
+    getConfig(),
     db.membership.count({ where: { clubId: club.id, status: "PENDING" } }),
     db.eventCohost.count({ where: { clubId: club.id, status: "PENDING" } }),
     db.eventOccurrence.findMany({
@@ -51,6 +52,8 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
     db.task.count({ where: { clubId: club.id, status: "OPEN", assigneeType: "CLUB" } }),
   ]);
 
+  // Registered members come from lib/metrics (students only), so this matches the club page.
+  const members = activity.registeredMembers;
   const statusLabel = activity.inPilot ? "Pilot period" : activity.active ? "Active" : "Inactive";
   const statusHint = activity.inPilot && activity.pilotEndsAt ? `Counts as active through ${fmtLongDate(activity.pilotEndsAt)}` : activity.active ? "Meeting WSUSA's activity standard" : "Not meeting the activity standard yet";
   const next = upcoming[0];
@@ -59,7 +62,7 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Members" value={members} hint={pendingJoins ? `${pendingJoins} waiting to join` : "Registered members"} />
-        <Stat label="Active members" value={activity.activeMembers} hint="Attended in the last month or recent events" />
+        <Stat label="Active members" value={activity.activeMembers} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
         <Stat label="Next 30 days" value={upcoming.length} hint={next ? `Next: ${next.event.title}` : "No events scheduled"} />
         <Stat label="Open to-dos" value={taskCount} hint={taskCount ? "Waiting on your leaders" : "All caught up"} />
       </div>
@@ -74,7 +77,7 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
             />
             <CardBody className="space-y-2 text-sm">
               <p className="text-ink-2">
-                {activity.heldEventsCurrentTerm} event{activity.heldEventsCurrentTerm === 1 ? "" : "s"} held this term · {activity.heldEventsPreviousTerm} last term · {activity.registeredMembers || members} registered members
+                {activity.heldEventsCurrentTerm} event{activity.heldEventsCurrentTerm === 1 ? "" : "s"} held this term · {activity.heldEventsPreviousTerm} last term · {members} registered members
               </p>
               {activity.reasons.length ? (
                 <ul className="list-disc space-y-1 pl-5 text-ink-3">

@@ -22,8 +22,16 @@ import { leaveClubAction } from "@/app/clubs/[slug]/actions";
 
 export type MembershipView = { member: boolean; pending: boolean };
 
-export function loginHref(slug: string, register = false) {
-  return `/login?next=${encodeURIComponent(`/clubs/${slug}${register ? "?register=1" : ""}`)}`;
+/** Log in, then come back to the club page; `then` finishes the click there (?register=1 / ?subscribe=1). */
+export function loginHref(slug: string, then?: "register" | "subscribe") {
+  return `/login?next=${encodeURIComponent(`/clubs/${slug}${then ? `?${then}=1` : ""}`)}`;
+}
+
+/** Drop a hand-off flag from the address bar once it has been handled. */
+function stripParam(router: ReturnType<typeof useRouter>, name: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(name);
+  router.replace(url.pathname + url.search + url.hash, { scroll: false });
 }
 
 type RegisterProps = {
@@ -54,7 +62,7 @@ export function RegisterButton({ clubId, clubName, slug, gated, member, pending,
       const r = await registerClub(clubId);
       after?.();
       if (!r.ok) {
-        if (r.code === "UNAUTHENTICATED") router.push(loginHref(slug, true));
+        if (r.code === "UNAUTHENTICATED") router.push(loginHref(slug, "register"));
         toast.error(r.error);
         return;
       }
@@ -79,16 +87,12 @@ export function RegisterButton({ clubId, clubName, slug, gated, member, pending,
   useEffect(() => {
     if (!autoRegister || ran.current || !signedIn) return;
     ran.current = true;
-    const stripParam = () => {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("register");
-      router.replace(url.pathname + url.search + url.hash, { scroll: false });
-    };
+    const strip = () => stripParam(router, "register");
     if (member || pending) {
       toast(member ? `You're already a member of ${clubName}.` : "Your request is still waiting on a club leader.");
-      stripParam();
+      strip();
     } else {
-      register(stripParam);
+      register(strip);
     }
     // Runs once for the hand-off; later prop changes come from the server refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,7 +117,7 @@ export function RegisterButton({ clubId, clubName, slug, gated, member, pending,
   }
   if (!signedIn) {
     return (
-      <ButtonLink href={loginHref(slug, true)} size={size} className={className}>
+      <ButtonLink href={loginHref(slug, "register")} size={size} className={className}>
         <UserPlus className="h-4 w-4" aria-hidden="true" /> {label}
       </ButtonLink>
     );
@@ -138,23 +142,44 @@ type SubscribeProps = {
 };
 
 export function SubscribeToggle({ clubId, clubName, slug, subscribed, signedIn, variant = "button", className }: SubscribeProps) {
+  const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [on, setOn] = useOptimistic(subscribed);
   const id = useId();
+  const ran = useRef(false);
 
-  function toggle(next: boolean) {
+  function toggle(next: boolean, after?: () => void) {
     startTransition(async () => {
       setOn(next);
       const r = await setClubSubscription(clubId, next);
+      after?.();
       if (!r.ok) toast.error(r.error);
       else toast.success(next ? `${clubName} is on your calendar` : `${clubName} is off your calendar`);
     });
   }
 
+  // Signed-out visitors who clicked "Log in to add this calendar" come back with
+  // ?subscribe=1 (only the hero switch links there). Read from the URL so the page
+  // needn't pass it down.
+  useEffect(() => {
+    if (variant !== "switch" || !signedIn || ran.current) return;
+    if (new URLSearchParams(window.location.search).get("subscribe") !== "1") return;
+    ran.current = true;
+    const strip = () => stripParam(router, "subscribe");
+    if (subscribed) {
+      toast(`${clubName} is already on your calendar.`);
+      strip();
+    } else {
+      toggle(true, strip);
+    }
+    // Runs once for the hand-off; later prop changes come from the server refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant, signedIn]);
+
   if (variant === "switch") {
     if (!signedIn) {
       return (
-        <Link href={loginHref(slug)} className={cn("inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline", className)}>
+        <Link href={loginHref(slug, "subscribe")} className={cn("inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline", className)}>
           <CalendarPlus className="h-4 w-4" aria-hidden="true" /> Log in to add this calendar to yours
         </Link>
       );

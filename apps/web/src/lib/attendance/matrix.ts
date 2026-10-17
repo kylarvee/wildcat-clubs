@@ -179,20 +179,25 @@ export function sortRows(rows: MxRow[], by: RowSort, nameOf: (userId: string) =>
   }
 }
 
-// ─── CSV ────────────────────────────────────────────────────────────────────
+// ─── CSV (every export uses these) ──────────────────────────────────────────
+
+export type CsvValue = string | number | null | undefined;
 
 /**
- * RFC 4180 CSV. Cells that a spreadsheet would run as a formula (=, +, -, @)
- * get a leading apostrophe, so a name like "=HYPERLINK(…)" stays text.
+ * One RFC 4180 cell. Text a spreadsheet would run as a formula (starting with
+ * =, +, -, @, a tab or a carriage return) gets a leading apostrophe, so a name
+ * like "=HYPERLINK(…)" stays text. Numbers pass through, so -3 stays a number.
  */
-export function toCsv(rows: (string | number | null | undefined)[][]): string {
-  const cell = (v: string | number | null | undefined) => {
-    if (v === null || v === undefined) return "";
-    let s = String(v);
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+export function csvCell(v: CsvValue): string {
+  if (v === null || v === undefined) return "";
+  let s = String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Rows to a CSV body (CRLF line ends, trailing CRLF). */
+export function toCsv(rows: CsvValue[][]): string {
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
 /** 0.6667 → "67%"; null → "—". */

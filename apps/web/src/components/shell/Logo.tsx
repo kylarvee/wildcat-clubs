@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cn } from "@/components/ui/cn";
 import { PLATFORM } from "@/lib/institution";
 
 /** The Wildcat Clubs mark: a purple tile with a stylized "W" made of two linked rings (clubs connecting). */
@@ -12,11 +13,15 @@ export function LogoMark({ size = 32 }: { size?: number }) {
   );
 }
 
-export function Logo({ href = "/" }: { href?: string }) {
+/**
+ * `compact`: below 420px the wordmark is visually hidden (it stays the link's name),
+ * because the signed-in header's icons leave it too little room and it wrapped.
+ */
+export function Logo({ href = "/", compact = false }: { href?: string; compact?: boolean }) {
   return (
     <Link href={href} className="flex items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-brand">
       <LogoMark />
-      <span className="text-[17px] font-bold tracking-tight text-ink">{PLATFORM.name}</span>
+      <span className={cn("text-[17px] font-bold tracking-tight text-ink", compact && "max-[420px]:sr-only")}>{PLATFORM.name}</span>
     </Link>
   );
 }

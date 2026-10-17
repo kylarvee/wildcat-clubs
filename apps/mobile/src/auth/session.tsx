@@ -38,6 +38,7 @@ type SessionValue = {
 const SessionContext = createContext<SessionValue | null>(null);
 
 type Stored = { token: string; user: MUser };
+type PendingSignOut = { token: string; pushToken: string | null };
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
@@ -76,9 +77,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Finishes a sign-out that never reached the server. Until it does, the
+   * server keeps sending that account's notifications to this phone (and the
+   * session stays valid there). Safe to repeat.
+   */
+  const finishSignOut = useCallback(async () => {
+    const raw = await getItem(KEYS.pendingSignOut);
+    if (!raw) return;
+    try {
+      const pending = JSON.parse(raw) as PendingSignOut;
+      await Api.signOut(pending.token, pending.pushToken);
+    } catch (e) {
+      // Still offline: try again on the next launch or return to the app. (Unreadable: drop it.)
+      if (e instanceof ApiError) return;
+    }
+    await removeItem(KEYS.pendingSignOut);
+  }, []);
+
   /** Registers (or re-registers) this phone for pushes unless switched off here. */
   const syncPush = useCallback(async (ask: boolean) => {
+    // First, so an old sign-out finishing late can't undo this registration.
+    await finishSignOut();
     if ((await getItem(KEYS.notifications)) === 'off') {
+      // Switched off while offline: the server still sends here until it hears.
+      const stale = await getItem(KEYS.pushToken);
+      if (stale && token.current) {
+        try {
+          await Api.removePush(stale);
+          await removeItem(KEYS.pushToken);
+        } catch {
+          // Still offline: next launch.
+        }
+      }
       setPush({ kind: 'off' });
       return;
     }
@@ -93,7 +124,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     } else if (outcome.status === 'denied') setPush({ kind: 'denied', canAskAgain: outcome.canAskAgain });
     else setPush({ kind: 'unavailable', reason: outcome.reason });
-  }, []);
+  }, [finishSignOut]);
 
   // Launch: restore the stored session, then confirm it with the server.
   useEffect(() => {
@@ -109,26 +140,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       if (!stored?.token) {
         setStatus('signedOut');
+        void finishSignOut();
         return;
       }
       token.current = stored.token;
       setUser(stored.user);
       setStatus('signedIn');
       await refreshMe();
+      // syncPush starts by finishing any offline sign-out; if the stored session stopped working, just do that.
       if (token.current) void syncPush(false);
+      else void finishSignOut();
     })();
     return () => {
       cancelled = true;
     };
-  }, [refreshMe, syncPush]);
+  }, [refreshMe, syncPush, finishSignOut]);
 
-  // Back in the foreground: refresh badges (at most every 15 s).
+  // Back in the foreground: refresh badges (at most every 15 s), and finish an offline sign-out.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active' && token.current && Date.now() - lastMe.current > 15_000) void refreshMe();
+      if (s !== 'active') return;
+      void finishSignOut();
+      if (token.current && Date.now() - lastMe.current > 15_000) void refreshMe();
     });
     return () => sub.remove();
-  }, [refreshMe]);
+  }, [refreshMe, finishSignOut]);
 
   const signIn = useCallback(
     async (session: MSession) => {
@@ -151,7 +187,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         await Api.signOut(current, pushToken);
       } catch {
-        // Offline: the token still gets forgotten here; it expires on the server.
+        // Offline: forgotten here now; finishSignOut tells the server once we're back online.
+        await setItem(KEYS.pendingSignOut, JSON.stringify({ token: current, pushToken } satisfies PendingSignOut));
       }
     }
     await removeItem(KEYS.pushToken);

@@ -16,6 +16,8 @@ import { useApi } from '@/lib/use-api';
 import { space, useColors } from '@/theme';
 
 const WEEKS = 6;
+/** The server's longest range (api/m calendarView); the whole range reloads on refresh. */
+const MAX_DAYS = 400;
 
 export default function CalendarScreen() {
   const { status, user } = useSession();
@@ -27,7 +29,9 @@ export default function CalendarScreen() {
 /** Your calendar as an agenda, grouped by day. Six weeks at a time; "Show more" reaches further. */
 function Agenda({ userId }: { userId: string }) {
   const c = useColors();
-  const { data, error, loading, refreshing, refresh, reload, setData } = useApi(`calendar:${userId}`, () => Api.calendar());
+  // How far "Show more" has reached, so a refresh reloads all of it rather than only the first six weeks.
+  const [to, setTo] = useState<string | undefined>();
+  const { data, error, loading, refreshing, refresh, reload, setData } = useApi(`calendar:${userId}`, () => Api.calendar(undefined, to));
   const [more, setMore] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
   const sections = useMemo(() => {
@@ -45,17 +49,19 @@ function Agenda({ userId }: { userId: string }) {
   if (!data) return <ErrorView error={error} onRetry={reload} />;
 
   const today = todayKey();
+  const nextTo = new Date(new Date(data.to).getTime() + WEEKS * 7 * 86_400_000).toISOString();
+  const canLoadMore = new Date(nextTo).getTime() - new Date(data.from).getTime() <= MAX_DAYS * 86_400_000;
 
   const loadMore = async () => {
     setMore({ busy: true, error: null });
     try {
-      const to = new Date(new Date(data.to).getTime() + WEEKS * 7 * 86_400_000).toISOString();
-      const next: MCalendar = await Api.calendar(data.to, to);
+      const next: MCalendar = await Api.calendar(data.to, nextTo);
       setData((d) => {
         if (!d) return d;
         const seen = new Set(d.events.map((e) => e.occurrenceId));
         return { from: d.from, to: next.to, events: [...d.events, ...next.events.filter((e) => !seen.has(e.occurrenceId))] };
       });
+      setTo(next.to);
       setMore({ busy: false, error: null });
     } catch (e) {
       setMore({ busy: false, error: errorMessage(e) });
@@ -103,7 +109,7 @@ function Agenda({ userId }: { userId: string }) {
           <Text variant="small" tone="ink3" style={styles.center}>
             Showing through {campusDay(new Date(new Date(data.to).getTime() - 1).toISOString())}
           </Text>
-          <Button title={`Show ${WEEKS} more weeks`} variant="ghost" onPress={() => void loadMore()} loading={more.busy} />
+          {canLoadMore ? <Button title={`Show ${WEEKS} more weeks`} variant="ghost" onPress={() => void loadMore()} loading={more.busy} /> : null}
         </View>
       }
     />

@@ -10,10 +10,41 @@ export type QuestionOption = { id: string; text: string };
 export const AUTOMATION_TRIGGERS = ["PASSED", "FAILED", "MISSED_DEADLINE"] as const;
 export type AutomationTrigger = (typeof AUTOMATION_TRIGGERS)[number];
 
-export const AUTOMATION_ACTIONS = ["NOTIFY_TAKER", "NOTIFY_ADVISOR", "NOTIFY_ADMINS", "CREATE_ADMIN_TASK"] as const;
+export const AUTOMATION_ACTIONS = [
+  "NOTIFY_TAKER",
+  "NOTIFY_ADVISOR",
+  "NOTIFY_ADMINS",
+  "CREATE_ADMIN_TASK",
+  "APPROVE_JOIN_REQUEST",
+  "PAUSE_PERMISSIONS",
+  "RESUME_PERMISSIONS",
+] as const;
 export type AutomationAction = (typeof AUTOMATION_ACTIONS)[number];
 
 export type Automation = { trigger: AutomationTrigger; action: AutomationAction };
+
+/**
+ * Actions that change something in the club (a join request, an officer's
+ * permissions). They exist only for club tests, and only after the results
+ * they make sense for. Every other action fits any trigger and scope.
+ */
+const CLUB_ACTION_TRIGGERS: Partial<Record<AutomationAction, AutomationTrigger[]>> = {
+  APPROVE_JOIN_REQUEST: ["PASSED"],
+  RESUME_PERMISSIONS: ["PASSED"],
+  PAUSE_PERMISSIONS: ["FAILED", "MISSED_DEADLINE"],
+};
+
+export const isClubAction = (a: AutomationAction) => a in CLUB_ACTION_TRIGGERS;
+
+/** The actions a builder may pick for a trigger. */
+export function actionsFor(trigger: AutomationTrigger, scope: "club" | "university"): AutomationAction[] {
+  return AUTOMATION_ACTIONS.filter((a) => {
+    const only = CLUB_ACTION_TRIGGERS[a];
+    return !only || (scope === "club" && only.includes(trigger));
+  });
+}
+
+export const automationAllowed = (a: Automation, scope: "club" | "university") => actionsFor(a.trigger, scope).includes(a.action);
 
 /** New tests start with the one automation nearly everyone wants: tell people who didn't pass how to retake. */
 export const DEFAULT_AUTOMATIONS: Automation[] = [{ trigger: "FAILED", action: "NOTIFY_TAKER" }];
@@ -135,6 +166,12 @@ export function actionLabel(a: AutomationAction, scope: "club" | "university"): 
       return scope === "club" ? "Tell leaders who manage club tests" : "Tell WSUSA administrators";
     case "CREATE_ADMIN_TASK":
       return scope === "club" ? "Add a follow-up task for club leaders" : "Add a follow-up task for WSUSA administrators";
+    case "APPROVE_JOIN_REQUEST":
+      return "Approve their request to join the club";
+    case "PAUSE_PERMISSIONS":
+      return "Pause their officer permissions";
+    case "RESUME_PERMISSIONS":
+      return "Give back officer permissions a test paused";
   }
 }
 

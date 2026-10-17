@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMatrix, memberAt, pct, sortRows, toCsv, type MxCheckin, type MxMembership } from "./matrix";
+import { buildMatrix, csvCell, memberAt, pct, sortRows, toCsv, type MxCheckin, type MxMembership } from "./matrix";
 
 const d = (day: number, h = 18) => new Date(Date.UTC(2026, 9, day, h));
 const occ = (id: string, day: number) => ({ id, startsAt: d(day) });
@@ -90,6 +90,18 @@ describe("attendance matrix", () => {
 describe("csv", () => {
   it("quotes and neutralises spreadsheet formulas", () => {
     expect(toCsv([["Name", "Note"], ['Ana "A" Lee', "=1+1"], [3, null]])).toBe('Name,Note\r\n"Ana ""A"" Lee",\'=1+1\r\n3,\r\n');
+  });
+
+  it("defuses every formula lead character, but leaves numbers alone", () => {
+    expect(csvCell('=HYPERLINK("http://x","Open")')).toBe(`"'=HYPERLINK(""http://x"",""Open"")"`);
+    expect(csvCell("+1")).toBe("'+1");
+    expect(csvCell("-1")).toBe("'-1");
+    expect(csvCell("@SUM(A1)")).toBe("'@SUM(A1)");
+    expect(csvCell("\tx")).toBe("'\tx");
+    expect(csvCell("\rx")).toBe(`"'\rx"`);
+    expect(csvCell(-3)).toBe("-3");
+    expect(csvCell("Ana, Lee")).toBe('"Ana, Lee"');
+    expect(csvCell(undefined)).toBe("");
   });
 
   it("formats rates", () => {

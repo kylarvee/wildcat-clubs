@@ -168,6 +168,7 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
     for (const f of firsts) if (f._min.startsAt) firstScheduled.set(f.eventId, f._min.startsAt.toISOString());
   }
 
+  const now = new Date();
   return rows.map((o) => {
     const e = o.event;
     const color = e.club?.logoColor ?? UNIVERSITY_COLOR;
@@ -187,8 +188,9 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
       backgroundColor: color,
       borderColor: color,
       textColor: "#ffffff",
-      // Only one-time events of clubs you manage can be dragged; repeating ones open the editor.
-      editable: canManage && hostedHere && e.recurrence === "NONE" && !cancelled,
+      // Only upcoming one-time events of clubs you manage can be dragged; repeating ones open
+      // the editor, and past ones are history.
+      editable: canManage && hostedHere && e.recurrence === "NONE" && !cancelled && o.endsAt > now,
       classNames: cancelled ? ["wc-cancelled"] : [],
       extendedProps: {
         eventId: e.id,

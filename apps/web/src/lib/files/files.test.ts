@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { audienceIncludes, canSee, resolveVisibility, type VisNode, type ViewerFacts } from "@/lib/files/visibility";
 import { cleanName, nameProblem, splitExt, uniqueName } from "@/lib/files/names";
 import { matchesAccept, sortRows, typeAheadIndex } from "@/lib/files/listing";
+import { guessMime, servedType } from "@/lib/files/storage";
 
 const tree: Record<string, VisNode> = {
   root: { parentId: null, visibility: "INHERIT" },
@@ -122,5 +123,25 @@ describe("listing", () => {
     expect(typeAheadIndex(names, "b", 2)).toBe(2);
     expect(typeAheadIndex(names, "a", 3)).toBe(0);
     expect(typeAheadIndex(names, "x", 0)).toBe(-1);
+  });
+});
+
+describe("stored and served types", () => {
+  it("takes the stored type from the extension, never the browser's claim", () => {
+    expect(guessMime("Flyer.PNG", "text/html")).toBe("image/png");
+    expect(guessMime("page.xml", "application/xml")).toBe("application/octet-stream");
+    expect(guessMime("noext", "image/png")).toBe("application/octet-stream");
+    expect(guessMime("clip.webm")).toBe("video/webm");
+  });
+
+  it("shows only safe types in place; text becomes plain text; the rest downloads", () => {
+    expect(servedType("application/pdf")).toBe("application/pdf");
+    expect(servedType("image/svg+xml")).toBe("image/svg+xml");
+    expect(servedType("video/mp4")).toBe("video/mp4");
+    expect(servedType("text/markdown")).toBe("text/plain; charset=utf-8");
+    expect(servedType("text/html; charset=utf-8")).toBe("text/plain; charset=utf-8");
+    for (const risky of ["application/xml", "application/xhtml+xml", "image/svg", "application/octet-stream", "application/javascript", "", null]) {
+      expect(servedType(risky)).toBeNull();
+    }
   });
 });

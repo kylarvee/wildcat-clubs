@@ -85,7 +85,8 @@ The web preview is handy for quick checks. The camera scanner works in Chrome
 
 The session token is kept in the phone's keychain / keystore (expo-secure-store;
 the web preview uses localStorage). Sessions last 180 days; signing out ends the
-session on the server and stops pushes to the phone.
+session on the server and stops pushes to the phone (when signing out offline,
+the app tells the server as soon as it's back online).
 
 ## Try scanning with the seed data
 
@@ -124,6 +125,22 @@ Getting a push token needs an **EAS project id**. Run `npx eas-cli@latest init`
 once — it adds `extra.eas.projectId` to `app.json`. Without it (and in the web
 preview, or Expo Go on Android, which can't receive pushes) the app skips push
 quietly and Me → Settings says why; the in-app inbox still works.
+
+**Android also needs Firebase (FCM)** — without it Android builds get no push
+token (Me → Settings shows the Firebase error):
+
+1. In the [Firebase console](https://console.firebase.google.com), create a
+   project and add an Android app with the `android.package` from `app.json`.
+2. Download its `google-services.json` into `apps/mobile/` and add
+   `"googleServicesFile": "./google-services.json"` under `expo.android` in
+   `app.json`. Do both together: a build fails if that line points at a
+   missing file. The file holds only public identifiers, so it can be committed.
+3. In Firebase → Project settings → Service accounts, generate a private key
+   (keep it out of git), then run `npx eas-cli@latest credentials` → Android →
+   production → Google Service Account → FCM V1 key → upload it. Expo's push
+   service uses it to deliver to Android phones.
+
+On iOS, the first `eas build` offers to create the Apple push key; say yes.
 
 ## Building for the App Store and Google Play (EAS)
 

@@ -15,6 +15,7 @@ export function SideNav({ links, label }: { links: { href: string; label: string
           <Link
             key={l.href}
             href={l.href}
+            aria-current={active ? "page" : undefined}
             className={cn("shrink-0 rounded-lg px-3 py-2 text-sm font-medium", active ? "bg-brand-50 text-brand" : "text-ink-2 hover:bg-muted hover:text-ink")}
           >
             {l.label}

@@ -110,7 +110,7 @@ function NotificationRow({ item, onPress }: { item: MNotification; onPress: () =
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${unread ? 'Unread. ' : ''}${item.title}. ${item.body ?? ''} ${timeAgo(item.createdAt)}`}
-      accessibilityHint={item.href ? (opensWeb ? 'Opens on the web' : 'Opens it in the app') : undefined}
+      accessibilityHint={item.href ? (opensWeb ? 'Opens on the web. You may need to sign in there.' : 'Opens it in the app') : undefined}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? c.surfaceAlt : unread ? c.brandTint : 'transparent' }]}>
       <View style={[styles.dot, { backgroundColor: unread ? c.brand : 'transparent' }]} />
       <View style={styles.body}>
@@ -126,7 +126,14 @@ function NotificationRow({ item, onPress }: { item: MNotification; onPress: () =
           <Text variant="caption" tone="ink3">
             {timeAgo(item.createdAt)}
           </Text>
-          {opensWeb ? <Icon name="external" size={12} color={c.ink3} /> : null}
+          {opensWeb ? (
+            <>
+              <Icon name="external" size={12} color={c.ink3} />
+              <Text variant="caption" tone="ink3">
+                Opens on the web
+              </Text>
+            </>
+          ) : null}
         </View>
       </View>
     </Pressable>

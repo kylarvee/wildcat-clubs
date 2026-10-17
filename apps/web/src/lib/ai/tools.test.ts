@@ -6,10 +6,10 @@ import { Thread, type StoredRow } from "@/lib/ai/conversations";
 describe("tool registry", () => {
   it("offers every brief tool, read and write", () => {
     const names = TOOLS.map((t) => t.name);
-    for (const n of ["search_clubs", "get_club", "my_clubs_and_roles", "my_tasks", "my_calendar", "my_attendance", "list_policies", "get_policy", "explain_permissions", "event_details"]) {
+    for (const n of ["search_clubs", "get_club", "my_clubs_and_roles", "my_profile", "my_tasks", "my_calendar", "my_attendance", "list_policies", "get_policy", "explain_permissions", "event_details"]) {
       expect(findTool(n)?.kind).toBe("read");
     }
-    for (const n of ["join_club", "subscribe_calendar", "unsubscribe_calendar", "add_personal_task", "add_event_idea", "create_event", "post_announcement", "start_club_draft", "invite_advisor", "assign_role"]) {
+    for (const n of ["join_club", "subscribe_calendar", "unsubscribe_calendar", "add_personal_task", "update_my_profile", "add_event_idea", "create_event", "post_announcement", "start_club_draft", "invite_advisor", "assign_role"]) {
       expect(findTool(n)?.kind).toBe("write");
     }
     expect(new Set(names).size).toBe(names.length);
@@ -35,6 +35,8 @@ describe("tool registry", () => {
     expect(validateCall("CREATE_EVENT", { club: "Chess", title: "Meet", date: "2026-10-20" }).ok).toBe(true);
     const unknown = validateCall("vote_for", {});
     expect(unknown.ok).toBe(false);
+    expect(validateCall("update_my_profile", { headline: "CS junior", class_year: null, majors: [{ name: "Computer Science" }] }).ok).toBe(true);
+    expect(validateCall("update_my_profile", { headline: "x".repeat(121) }).ok).toBe(false);
   });
 });
 

@@ -3,16 +3,10 @@ import { getClubAccess } from "@/lib/authz";
 import { getClubBySlug } from "@/lib/clubs/context";
 import { clubMemberAttendanceCounts } from "@/lib/metrics";
 import { rosterData } from "@/lib/roles/queries";
-import { fmtLongDate } from "@/lib/time";
+import { toCsv } from "@/lib/attendance/matrix";
+import { fmtDate, fmtLongDate } from "@/lib/time";
 
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Member", PENDING: "Requested to join", ALUMNI: "Alumni", LEFT: "Left", REMOVED: "Removed", DECLINED: "Declined" };
-
-/** Quote a CSV cell and defuse spreadsheet formulas (=, +, -, @ at the start). */
-function cell(v: string | number | null | undefined) {
-  let s = v === null || v === undefined ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return `"${s.replace(/"/g, '""')}"`;
-}
 
 /** GET: the club roster as CSV, for people holding the `roster` capability. */
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -40,12 +34,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
         a?.attended ?? 0,
         a?.lastAttendedAt ? fmtLongDate(a.lastAttendedAt) : "",
         r.status === "ACTIVE" ? (a?.active ? "Yes" : "No") : "",
-      ]
-        .map(cell)
-        .join(",");
+      ];
     });
-  const csv = "﻿" + [header.map(cell).join(","), ...lines].join("\r\n");
-  const date = new Date().toISOString().slice(0, 10);
+  // The BOM makes Excel read names with accents correctly.
+  const csv = "﻿" + toCsv([header, ...lines]);
+  // Campus date, so an evening export isn't stamped with tomorrow (UTC).
+  const date = fmtDate(new Date(), "yyyy-MM-dd");
   return new Response(csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",

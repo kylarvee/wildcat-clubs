@@ -28,15 +28,40 @@ describe("expandOccurrences", () => {
     expect(occ).toHaveLength(13);
   });
 
+  const term = (id: string, kind: Term["kind"], from: Date, to: Date): Term => ({ id, name: id, kind, academicYear: "x", startsOn: from, endsOn: to, countsForActivity: kind !== "SUMMER" });
+  const terms = [
+    term("F26", "FALL", campusDate(2026, 8, 24), campusDate(2026, 12, 18)),
+    term("S27", "SPRING", campusDate(2027, 1, 11), campusDate(2027, 5, 1)),
+    term("U27", "SUMMER", campusDate(2027, 5, 10), campusDate(2027, 8, 7)),
+    term("F27", "FALL", campusDate(2027, 8, 23), campusDate(2027, 12, 17)),
+  ];
+
   it("repeats once per semester at the same offset", () => {
-    const term = (id: string, kind: Term["kind"], from: Date, to: Date): Term => ({ id, name: id, kind, academicYear: "x", startsOn: from, endsOn: to, countsForActivity: kind !== "SUMMER" });
-    const terms = [
-      term("F26", "FALL", campusDate(2026, 8, 24), campusDate(2026, 12, 18)),
-      term("S27", "SPRING", campusDate(2027, 1, 11), campusDate(2027, 5, 1)),
-      term("U27", "SUMMER", campusDate(2027, 5, 10), campusDate(2027, 8, 7)),
-      term("F27", "FALL", campusDate(2027, 8, 23), campusDate(2027, 12, 17)),
-    ];
     const occ = expandOccurrences({ startsAt: campusDate(2026, 9, 3, 12, 0), durationMinutes: 60, recurrence: "SEMESTERLY", until: campusDate(2027, 12, 31) }, terms);
     expect(days(occ)).toEqual(["2026-09-03", "2027-01-21", "2027-09-02"]);
+  });
+
+  it("puts a semesterly rule that starts between terms on each term's first day, never in a break", () => {
+    const occ = expandOccurrences({ startsAt: campusDate(2026, 12, 28, 18, 0), durationMinutes: 60, recurrence: "SEMESTERLY", until: campusDate(2027, 12, 31) }, terms);
+    expect(days(occ)).toEqual(["2027-01-11", "2027-08-23"]);
+    expect(occ.every((o) => toTimeInput(o.startsAt) === "18:00")).toBe(true);
+  });
+
+  it("ends all-day meetings at the next campus midnight, also on daylight-saving days", () => {
+    for (const [y, m, d] of [
+      [2026, 10, 20],
+      [2027, 3, 14], // clocks spring forward: a 23-hour day
+      [2026, 11, 1], // clocks fall back: a 25-hour day
+    ]) {
+      const s = campusDate(y, m, d);
+      const [o] = expandOccurrences({ startsAt: s, durationMinutes: 24 * 60, allDay: true, recurrence: "NONE" });
+      expect(o.startsAt).toEqual(s);
+      expect(o.endsAt).toEqual(campusDate(y, m, d + 1));
+    }
+    const weekly = expandOccurrences({ startsAt: campusDate(2027, 3, 7), durationMinutes: 24 * 60, allDay: true, recurrence: "WEEKLY", count: 2 });
+    expect(weekly.map((o) => [toDateInput(o.startsAt), toDateInput(new Date(o.endsAt.getTime() - 1))])).toEqual([
+      ["2027-03-07", "2027-03-07"],
+      ["2027-03-14", "2027-03-14"],
+    ]);
   });
 });

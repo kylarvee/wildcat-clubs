@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyClubCapability } from "@/lib/domain/notify";
+import { reopenRequirementTasks } from "@/lib/domain/requirements";
 
 /**
  * Membership and calendar subscriptions. Register buttons (web + mobile),
@@ -92,6 +93,8 @@ export async function leaveClub(actor: Actor | null, clubId: string) {
     db.calendarSubscription.deleteMany({ where: { userId: actor.id, clubId } }),
   ]);
   await resolveTasks("membership", m.id, actor.id, db, "CANCELLED");
+  // Ended roles: requirements they no longer owe close now, not on the next job tick.
+  if (roles.length) await reopenRequirementTasks(actor.id);
   await logActivity({ actorId: actor.id, action: "membership.left", entityType: "membership", entityId: m.id, clubId });
 }
 
@@ -111,6 +114,7 @@ export async function removeMember(actor: Actor | null, membershipId: string) {
     db.membership.update({ where: { id: m.id }, data: { status: "REMOVED", endedAt: now } }),
     db.calendarSubscription.deleteMany({ where: { userId: m.userId, clubId: m.clubId } }),
   ]);
+  if (theirRoles.length) await reopenRequirementTasks(m.userId);
   await logActivity({ actorId: actor!.id, action: "membership.removed", entityType: "membership", entityId: m.id, clubId: m.clubId });
 }
 

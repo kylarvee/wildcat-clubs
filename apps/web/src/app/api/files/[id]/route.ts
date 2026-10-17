@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { canViewFile } from "@/lib/domain/files";
-import { getBytes } from "@/lib/files/storage";
+import { getBytes, servedType } from "@/lib/files/storage";
 
 /** "Fall flyer (2).png" → a quoted ASCII fallback plus the exact UTF-8 name (RFC 6266). */
 function disposition(kind: "inline" | "attachment", name: string) {
@@ -42,18 +42,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const bytes = await getBytes(file.storageKey).catch(() => null);
   if (!bytes) return new Response("This file is missing from storage.", { status: 410 });
   const download = new URL(req.url).searchParams.get("download") === "1";
-  const type = file.mimeType ?? "application/octet-stream";
-  // Never let uploaded HTML run in our origin; SVG renders as an image but is sandboxed.
-  const risky = type.includes("html");
+  const shown = servedType(file.mimeType);
   const headers: Record<string, string> = {
-    "content-type": risky && !download ? "text/plain; charset=utf-8" : type,
-    "content-disposition": disposition(download ? "attachment" : "inline", file.name),
+    "content-type": shown ?? "application/octet-stream",
+    "content-disposition": disposition(download || !shown ? "attachment" : "inline", file.name),
     // Public files may be cached by the browser a little longer; nothing is cached by shared caches.
     "cache-control": "private, max-age=300",
     "x-content-type-options": "nosniff",
     "accept-ranges": "bytes",
     "last-modified": file.updatedAt.toUTCString(),
-    ...(type.includes("svg") ? { "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}),
+    // Anything opened directly runs sandboxed: no script, an opaque origin. PDFs are exempt
+    // because browsers' PDF viewers won't render under a sandbox (they are not scriptable pages).
+    ...(shown === "application/pdf" ? {} : { "content-security-policy": shown === "image/svg+xml" ? "default-src 'none'; style-src 'unsafe-inline'; sandbox" : "sandbox" }),
   };
 
   const range = parseRange(req.headers.get("range"), bytes.length);

@@ -1,8 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { ClubM, Ctx } from "../ctx";
+import type { Assignment, ClubM, Ctx } from "../ctx";
 import { makeFlyerSvg, makePdf, type PdfBlock } from "../lib/assets";
 import { MINUTES_ITEMS } from "../data/text";
-import { addDays, human, minDate, monthDay, ymd } from "../lib/dates";
+import { addDays, DAY, human, minDate, monthDay, ymd } from "../lib/dates";
+import { createRng, type Rng } from "../lib/rng";
 import { addFile, addFolder, addPdf } from "./filehelp";
 import { mayGraduation } from "./reference";
 import { defaultDraftData } from "@/lib/constitution/templates";
@@ -161,6 +162,78 @@ function clubFiles(ctx: Ctx, club: ClubM, drafts: Map<string, string>) {
   }
 }
 
+type Contribution = { title: string; html: string };
+
+/** What a past leader might have left behind in their seat (one of these per pick). */
+const SEAT_IDEAS: Record<string, Contribution[]> = {
+  President: [
+    { title: "Fall recruitment drive", html: "<p>Planned the fall recruitment push: an involvement fair table, a first-week social and follow-up emails that turned sign-ups into regulars.</p>" },
+    { title: "Officer transition handbook", html: "<p>Wrote the handbook the next officer team started from: who owns what, the yearly calendar and how funding requests work.</p>" },
+    { title: "Campus partnership program", html: "<p>Set up a standing partnership with a campus department, so members got speakers, space and project ideas every semester.</p>" },
+  ],
+  "Vice President": [
+    { title: "Semester event plan", html: "<p>Built the semester's event plan with the officers, booked rooms early and kept the club calendar current.</p>" },
+    { title: "New member onboarding", html: "<p>Ran the welcome table and paired each new member with an officer for their first month.</p>" },
+  ],
+  Treasurer: [{ title: "Budget and funding requests", html: "<p>Kept the club's budget in Wildcat Clubs and wrote the funding requests that paid for the year's events.</p>" }],
+  Secretary: [{ title: "Meeting minutes archive", html: "<p>Took and posted minutes for every general meeting, so members who missed one could catch up.</p>" }],
+  "Communications Officer": [{ title: "Flyer and social media series", html: "<p>Designed the flyers and posts for the semester's events and grew the club's following.</p>" }],
+  "Membership Officer": [{ title: "Member check-in program", html: "<p>Followed up with members who drifted away and started the welcome-back social each semester.</p>" }],
+};
+
+const OFFICER_IDEAS: Contribution[] = [
+  { title: "Club newsletter", html: "<p>Started a short monthly newsletter with upcoming events, member spotlights and photos.</p>" },
+  { title: "Volunteer roster", html: "<p>Kept a roster of members who could help at events, so no event ran short-handed.</p>" },
+];
+
+function contributionFor(club: ClubM, a: Assignment, r: Rng): Contribution {
+  // Prefer a real event the club held during the term: the holder organized it.
+  const events = club.events.filter((e) => !e.isSeries && e.status === "SCHEDULED" && e.startsAt && e.startsAt > a.startedAt && e.startsAt < a.endedAt! && e.occurrences.some((o) => o.attendees.size > 0));
+  if (events.length && (a.seatName === "Events Coordinator" || r.chance(0.35))) {
+    const ev = r.pick(events);
+    return { title: ev.title, html: `<p>Organized ${ev.title} (${monthDay(ev.startsAt!)}, ${ev.startsAt!.getUTCFullYear()}): booked the space, lined up volunteers and ran check-in at the door.</p>` };
+  }
+  return r.pick(SEAT_IDEAS[a.seatName ?? ""] ?? (a.role === "PRESIDENT" ? SEAT_IDEAS.President : a.role === "VP" ? SEAT_IDEAS["Vice President"] : OFFICER_IDEAS));
+}
+
+type AddProject = (userId: string, assignmentId: string, clubId: string, title: string, html: string, start: Date, end: Date | null, files: string[]) => void;
+
+/**
+ * Role history shows the work, not just the titles: one or two past leaders
+ * per club get a contribution tied to the seat they held, with up to two club
+ * files they made during the term. Personas are left as PERSONAS.md describes.
+ */
+function roleContributions(ctx: Ctx, proj: AddProject) {
+  const r = createRng(17102026); // its own stream, so the rest of the seed comes out the same
+  const leadersOnly = new Set(ctx.rows.files.filter((f) => f.isFolder && f.visibility === "LEADERS").map((f) => f.id as string));
+  for (const club of ctx.clubs) {
+    if (club.status !== "APPROVED" && club.status !== "RETIRED") continue;
+    const past = club.assignments.filter(
+      (a) => a.endedAt && (a.role === "PRESIDENT" || a.role === "VP" || a.role === "OFFICER") && a.endedAt.getTime() - a.startedAt.getTime() > 60 * DAY && !ctx.person(a.userId).persona,
+    );
+    for (const a of r.sample(past, r.int(1, 2))) {
+      const end = a.endedAt!;
+      const files = ctx.rows.files
+        .filter((f) => f.clubId === club.id && !f.isFolder && f.createdById === a.userId && !leadersOnly.has(f.parentId ?? "") && (f.createdAt as Date) >= a.startedAt && (f.createdAt as Date) <= end)
+        .map((f) => f.id as string);
+      const idea = contributionFor(club, a, r);
+      const start = addDays(a.startedAt, r.float(7, 30));
+      const finish = minDate(addDays(start, r.float(60, 200)), end);
+      if (!files.length && r.chance(0.6)) {
+        // No club file from the term: a write-up in the holder's own files, as the contribution dialog's uploads are.
+        const holder = ctx.person(a.userId);
+        files.push(
+          addPdf(ctx, { ownerId: holder.id, dir: `users/${holder.handle}` }, `${idea.title} - summary.pdf`, {
+            title: idea.title, subtitle: `${club.name} · ${a.seatName ?? "Officer"}, ${monthDay(finish)}, ${finish.getUTCFullYear()}`,
+            blocks: [{ heading: "What we did", text: idea.html.replace(/<[^>]+>/g, "") }], footer: "Sample file for user testing",
+          }, { createdById: holder.id, createdAt: finish, visibility: "MEMBERS" }),
+        );
+      }
+      proj(a.userId, a.id, club.id, idea.title, idea.html, start, finish, r.sample(files, 2));
+    }
+  }
+}
+
 export function buildFiles(ctx: Ctx) {
   const { rng, NOW } = ctx;
   const alex = ctx.p("alex").id;
@@ -294,4 +367,6 @@ export function buildFiles(ctx: Ctx) {
     blocks: [{ heading: "Design", bullets: ["Four-wheel skid steer with regolith-rated wheels", "Brushless motors with planetary gearboxes", "Target: 30 kg rover under the 80 kg limit"] }],
   }, { createdById: priya, createdAt: new Date("2026-03-12T18:00:00Z"), visibility: "MEMBERS" });
   proj(priya, priyaVp.id, robotics.id, "Lunabotics Rover Drivetrain", "<p>Led the drivetrain subteam for Wildcat Robotics' first NASA Lunabotics rover.</p>", new Date("2025-09-02T18:00:00Z"), new Date("2026-04-10T18:00:00Z"), [review]);
+
+  roleContributions(ctx, proj);
 }

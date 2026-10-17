@@ -56,6 +56,9 @@ export type MemberClubSummary = {
   rate: number | null; // attended ÷ heldSinceJoined
   lastAttendedAt: Date | null;
   active: boolean;
+  /** Whether this account may ever write reviews (an active student). When false, show no review progress. */
+  canReview: boolean;
+  /** canReview and attended ≥ reviewThreshold. */
   reviewEligible: boolean;
   reviewThreshold: number;
 };

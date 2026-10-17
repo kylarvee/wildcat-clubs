@@ -45,7 +45,7 @@ export async function SiteHeader() {
     <header className="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur supports-[backdrop-filter]:bg-surface/75">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
         <MobileNav links={links} />
-        <Logo href={user ? "/dashboard" : "/"} />
+        <Logo href={user ? "/dashboard" : "/"} compact={Boolean(user)} />
         <NavLinks links={links} />
         <div className="ml-auto flex items-center gap-1">
           {user ? (

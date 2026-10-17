@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
 import { googleConfigured, personasEnabled } from "@/lib/auth/google";
+import { safeNext } from "@/lib/auth/redirect";
 import { PERSONAS } from "@/lib/auth/personas";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { LogoMark } from "@/components/shell/Logo";
@@ -11,11 +12,21 @@ import { signInAsPersona, signInWithTestEmail } from "./actions";
 
 export const metadata: Metadata = { title: "Log in" };
 
+/** Sign-in failures arrive as codes (from the Google callback and test sign-in); unknown codes show nothing. */
+const ERRORS: Record<string, string> = {
+  expired: "Sign-in expired. Please try again.",
+  cancelled: "Sign-in was cancelled.",
+  domain: `Sign in with your ${INSTITUTION.shortName} account: @${INSTITUTION.studentEmailDomain} for students, @${INSTITUTION.staffEmailDomain} for faculty and staff.`,
+  failed: "Sign-in didn't go through. Please try again.",
+};
+
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string; switch?: string }> }) {
   const sp = await searchParams;
-  const next = sp.next && sp.next.startsWith("/") ? sp.next : "/dashboard";
+  const next = safeNext(sp.next);
+  const error = sp.error && Object.hasOwn(ERRORS, sp.error) ? ERRORS[sp.error] : null;
   const user = await getCurrentUser();
-  if (user && !sp.switch) redirect(next);
+  // Stay put while there's an error to read (e.g. a signed-in tester switching to a bad email).
+  if (user && !sp.switch && !error) redirect(next);
 
   const google = googleConfigured();
   const personas = personasEnabled();
@@ -32,9 +43,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           Use your {INSTITUTION.shortName} Google account — <span className="font-medium">@{INSTITUTION.studentEmailDomain}</span> for students,{" "}
           <span className="font-medium">@{INSTITUTION.staffEmailDomain}</span> for faculty and staff.
         </p>
-        {sp.error ? (
+        {error ? (
           <Callout tone="danger" className="mt-4 text-left">
-            {sp.error}
+            {error}
           </Callout>
         ) : null}
         <div className="mt-6">
@@ -43,8 +54,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <GoogleG /> Continue with Weber State Google
             </a>
           ) : (
-            <Callout tone="info" className="text-left" title="Google sign-in isn't connected yet">
-              Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to turn it on. Until then, use a test persona below.
+            <Callout tone="info" className="text-left" title="Google sign-in isn't available yet">
+              {personas ? "Until it is, use a test persona below." : "Please check back soon."}
             </Callout>
           )}
         </div>
@@ -84,8 +95,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <p className="mb-3 text-sm text-ink-3">Creates the account on first use, the same way Google sign-in would.</p>
             <input type="hidden" name="next" value={next} />
             <div className="flex flex-col gap-2 sm:flex-row">
-              <input name="name" placeholder="Full name" className="h-10 flex-1 rounded-lg border border-line-2 px-3 text-sm" />
-              <input name="email" type="email" required placeholder={`name@${INSTITUTION.studentEmailDomain}`} className="h-10 flex-1 rounded-lg border border-line-2 px-3 text-sm" />
+              <label htmlFor="test-name" className="sr-only">
+                Full name
+              </label>
+              <input id="test-name" name="name" placeholder="Full name" className="h-10 flex-1 rounded-lg border border-line-2 px-3 text-sm" />
+              <label htmlFor="test-email" className="sr-only">
+                University email
+              </label>
+              <input id="test-email" name="email" type="email" required placeholder={`name@${INSTITUTION.studentEmailDomain}`} className="h-10 flex-1 rounded-lg border border-line-2 px-3 text-sm" />
               <button type="submit" className={buttonClasses("outline")}>
                 Sign in
               </button>

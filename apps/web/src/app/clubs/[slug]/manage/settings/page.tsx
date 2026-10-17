@@ -6,6 +6,7 @@ import { INSTITUTION } from "@/lib/institution";
 import { fmtLongDate } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { workspaceTitle } from "@/components/founding/workspaceTitle";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { KeyValue, PageHeader } from "@/components/ui/layout";
 import { AdvisorPanel } from "@/components/founding/AdvisorPanel";
@@ -89,13 +90,24 @@ export default async function ClubSettingsPage({ params }: { params: Promise<{ s
       </Card>
 
       <Card>
-        <CardHeader title="Club Google account" />
-        <CardBody>
+        <CardHeader
+          title="Club Google account"
+          action={club.contactEmail ? <Badge tone={club.googleAccountVerifiedAt ? "success" : "warning"}>{club.googleAccountVerifiedAt ? "Verified by WSUSA" : "Waiting for WSUSA"}</Badge> : null}
+        />
+        <CardBody className="space-y-2">
           {caps.has("profile") ? (
             <ContactEmailForm clubId={club.id} email={club.contactEmail} />
           ) : (
             <p className="text-sm text-ink-2">{club.contactEmail ?? "Not set yet."} Only leaders with the Profile permission can change it.</p>
           )}
+          {club.contactEmail ? (
+            <p className="text-xs text-ink-3">
+              {club.googleAccountVerifiedAt
+                ? `WSUSA verified this account on ${fmtLongDate(club.googleAccountVerifiedAt)}. Changing it starts a new check, and the club's Drive folder, calendar and Chat space are made again in the new account.`
+                : "WSUSA checks that this is your club's own account before Google sync runs as it. Until then, nothing is copied to Google."}
+              {founding ? " Sync also waits until your club is approved." : ""}
+            </p>
+          ) : null}
         </CardBody>
       </Card>
 

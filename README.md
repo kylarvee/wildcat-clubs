@@ -44,6 +44,10 @@ account with real history — see `apps/web/prisma/seed/PERSONAS.md` for what to
 `db:reset` wipes the database and re-seeds the full mock data set (~46 clubs, ~500 people, two years
 of events and attendance). Run it any time to start user testing fresh.
 
+Test personas need no password, so they exist only in development. A production build
+(`next build && next start`) offers Google sign-in only, whatever `AUTH_MODE` says, unless
+`ALLOW_TEST_SIGNIN=1` is also set — do that only on a demo or user-testing server.
+
 ## Without any external accounts
 
 Everything works with no Google or Anthropic setup: test personas sign in, emails and push

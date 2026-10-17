@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { autoPoints, choiceCorrect, clampPoints, hasText, isAnswered, passes, scoreAttempt, type ScoringQuestion } from "@/lib/tests/scoring";
-import { parseAutomations, parseOptions } from "@/lib/tests/types";
+import { actionsFor, automationAllowed, parseAutomations, parseOptions } from "@/lib/tests/types";
 
 const single: ScoringQuestion = { id: "q1", type: "SINGLE_CHOICE", points: 1, correctOptionIds: ["b"] };
 const multi: ScoringQuestion = { id: "q2", type: "MULTI_CHOICE", points: 2, correctOptionIds: ["a", "b", "d"] };
@@ -109,5 +109,24 @@ describe("stored JSON", () => {
       { trigger: "FAILED", action: "NOTIFY_TAKER" },
       { trigger: "MISSED_DEADLINE", action: "CREATE_ADMIN_TASK" },
     ]);
+  });
+});
+
+describe("automation choices", () => {
+  it("offers club-changing steps only for club tests, after the results they fit", () => {
+    expect(actionsFor("PASSED", "club")).toEqual(["NOTIFY_TAKER", "NOTIFY_ADVISOR", "NOTIFY_ADMINS", "CREATE_ADMIN_TASK", "APPROVE_JOIN_REQUEST", "RESUME_PERMISSIONS"]);
+    expect(actionsFor("FAILED", "club")).toEqual(["NOTIFY_TAKER", "NOTIFY_ADVISOR", "NOTIFY_ADMINS", "CREATE_ADMIN_TASK", "PAUSE_PERMISSIONS"]);
+    expect(actionsFor("MISSED_DEADLINE", "club")).toContain("PAUSE_PERMISSIONS");
+    for (const t of ["PASSED", "FAILED", "MISSED_DEADLINE"] as const) {
+      expect(actionsFor(t, "university")).toEqual(["NOTIFY_TAKER", "NOTIFY_ADVISOR", "NOTIFY_ADMINS", "CREATE_ADMIN_TASK"]);
+    }
+  });
+
+  it("rejects automations that don't fit their trigger or scope", () => {
+    expect(automationAllowed({ trigger: "PASSED", action: "APPROVE_JOIN_REQUEST" }, "club")).toBe(true);
+    expect(automationAllowed({ trigger: "FAILED", action: "APPROVE_JOIN_REQUEST" }, "club")).toBe(false);
+    expect(automationAllowed({ trigger: "PASSED", action: "PAUSE_PERMISSIONS" }, "club")).toBe(false);
+    expect(automationAllowed({ trigger: "PASSED", action: "RESUME_PERMISSIONS" }, "university")).toBe(false);
+    expect(automationAllowed({ trigger: "MISSED_DEADLINE", action: "NOTIFY_ADMINS" }, "university")).toBe(true);
   });
 });

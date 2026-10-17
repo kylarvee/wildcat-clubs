@@ -5,6 +5,7 @@ import { getTerms } from "@/lib/terms";
 import { fileUrl } from "@/lib/domain/files";
 import { richToText } from "@/lib/rich/sanitize";
 import { googleCalendarReady } from "@/lib/integrations/google-calendar";
+import { costLineLocks } from "@/lib/domain/events";
 import { splitEventLinks } from "@/lib/events/links";
 import { describeRecurrence } from "@/lib/events/summary";
 import type { TermJson } from "@/lib/events/types";
@@ -132,7 +133,7 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
 
   let editor: EditorEvent | null = null;
   if (event) {
-    const attendanceCount = await db.attendance.count({ where: { occurrence: { eventId: event.id } } });
+    const [attendanceCount, locks] = await Promise.all([db.attendance.count({ where: { occurrence: { eventId: event.id } } }), costLineLocks(event.costItems.map((c) => c.id))]);
     const { body, links } = splitEventLinks(event.descriptionHtml);
     editor = {
       id: event.id,
@@ -159,7 +160,16 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       cohostAllClubs: event.cohostAllClubs,
       cohosts: event.cohosts,
       attachments: event.attachments.filter((a) => !a.file.trashedAt).map((a) => ({ id: a.file.id, name: a.file.name, mimeType: a.file.mimeType, url: fileUrl(a.file.id) })),
-      costs: event.costItems.map((c) => ({ id: c.id, description: c.description, category: c.category, quantity: c.quantity, unitCostCents: c.unitCostCents, perOccurrence: c.perOccurrence, fundingSource: c.fundingSource })),
+      costs: event.costItems.map((c) => ({
+        id: c.id,
+        description: c.description,
+        category: c.category,
+        quantity: c.quantity,
+        unitCostCents: c.unitCostCents,
+        perOccurrence: c.perOccurrence,
+        fundingSource: c.fundingSource,
+        lockedBy: locks.get(c.id)?.title ?? null,
+      })),
       attendanceCount,
       requirementName: event.requirements[0]?.name ?? null,
     };

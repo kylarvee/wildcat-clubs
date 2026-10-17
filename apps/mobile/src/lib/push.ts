@@ -9,9 +9,10 @@ import { BRAND } from '@/theme';
  * lib/integrations/push sends to the tokens registered here).
  *
  * Getting a token needs an EAS project id (app.json → extra.eas.projectId,
- * added by `npx eas-cli@latest init`). Without one — or on the web, or in
- * Expo Go on Android, which can't receive pushes — we skip quietly and say
- * why in Settings; everything else in the app still works.
+ * added by `npx eas-cli@latest init`), and on Android a Firebase
+ * google-services.json (README → Push notifications). Without them — or on
+ * the web, or in Expo Go on Android, which can't receive pushes — we skip
+ * quietly and say why in Settings; everything else in the app still works.
  */
 
 export type PushOutcome =

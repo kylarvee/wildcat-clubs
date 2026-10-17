@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { errorMessage } from '@/api/client';
 import { Api } from '@/api/endpoints';
 import type { MClubDetail, MOccurrence } from '@/api/types';
@@ -29,7 +29,7 @@ type Notice = { tone: 'success' | 'info' | 'danger' | 'warning'; text: string } 
 /** A club: who they are, Register / Subscribe, what's coming up, and your attendance. */
 export default function ClubScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
-  const { user, refreshMe } = useSession();
+  const { user, status, refreshMe } = useSession();
   const c = useColors();
   const { data, error, loading, refreshing, refresh, reload, setData } = useApi(`club:${user?.id ?? 'anon'}:${slug}`, () => Api.club(String(slug)));
   const dismissed = useLiveDismissals();
@@ -43,6 +43,51 @@ export default function ClubScreen() {
   useEffect(() => {
     if (firstLive && !sheet) setSheet(firstLive);
   }, [firstLive, sheet]);
+
+  const act = useCallback(
+    async (action: 'join' | 'leave' | 'subscribe' | 'unsubscribe') => {
+      if (!data) return;
+      const { club, viewer } = data;
+      setBusy(action);
+      setNotice(null);
+      try {
+        const r = await Api.clubAction(club.slug, action);
+        setData((d) => (d ? { ...d, viewer: r.viewer } : d));
+        invalidateApi();
+        if (action === 'join') {
+          setNotice(
+            r.joinStatus === 'PENDING' || r.joinStatus === 'ALREADY_PENDING'
+              ? { tone: 'info', text: `Request sent. ${possessive(club.name)} leaders approve new members — you'll get a notification when they decide.` }
+              : { tone: 'success', text: `You're in! Welcome to ${club.name}. Its events are on your calendar now.` },
+          );
+          void refresh();
+        } else if (action === 'leave') {
+          setNotice({ tone: 'info', text: viewer.isPending ? 'Your join request was withdrawn.' : `You left ${club.name}.` });
+          void refresh();
+        }
+        void refreshMe();
+      } catch (e) {
+        setNotice({ tone: 'danger', text: errorMessage(e) });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [data, setData, refresh, refreshMe],
+  );
+
+  // "Sign in to register" registers too, once the signed-in answer is in (the web does this with ?register=1).
+  // Back here still signed out means "Not now", which drops the wish.
+  const wantsJoin = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!wantsJoin.current) return;
+      if (status === 'signedOut') wantsJoin.current = false;
+      else if (data?.viewer.signedIn) {
+        wantsJoin.current = false;
+        if (!data.viewer.isMember && !data.viewer.isPending) void act('join');
+      }
+    }, [status, data, act]),
+  );
 
   if (loading && !data) return <LoadingView label="Loading club" />;
   if (!data) return (
@@ -59,30 +104,9 @@ export default function ClubScreen() {
   const about = club.about.replace(new RegExp(`^about\\s+(us|${club.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\s*\\n`, 'i'), '').trim();
   const founding = club.status !== 'APPROVED' && !retired;
 
-  const act = async (action: 'join' | 'leave' | 'subscribe' | 'unsubscribe') => {
-    setBusy(action);
-    setNotice(null);
-    try {
-      const r = await Api.clubAction(club.slug, action);
-      setData((d) => (d ? { ...d, viewer: r.viewer } : d));
-      invalidateApi();
-      if (action === 'join') {
-        setNotice(
-          r.joinStatus === 'PENDING' || r.joinStatus === 'ALREADY_PENDING'
-            ? { tone: 'info', text: `Request sent. ${possessive(club.name)} leaders approve new members — you'll get a notification when they decide.` }
-            : { tone: 'success', text: `You're in! Welcome to ${club.name}. Its events are on your calendar now.` },
-        );
-        void refresh();
-      } else if (action === 'leave') {
-        setNotice({ tone: 'info', text: v.isPending ? 'Your join request was withdrawn.' : `You left ${club.name}.` });
-        void refresh();
-      }
-      void refreshMe();
-    } catch (e) {
-      setNotice({ tone: 'danger', text: errorMessage(e) });
-    } finally {
-      setBusy(null);
-    }
+  const signInToJoin = () => {
+    wantsJoin.current = true;
+    router.push({ pathname: '/welcome', params: { reason: 'register' } });
   };
 
   const leave = async () => {
@@ -140,7 +164,7 @@ export default function ClubScreen() {
         : null}
 
       {!retired && !founding ? (
-        <Actions data={data} busy={busy} onJoin={() => void act('join')} onLeave={() => void leave()} onToggleSubscribe={(on) => void act(on ? 'subscribe' : 'unsubscribe')} />
+        <Actions data={data} busy={busy} onSignIn={signInToJoin} onJoin={() => void act('join')} onLeave={() => void leave()} onToggleSubscribe={(on) => void act(on ? 'subscribe' : 'unsubscribe')} />
       ) : null}
 
       {data.attendance ? <AttendanceCard data={data} /> : null}
@@ -225,7 +249,7 @@ export default function ClubScreen() {
   );
 }
 
-function Actions({ data, busy, onJoin, onLeave, onToggleSubscribe }: { data: MClubDetail; busy: string | null; onJoin: () => void; onLeave: () => void; onToggleSubscribe: (on: boolean) => void }) {
+function Actions({ data, busy, onSignIn, onJoin, onLeave, onToggleSubscribe }: { data: MClubDetail; busy: string | null; onSignIn: () => void; onJoin: () => void; onLeave: () => void; onToggleSubscribe: (on: boolean) => void }) {
   const c = useColors();
   const v = data.viewer;
   const club = data.club;
@@ -235,7 +259,7 @@ function Actions({ data, busy, onJoin, onLeave, onToggleSubscribe }: { data: MCl
         <Button
           title={club.joinPolicy === 'APPROVAL' ? 'Sign in to request to join' : 'Sign in to register'}
           icon="join"
-          onPress={() => router.push({ pathname: '/welcome', params: { reason: 'register' } })}
+          onPress={onSignIn}
         />
         <Text variant="small" tone="ink3">
           Use your Weber State account. Signing in for the first time creates it.

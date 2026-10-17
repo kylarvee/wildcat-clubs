@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { clubMemberAttendanceCounts } from "@/lib/metrics";
+import { getConfig } from "@/lib/config";
+import { activeMemberIdsFor, clubMemberAttendanceCounts, registeredMemberCount } from "@/lib/metrics";
 import { rosterData } from "@/lib/roles/queries";
 import { fmtAgo, fmtLongDate } from "@/lib/time";
 import { buttonClasses } from "@/components/ui/button";
@@ -26,7 +27,14 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
   }
 
   // Counts and "active" come from lib/metrics so the roster agrees with every other screen.
-  const [roster, attendance] = await Promise.all([rosterData(club.id), clubMemberAttendanceCounts(club.id)]);
+  const [roster, attendance, registered, activeIds, cfg] = await Promise.all([
+    rosterData(club.id),
+    clubMemberAttendanceCounts(club.id),
+    registeredMemberCount(club.id),
+    activeMemberIdsFor(club.id),
+    getConfig(),
+  ]);
+  const activeRule = { windowDays: cfg["activity.studentWindowDays"], recentEvents: cfg["activity.studentRecentEvents"] };
   const full = access.viaPlatform !== null || access.isAdvisor;
 
   const rows: MemberRow[] = roster
@@ -98,13 +106,14 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
       {pending.length ? <PendingRequests slug={club.slug} rows={pending} /> : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Members" value={current.length} />
-        <Stat label="Active" value={current.filter((r) => r.active).length} hint="Attended in the last month or recent events" />
+        {/* Registered students and the active ones among them, as on the club page; the table below also lists advisors. */}
+        <Stat label="Members" value={registered} hint="Registered students" />
+        <Stat label="Active" value={activeIds.length} hint={`Checked in within ${activeRule.windowDays} days or at one of the last ${activeRule.recentEvents} events`} />
         <Stat label="Leaders" value={current.filter((r) => r.roles.length > 0).length} />
         <Stat label="Alumni" value={rows.filter((r) => r.status === "ALUMNI").length} />
       </div>
 
-      <MembersTable slug={club.slug} clubName={club.name} rows={rows} canEditTitles={club.status !== "RETIRED"} />
+      <MembersTable slug={club.slug} clubName={club.name} rows={rows} canEditTitles={club.status !== "RETIRED"} activeRule={activeRule} />
 
       <PolicyNotices placement="MEMBERSHIP" />
     </div>

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DomainError } from "@/lib/domain/kit";
 import { assistantGate, readJson } from "@/lib/ai/access";
-import { createThread, loadThread, modelCallsSince, type Thread } from "@/lib/ai/conversations";
+import { createThread, LIMIT_TEXT, loadThread, overHourlyLimit, type Thread } from "@/lib/ai/conversations";
 import { runTurn, tryLock } from "@/lib/ai/loop";
 import { jsonError, sseResponse } from "@/lib/ai/sse";
 import { buildView } from "@/lib/ai/view";
@@ -12,11 +12,9 @@ import { MAX_USER_MESSAGE } from "@/lib/ai/types";
  * last one) and stream the answer as server-sent events (StreamEvent in
  * lib/ai/types). Body: { conversationId?, message } or { conversationId, retry: true }.
  * Leaving out conversationId starts a new conversation. 404 when the
- * assistant is off; 409 while the conversation is still answering.
+ * assistant is off; 409 while the conversation is still answering; 429 past
+ * the hourly limit (lib/ai/conversations).
  */
-
-/** Model calls per person per hour — a cost guard well above normal use. */
-const HOURLY_LIMIT = 150;
 
 const Body = z.union([
   z.object({
@@ -34,9 +32,7 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response;
   const input = body.data;
 
-  if ((await modelCallsSince(actor.id, new Date(Date.now() - 3_600_000))) >= HOURLY_LIMIT) {
-    return jsonError(429, "You've asked a lot in the last hour. Take a short break and try again a little later.", "LIMIT");
-  }
+  if (await overHourlyLimit(actor.id)) return jsonError(429, LIMIT_TEXT, "LIMIT");
 
   let thread: Thread;
   try {

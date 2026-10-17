@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
-import { addDepartmentForClub, decideClub, reinstateClub, startAmbassadorProgram } from "@/lib/domain/clubs";
+import { addDepartmentForClub, decideClub, reinstateClub, setClubGoogleAccountVerified, startAmbassadorProgram } from "@/lib/domain/clubs";
 import { decideCustomDocument } from "@/lib/domain/constitution";
 
 function refresh() {
@@ -41,6 +41,12 @@ export async function decideDocumentAction(input: { docId: string; approve: bool
 
 export async function reinstateClubAction(input: { clubId: string; note?: string }) {
   const r = await act((actor) => reinstateClub(actor, input));
+  if (r.ok) refresh();
+  return r;
+}
+
+export async function verifyGoogleAccountAction(input: { clubId: string; email: string; verified: boolean }) {
+  const r = await act((actor) => setClubGoogleAccountVerified(actor, input));
   if (r.ok) refresh();
   return r;
 }

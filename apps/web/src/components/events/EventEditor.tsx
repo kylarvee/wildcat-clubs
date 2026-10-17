@@ -52,7 +52,8 @@ export type EditorEvent = {
   cohostAllClubs: boolean;
   cohosts: { clubId: string; status: CohostStatus }[];
   attachments: PickedFile[];
-  costs: { id: string; description: string; category: string; quantity: number; unitCostCents: number; perOccurrence: boolean; fundingSource: FundingSource }[];
+  /** `lockedBy`: the submitted or approved funding request that covers the line (it can't change). */
+  costs: { id: string; description: string; category: string; quantity: number; unitCostCents: number; perOccurrence: boolean; fundingSource: FundingSource; lockedBy: string | null }[];
   attendanceCount: number;
   /** Set when an officer requirement points at this training. */
   requirementName: string | null;
@@ -132,6 +133,7 @@ export function EventEditor(props: EventEditorProps) {
         unitCost: (c.unitCostCents / 100).toFixed(2),
         perOccurrence: c.perOccurrence,
         fundingSource: c.fundingSource,
+        lockedBy: c.lockedBy,
       })) ?? [],
   );
   const statuses = useMemo(() => Object.fromEntries((event?.cohosts ?? []).map((c) => [c.clubId, c.status])) as Record<string, CohostStatus>, [event]);

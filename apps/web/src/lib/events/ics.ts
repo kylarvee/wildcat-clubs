@@ -43,7 +43,7 @@ const PRODID = "-//Wildcat Clubs//Weber State University//EN";
 export function escapeText(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\;")
+    .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
     .replace(/\r\n|\r|\n/g, "\\n");
 }
@@ -100,6 +100,33 @@ function prop(name: string, value: string) {
   return foldLine(`${name}:${value}`);
 }
 
+/**
+ * The campus zone's rules (US daylight saving since 2007), keyed by TZ. Every
+ * calendar carries it: it matches X-WR-TIMEZONE, and RFC 5545 needs at least one
+ * component, so a club with no events still publishes a valid feed.
+ */
+const VTIMEZONES: Record<string, string[]> = {
+  "America/Denver": [
+    "BEGIN:VTIMEZONE",
+    "TZID:America/Denver",
+    "BEGIN:DAYLIGHT",
+    "TZOFFSETFROM:-0700",
+    "TZOFFSETTO:-0600",
+    "TZNAME:MDT",
+    "DTSTART:19700308T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
+    "END:DAYLIGHT",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:-0600",
+    "TZOFFSETTO:-0700",
+    "TZNAME:MST",
+    "DTSTART:19701101T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+  ],
+};
+
 export function buildVEvent(e: IcsEvent, now: Date = new Date()): string[] {
   const lines = ["BEGIN:VEVENT", prop("UID", e.uid), prop("DTSTAMP", formatUtc(e.updatedAt ?? now))];
   if (e.allDay) {
@@ -142,6 +169,7 @@ export function buildCalendar(cal: IcsCalendar, now: Date = new Date()): string 
     lines.push(prop("DESCRIPTION", escapeText(cal.description)));
   }
   lines.push(`REFRESH-INTERVAL;VALUE=DURATION:PT${refresh}M`, `X-PUBLISHED-TTL:PT${refresh}M`);
+  lines.push(...(VTIMEZONES[TZ] ?? []));
   for (const e of cal.events) lines.push(...buildVEvent(e, now));
   lines.push("END:VCALENDAR");
   return lines.join(CRLF) + CRLF;

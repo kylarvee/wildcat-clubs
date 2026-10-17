@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { FundingSource } from "@prisma/client";
-import { Plus, Trash2, Wallet } from "lucide-react";
+import { Lock, Plus, Trash2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { fmtMoney } from "@/lib/time";
@@ -17,6 +17,8 @@ export type CostRowValue = {
   unitCost: string;
   perOccurrence: boolean;
   fundingSource: FundingSource;
+  /** Title of the submitted or approved funding request that covers this line; it can't change then. */
+  lockedBy?: string | null;
 };
 
 export function costRowCents(r: CostRowValue) {
@@ -49,7 +51,7 @@ export const newCostKey = () => `new-${Date.now()}-${keySeq++}`;
 /**
  * Event costs (the only place they're entered). "Each meeting" lines multiply
  * by the number of meetings; "Once" lines count one time. Funding requests are
- * made from these in the Budget tool.
+ * made from these in the Budget tool; a line a request covers is read-only.
  */
 export function CostsEditor({
   rows,
@@ -78,70 +80,83 @@ export function CostsEditor({
         </div>
       ) : (
         <ul className="space-y-3">
-          {rows.map((r, i) => (
-            <li key={r.key} className="rounded-xl border border-line bg-surface p-3">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-d`}>
-                    What it&apos;s for
-                  </label>
-                  <Input id={`${r.key}-d`} value={r.description} maxLength={200} placeholder="e.g. Pizza for 25 people" onChange={(e) => update(r.key, { description: e.target.value })} />
+          {rows.map((r, i) => {
+            const locked = Boolean(r.lockedBy);
+            return (
+              <li key={r.key} className="rounded-xl border border-line bg-surface p-3">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-d`}>
+                      What it&apos;s for
+                    </label>
+                    <Input id={`${r.key}-d`} value={r.description} maxLength={200} placeholder="e.g. Pizza for 25 people" disabled={locked} onChange={(e) => update(r.key, { description: e.target.value })} />
+                  </div>
+                  <div className="pt-5 text-right">
+                    <p className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(costRowCents(r))}</p>
+                    <p className="text-xs text-ink-3">{r.perOccurrence ? "per meeting" : "once"}</p>
+                  </div>
+                  {locked ? null : (
+                    <Button variant="ghost" size="icon" className="mt-5 shrink-0" aria-label={`Remove cost line ${i + 1}`} onClick={() => onChange(rows.filter((x) => x.key !== r.key))}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
-                <div className="pt-5 text-right">
-                  <p className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(costRowCents(r))}</p>
-                  <p className="text-xs text-ink-3">{r.perOccurrence ? "per meeting" : "once"}</p>
-                </div>
-                <Button variant="ghost" size="icon" className="mt-5 shrink-0" aria-label={`Remove cost line ${i + 1}`} onClick={() => onChange(rows.filter((x) => x.key !== r.key))}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-[1.3fr_0.7fr_0.9fr_1fr_1fr]">
-                <div>
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-c`}>
-                    Category
-                  </label>
-                  <Select id={`${r.key}-c`} value={r.category} onChange={(e) => update(r.key, { category: e.target.value })}>
-                    {[...new Set([...COST_CATEGORIES, r.category])].map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-q`}>
-                    Quantity
-                  </label>
-                  <Input id={`${r.key}-q`} type="number" min={0} step="any" inputMode="decimal" value={r.quantity} onChange={(e) => update(r.key, { quantity: e.target.value })} />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-u`}>
-                    Cost each ($)
-                  </label>
-                  <Input id={`${r.key}-u`} type="number" min={0} step="0.01" inputMode="decimal" placeholder="0.00" value={r.unitCost} onChange={(e) => update(r.key, { unitCost: e.target.value })} />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-p`}>
-                    How often
-                  </label>
-                  <Select id={`${r.key}-p`} value={r.perOccurrence ? "each" : "once"} onChange={(e) => update(r.key, { perOccurrence: e.target.value === "each" })}>
-                    <option value="each">Each meeting</option>
-                    <option value="once">Once</option>
-                  </Select>
-                </div>
-                <div className="col-span-2 sm:col-span-1">
-                  <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-f`}>
-                    Funding from
-                  </label>
-                  <Select id={`${r.key}-f`} value={r.fundingSource} onChange={(e) => update(r.key, { fundingSource: e.target.value as FundingSource })}>
-                    {FUNDING_SOURCES.map((s) => (
-                      <option key={s} value={s}>
-                        {FUNDING_LABEL[s]}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-            </li>
-          ))}
+                {locked ? (
+                  <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-3">
+                    <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span>
+                      Part of the funding request “{r.lockedBy}”, so it&apos;s locked to match what you asked for. Add a new line for anything extra.
+                    </span>
+                  </p>
+                ) : null}
+                <fieldset disabled={locked} className="mt-2 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-[1.3fr_0.7fr_0.9fr_1fr_1fr]">
+                  <div>
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-c`}>
+                      Category
+                    </label>
+                    <Select id={`${r.key}-c`} value={r.category} onChange={(e) => update(r.key, { category: e.target.value })}>
+                      {[...new Set([...COST_CATEGORIES, r.category])].map((c) => (
+                        <option key={c}>{c}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-q`}>
+                      Quantity
+                    </label>
+                    <Input id={`${r.key}-q`} type="number" min={0} step="any" inputMode="decimal" value={r.quantity} onChange={(e) => update(r.key, { quantity: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-u`}>
+                      Cost each ($)
+                    </label>
+                    <Input id={`${r.key}-u`} type="number" min={0} step="0.01" inputMode="decimal" placeholder="0.00" value={r.unitCost} onChange={(e) => update(r.key, { unitCost: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-p`}>
+                      How often
+                    </label>
+                    <Select id={`${r.key}-p`} value={r.perOccurrence ? "each" : "once"} onChange={(e) => update(r.key, { perOccurrence: e.target.value === "each" })}>
+                      <option value="each">Each meeting</option>
+                      <option value="once">Once</option>
+                    </Select>
+                  </div>
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="text-xs font-medium text-ink-3" htmlFor={`${r.key}-f`}>
+                      Funding from
+                    </label>
+                    <Select id={`${r.key}-f`} value={r.fundingSource} onChange={(e) => update(r.key, { fundingSource: e.target.value as FundingSource })}>
+                      {FUNDING_SOURCES.map((s) => (
+                        <option key={s} value={s}>
+                          {FUNDING_LABEL[s]}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </fieldset>
+              </li>
+            );
+          })}
         </ul>
       )}
 

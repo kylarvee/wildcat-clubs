@@ -10,7 +10,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const occ = await db.eventOccurrence.findUnique({ where: { id }, include: OCC_INCLUDE });
   if (!occ) return new Response("Not found", { status: 404 });
   const actor = await getCurrentUser();
-  if (!(await canViewEvent(actor, occ.event))) return new Response("Not found", { status: 404 });
+  // The feed include selects only APPROVED co-hosts' clubs; the visibility rule needs { clubId, status }.
+  const gate = { ...occ.event, cohosts: occ.event.cohosts.map((c) => ({ clubId: c.club.id, status: "APPROVED" })) };
+  if (!(await canViewEvent(actor, gate))) return new Response("Not found", { status: 404 });
   const body = buildCalendar({ name: occ.event.title, events: toIcsEvents([occ]) });
   const slug = occ.event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "event";
   return icsResponse(body, { filename: `${slug}.ics`, download: true, cacheSeconds: 60 });

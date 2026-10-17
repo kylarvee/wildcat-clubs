@@ -22,11 +22,12 @@ import type { TestPersonOption } from "@/lib/domain/tests";
 import { blankQuestion, LIMITS, testProblems, totalPoints, type EditorTest, type Problem } from "@/lib/tests/editor";
 import {
   actionLabel,
+  actionsFor,
   audienceDescription,
   audienceLabel,
-  AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
   CLUB_AUDIENCES,
+  isClubAction,
   RECURRENCE_LABEL,
   TRIGGER_LABEL,
   UNIVERSITY_AUDIENCES,
@@ -639,10 +640,15 @@ function AutomationsCard({
   const triggers = AUTOMATION_TRIGGERS.filter((t) => t !== "MISSED_DEADLINE" || showMissed || automations.some((a) => a.trigger === t));
   const used = new Set(automations.map((a) => `${a.trigger}:${a.action}`));
   const nextFree = (): Automation | null => {
-    for (const trigger of triggers) for (const action of AUTOMATION_ACTIONS) if (!used.has(`${trigger}:${action}`)) return { trigger, action };
+    for (const trigger of triggers) for (const action of actionsFor(trigger, kind)) if (!used.has(`${trigger}:${action}`)) return { trigger, action };
     return null;
   };
   const set = (i: number, a: Automation) => onChange(automations.map((x, j) => (j === i ? a : x)));
+  // Some steps only fit some results (e.g. approving a join request only after a pass).
+  const setTrigger = (i: number, a: Automation, trigger: Automation["trigger"]) => {
+    const fits = actionsFor(trigger, kind);
+    set(i, { trigger, action: fits.includes(a.action) ? a.action : fits[0] });
+  };
   return (
     <Card>
       <CardHeader title="Automations" description="What happens on its own after a result. Taking the step yourself is always still an option." />
@@ -659,7 +665,7 @@ function AutomationsCard({
         <ul className="space-y-2">
           {automations.map((a, i) => (
             <li key={i} className="flex flex-col gap-2 rounded-xl border border-line p-3 sm:flex-row sm:items-center">
-              <Select aria-label={`Automation ${i + 1}: when`} value={a.trigger} onChange={(e) => set(i, { ...a, trigger: e.target.value as Automation["trigger"] })} className="sm:w-64">
+              <Select aria-label={`Automation ${i + 1}: when`} value={a.trigger} onChange={(e) => setTrigger(i, a, e.target.value as Automation["trigger"])} className="sm:w-64">
                 {triggers.map((t) => (
                   <option key={t} value={t}>
                     {TRIGGER_LABEL[t]}
@@ -670,7 +676,7 @@ function AutomationsCard({
                 →
               </span>
               <Select aria-label={`Automation ${i + 1}: then`} value={a.action} onChange={(e) => set(i, { ...a, action: e.target.value as Automation["action"] })} className="sm:flex-1">
-                {AUTOMATION_ACTIONS.map((x) => (
+                {actionsFor(a.trigger, kind).map((x) => (
                   <option key={x} value={x}>
                     {actionLabel(x, kind)}
                   </option>
@@ -684,6 +690,13 @@ function AutomationsCard({
         </ul>
         {automations.some((a, i) => automations.findIndex((b) => b.trigger === a.trigger && b.action === a.action) !== i) ? (
           <p className="text-xs text-warning">Two rows do the same thing; only one will run.</p>
+        ) : null}
+        {automations.some((a) => isClubAction(a.action)) ? (
+          <p className="text-xs text-ink-3">
+            Approvals and permission changes are made in the name of the person who created this test, and only while they could make them by hand (approving takes the Members permission;
+            officer permissions take the President, a Vice President or the advisor). Adding one takes the same permission.
+            {automations.some((a) => a.action === "APPROVE_JOIN_REQUEST") ? " People waiting to join can only take a test that's open to anyone." : ""}
+          </p>
         ) : null}
         <Button
           variant="outline"

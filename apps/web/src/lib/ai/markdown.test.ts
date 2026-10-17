@@ -11,6 +11,8 @@ describe("safeHref", () => {
     expect(safeHref("javascript:alert(1)")).toBeNull();
     expect(safeHref("data:text/html,hi")).toBeNull();
     expect(safeHref("//evil.example")).toBeNull();
+    expect(safeHref("/\\evil.example/login")).toBeNull();
+    expect(safeHref("/clubs/x\\y")).toBeNull();
     expect(safeHref("clubs/chess")).toBeNull();
   });
 });

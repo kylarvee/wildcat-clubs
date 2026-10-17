@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
@@ -20,6 +21,12 @@ import { clubLeaderIds, parseForm } from "@/lib/domain/clubs";
  */
 
 export const inviteHref = (token: string) => `/advisor/invite/${token}`;
+
+/** The invite link is the only thing guarding the invite page, so it's 256 random bits (not a guessable cuid). */
+export const newInviteToken = () => randomBytes(32).toString("base64url");
+
+/** Retired and rejected clubs can't take an advisor, so their invitations can't be answered. */
+const clubClosed = (status: string) => status === "RETIRED" || status === "REJECTED";
 
 const InviteInput = z.object({
   clubId: z.string().trim().min(1),
@@ -101,7 +108,7 @@ export async function inviteAdvisor(actor: Actor | null, clubId: string, input: 
   const pending = await db.advisorInvite.findFirst({ where: { clubId: club.id, status: "PENDING", email: { equals: v.email, mode: "insensitive" } } });
   if (pending) throw conflict("They already have a pending invitation. Use “Resend” to send it again.");
 
-  const invite = await db.advisorInvite.create({ data: { clubId: club.id, name: v.name, email: v.email, invitedById: actor.id, inviteeId: account?.id ?? null } });
+  const invite = await db.advisorInvite.create({ data: { clubId: club.id, name: v.name, email: v.email, token: newInviteToken(), invitedById: actor.id, inviteeId: account?.id ?? null } });
   await ensureInviteTask(invite, club.name, actor.id);
   await sendInvite(invite, club, actor);
   await logActivity({ actorId: actor.id, action: "advisor.invited", entityType: "advisorInvite", entityId: invite.id, clubId: club.id, data: { name: v.name, email: v.email } });
@@ -142,7 +149,7 @@ export async function loadInviteForViewer(actor: Actor | null, token: string) {
   });
   if (!invite) return null;
   const emailMatches = Boolean(actor && actor.email.toLowerCase() === invite.email.toLowerCase());
-  return { invite, emailMatches, canAnswer: emailMatches && actor?.kind === "FACULTY_STAFF" && invite.status === "PENDING" };
+  return { invite, emailMatches, canAnswer: emailMatches && actor?.kind === "FACULTY_STAFF" && invite.status === "PENDING" && !clubClosed(invite.club.status) };
 }
 
 async function loadInviteForAnswer(actor: Actor | null, token: string) {
@@ -152,7 +159,7 @@ async function loadInviteForAnswer(actor: Actor | null, token: string) {
   if (actor.email.toLowerCase() !== invite.email.toLowerCase()) throw forbidden(`This invitation was sent to ${invite.email}. Sign in with that account to answer it.`);
   if (actor.kind !== "FACULTY_STAFF") throw forbidden("Only faculty and staff accounts can be advisors.");
   if (invite.status !== "PENDING") throw conflict(invite.status === "CANCELLED" ? "The club cancelled this invitation." : "You've already answered this invitation.");
-  if (invite.club.status === "RETIRED" || invite.club.status === "REJECTED") throw conflict("This club is no longer active, so the invitation has closed.");
+  if (clubClosed(invite.club.status)) throw conflict("This club is no longer active, so the invitation has closed.");
   return invite;
 }
 

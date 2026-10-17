@@ -65,8 +65,14 @@ export function SeatCard({
         {vacant ? (
           <Badge tone="warning">Vacant</Badge>
         ) : maxHolders > 1 ? (
-          <span className="mt-0.5 text-xs tabular-nums text-ink-3" title={`${holders.length} of ${maxHolders} spots filled`}>
-            {holders.length}/{maxHolders}
+          // Spelled out for screen readers ("1/2" reads as a fraction) and touch (no hover title).
+          <span className="mt-0.5 text-xs tabular-nums text-ink-3">
+            <span aria-hidden="true">
+              {holders.length}/{maxHolders}
+            </span>
+            <span className="sr-only">
+              {holders.length} of {maxHolders} spots filled
+            </span>
           </span>
         ) : null}
         {actions}

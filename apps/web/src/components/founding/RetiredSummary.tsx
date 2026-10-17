@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Archive } from "lucide-react";
 import type { Club } from "@prisma/client";
 import { db } from "@/lib/db";
+import { clubHeldEventCount } from "@/lib/metrics";
 import { fmtLongDate } from "@/lib/time";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Stat } from "@/components/ui/layout";
@@ -13,8 +14,10 @@ export async function RetiredSummary({ club }: { club: Club }) {
   const [roles, people, alumni, held, files] = await Promise.all([
     db.roleAssignment.count({ where: { clubId: club.id, role: { not: "MEMBER" } } }),
     db.roleAssignment.findMany({ where: { clubId: club.id, role: { not: "MEMBER" } }, distinct: ["userId"], select: { userId: true } }),
-    db.membership.count({ where: { clubId: club.id, status: { in: ["ALUMNI", "ACTIVE"] } } }),
-    db.eventOccurrence.count({ where: { event: { clubId: club.id }, status: "SCHEDULED", startsAt: { lte: club.retiredAt ?? new Date() }, attendances: { some: {} } } }),
+    // Students only, like every member count (advisors hold memberships too).
+    db.membership.count({ where: { clubId: club.id, status: { in: ["ALUMNI", "ACTIVE"] }, user: { kind: "STUDENT" } } }),
+    // Same "held" rule as everywhere else, co-hosted events included.
+    clubHeldEventCount(club.id, { to: club.retiredAt ?? undefined }),
     db.fileItem.count({ where: { clubId: club.id, isFolder: false, trashedAt: null } }),
   ]);
   const since = club.approvedAt ?? club.createdAt;

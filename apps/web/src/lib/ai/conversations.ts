@@ -237,9 +237,18 @@ export async function claimAction(thread: Thread, toolUseId: string): Promise<{ 
   return claimed;
 }
 
-/** Model calls (assistant rows) this person made in the last hour, for the usage limit. */
-export async function modelCallsSince(userId: string, since: Date): Promise<number> {
+/** Model calls per person per hour — a cost guard well above normal use. */
+export const HOURLY_LIMIT = 150;
+export const LIMIT_TEXT = "You've asked a lot in the last hour. Take a short break and try again a little later.";
+
+/** Model calls (assistant rows) this person made since a moment, for the usage limit. */
+async function modelCallsSince(userId: string, since: Date): Promise<number> {
   return db.aiMessage.count({ where: { role: "assistant", createdAt: { gte: since }, conversation: { userId } } });
+}
+
+/** True once this person has used the last hour's model calls. Checked before every turn that calls Claude. */
+export async function overHourlyLimit(userId: string): Promise<boolean> {
+  return (await modelCallsSince(userId, new Date(Date.now() - 3_600_000))) >= HOURLY_LIMIT;
 }
 
 /**

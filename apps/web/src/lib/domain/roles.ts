@@ -59,12 +59,12 @@ export async function grantRole(input: {
   endReason?: RoleEndReason;
 }) {
   const now = new Date();
+  let endedUserIds: string[] = [];
   const assignment = await db.$transaction(async (tx) => {
     if (input.endAssignmentIds?.length) {
-      await tx.roleAssignment.updateMany({
-        where: { id: { in: input.endAssignmentIds }, clubId: input.clubId, endedAt: null },
-        data: { endedAt: now, endReason: input.endReason ?? "SUCCEEDED" },
-      });
+      const where = { id: { in: input.endAssignmentIds }, clubId: input.clubId, endedAt: null };
+      endedUserIds = [...new Set((await tx.roleAssignment.findMany({ where, select: { userId: true } })).map((r) => r.userId))];
+      await tx.roleAssignment.updateMany({ where, data: { endedAt: now, endReason: input.endReason ?? "SUCCEEDED" } });
     }
     await tx.membership.upsert({
       where: { userId_clubId: { userId: input.userId, clubId: input.clubId } },
@@ -104,6 +104,8 @@ export async function grantRole(input: {
     return a;
   });
 
+  // People replaced in the same step stop owing that role's requirements right away.
+  for (const id of endedUserIds) if (id !== input.userId) await reopenRequirementTasks(id);
   if (input.role !== "ADVISOR" && ROLE_RANK[input.role] >= 1) {
     await openRequirementTasks(input.userId, input.role, { clubId: input.clubId, assignmentStartedAt: now, clubApprovedAt: assignment.club.approvedAt });
   }
@@ -184,7 +186,8 @@ export async function endRoleAssignment(actor: Actor | null, assignmentId: strin
   if (!access) throw notFound("Club");
   const self = a.userId === actor.id;
   const full = access.viaPlatform !== null || access.isAdvisor;
-  if (a.role === "ADVISOR" && !full) throw forbidden("Only an admin or the advisor can end an advisor's role.");
+  // Same rule as memberships.removeMember: a co-advisor can't end another advisor's role.
+  if (a.role === "ADVISOR" && !self && !access.viaPlatform) throw forbidden("Only an admin or the advisor can end an advisor's role.");
   if (!self && !full && !access.assignableRoles.includes(a.role)) throw forbidden();
   if (a.role === "PRESIDENT" && !full) {
     const others = await db.roleAssignment.count({ where: { clubId: a.clubId, role: "PRESIDENT", endedAt: null, id: { not: a.id } } });
@@ -310,6 +313,7 @@ export async function handOffPresidency(actor: Actor | null, clubId: string, inp
       db.roleAssignment.updateMany({ where: { clubId, userId: outgoing.userId, endedAt: null }, data: { endedAt: now, endReason: "RESIGNED" } }),
       db.membership.updateMany({ where: { clubId, userId: outgoing.userId, status: "ACTIVE" }, data: { status: "ALUMNI", endedAt: now } }),
     ]);
+    await reopenRequirementTasks(outgoing.userId);
   }
 
   await logActivity({
@@ -445,6 +449,7 @@ export async function endPlacement(actor: Actor | null, assignmentId: string) {
   if (!a || a.endedAt || !a.viaClubId) throw notFound("Placement");
   await assertClubCap(actor, a.viaClubId, "roster");
   await db.roleAssignment.update({ where: { id: a.id }, data: { endedAt: new Date(), endReason: "TERM_ENDED" } });
+  await reopenRequirementTasks(a.userId);
   await logActivity({ actorId: actor.id, action: "role.ended", entityType: "roleAssignment", entityId: a.id, clubId: a.clubId, data: { userId: a.userId, role: a.role, reason: "TERM_ENDED", placement: true }, isPublic: true });
   await logActivity({ actorId: actor.id, action: "ambassador.placement_ended", entityType: "roleAssignment", entityId: a.id, clubId: a.viaClubId, data: { userId: a.userId, clubId: a.clubId } });
   await notify({
@@ -516,9 +521,13 @@ const ContributionInput = z.object({
   fileIds: z.array(z.string()).max(20, "Attach up to 20 files.").optional(),
 });
 
-/** Who may add to or remove from a role's contributions: the holder (any time) or club leaders with `orgchart`. */
+/**
+ * Who may add to or remove from a role's contributions: the holder (any time,
+ * while their account is active — alumni profiles are frozen, as in
+ * profiles.ts) or club leaders with `orgchart`.
+ */
 async function canCurateRole(actor: Actor, assignment: { userId: string; clubId: string }) {
-  if (assignment.userId === actor.id) return true;
+  if (assignment.userId === actor.id && actor.status === "ACTIVE") return true;
   const access = await getClubAccess(actor, assignment.clubId);
   return Boolean(access?.capabilities.has("orgchart"));
 }
@@ -576,14 +585,28 @@ export async function addRoleContribution(actor: Actor | null, roleAssignmentId:
   return { project, skippedFiles: ids.length - visible.length };
 }
 
-/** Remove a contribution from a role (the holder or org chart editors). */
+/**
+ * Remove a contribution from a role (the holder or org chart editors).
+ * Contributions belong to the holder, so only the holder deletes one; an
+ * editor takes it off the role and it stays on the holder's profile.
+ */
 export async function removeRoleContribution(actor: Actor | null, projectId: string) {
   assertSignedIn(actor);
   const p = await db.project.findUnique({ where: { id: projectId }, include: { roleAssignment: { select: { userId: true, clubId: true } } } });
   if (!p || !p.roleAssignment) throw notFound("Contribution");
   if (!(await canCurateRole(actor, p.roleAssignment))) throw forbidden();
-  await db.project.delete({ where: { id: p.id } });
-  await logActivity({ actorId: actor.id, action: "project.removed", entityType: "project", entityId: p.id, clubId: p.roleAssignment.clubId, data: { title: p.title } });
+  const owner = p.userId === actor.id;
+  if (owner) await db.project.delete({ where: { id: p.id } });
+  else await db.project.update({ where: { id: p.id }, data: { roleAssignmentId: null, clubId: null } });
+  await logActivity({
+    actorId: actor.id,
+    action: owner ? "project.removed" : "project.unlinked",
+    entityType: "project",
+    entityId: p.id,
+    clubId: p.roleAssignment.clubId,
+    data: { title: p.title, ...(owner ? {} : { userId: p.userId, roleAssignmentId: p.roleAssignmentId }) },
+  });
+  return { deleted: owner };
 }
 
 export { ALL_CAPABILITIES };

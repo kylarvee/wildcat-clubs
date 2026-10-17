@@ -17,7 +17,8 @@ export function SiteFooter() {
         </div>
         <FooterCol title="Explore" links={[["Clubs", "/clubs"], ["Calendar", "/calendar"], ["Club network", "/network"], ["Start a club", "/clubs/new"]]} />
         <FooterCol title="For members" links={[["Dashboard", "/dashboard"], ["My attendance", "/me/attendance"], ["Get the app", "/get-the-app"], ["Report a concern", "/report"]]} />
-        <FooterCol title="Policy" links={[["Policy library", "/policies"], ["Review policy", "/policies/review-integrity"], ["Reporting policy", "/policies/anonymous-reporting"]]} />
+        {/* Topic anchors in the library, not policy slugs: an archived policy would make a slug link 404 on every page. */}
+        <FooterCol title="Policy" links={[["Policy library", "/policies"], ["Review policy", "/policies#reviews"], ["Reporting policy", "/policies#complaints"]]} />
       </div>
       <div className="border-t border-line py-4 text-center text-xs text-ink-3">
         {PLATFORM.name} · {INSTITUTION.name} · {INSTITUTION.city}

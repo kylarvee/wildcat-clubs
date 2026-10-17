@@ -102,7 +102,7 @@ suite("Club Files (scratch database)", async () => {
     const folder = await files.createFolder(advisor, { scope, parentId: null, name: "Integration Test" });
     const sub = await files.createFolder(advisor, { scope, parentId: folder.id });
     expect(sub.name).toBe("New folder");
-    const up = await files.uploadFile(advisor, { name: "hello.txt", mimeType: "text/plain", bytes: Buffer.from("hello"), scope: "club", clubId: club.id, parentId: folder.id });
+    const up = await files.uploadFile(advisor, { name: "hello.txt", bytes: Buffer.from("hello"), scope: "club", clubId: club.id, parentId: folder.id });
     const up2 = await files.uploadFile(advisor, { name: "hello.txt", bytes: Buffer.from("hi"), scope: "club", clubId: club.id, parentId: folder.id });
     keys.push(up.storageKey!, up2.storageKey!);
     expect(up2.name).toBe("hello (2).txt");
@@ -193,7 +193,7 @@ suite("Club Files (scratch database)", async () => {
       expect(store.get(rootId)?.name).toContain(club.name);
       expect(store.get(rootId)!.perms.some((p) => p.role === "writer")).toBe(true); // leaders
 
-      const up = await files.uploadFile(advisor, { name: "flyer.png", mimeType: "image/png", bytes: Buffer.from("png"), scope: "club", clubId: club.id, parentId: folder.id });
+      const up = await files.uploadFile(advisor, { name: "flyer.png", bytes: Buffer.from("png"), scope: "club", clubId: club.id, parentId: folder.id });
       const upDrive = (await db.fileItem.findUniqueOrThrow({ where: { id: up.id } })).driveFileId!;
       expect(store.get(upDrive)?.parents).toEqual([folderDrive]);
 

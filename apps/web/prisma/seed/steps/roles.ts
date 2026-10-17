@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { RoleEndReason } from "@prisma/client";
 import type { Assignment, ClubM, Ctx, Person } from "../ctx";
 import { addDays, DAY, maxDate, minDate } from "../lib/dates";
@@ -10,6 +11,9 @@ import { decGraduation, fallStartDate, mayGraduation, springStartDate } from "./
  * resignations and seats left empty for a while. Personas' roles are pinned so
  * their test scenarios hold, everything else is generated around them.
  */
+
+/** Same as domain/advisors: the link is the only key to the invite page, so it's random, not a seeded id. */
+const inviteToken = () => randomBytes(32).toString("base64url");
 
 const FAR = new Date("2100-01-01T00:00:00Z");
 const H = (y: number) => mayGraduation(y);
@@ -361,7 +365,7 @@ function addAdvisor(ctx: Ctx, club: ClubM, advisor: Person, start: Date, endAt: 
   void m;
   const invitedAt = addDays(start, -rng.float(1, 4));
   ctx.rows.invites.push({
-    id: ctx.id(), clubId: club.id, name: advisor.name, email: advisor.email, token: `inv_${ctx.id()}`, status: "ACCEPTED",
+    id: ctx.id(), clubId: club.id, name: advisor.name, email: advisor.email, token: inviteToken(), status: "ACCEPTED",
     invitedById: invitedBy, inviteeId: advisor.id, createdAt: invitedAt < NOW ? invitedAt : NOW, respondedAt: start,
   });
 }
@@ -388,7 +392,7 @@ function buildAdvisors(ctx: Ctx) {
       // An earlier invitee (the Student Success Center advisor) said no before the librarian said yes.
       const declined = ctx.person(ctx.refs["staff:success"]);
       ctx.rows.invites.push({
-        id: ctx.id(), clubId: club.id, name: declined.name, email: declined.email, token: `inv_${ctx.id()}`, status: "DECLINED",
+        id: ctx.id(), clubId: club.id, name: declined.name, email: declined.email, token: inviteToken(), status: "DECLINED",
         invitedById: club.founderId, inviteeId: declined.id, createdAt: addDays(NOW, -36.4), respondedAt: addDays(NOW, -34.1),
       });
     }
@@ -410,7 +414,7 @@ function buildAdvisors(ctx: Ctx) {
   const bee = ctx.club("beekeeping");
   const nathan = ctx.p("nathan");
   const invite = {
-    id: ctx.id(), clubId: bee.id, name: nathan.name, email: nathan.email, token: `inv_${ctx.id()}`, status: "PENDING" as const,
+    id: ctx.id(), clubId: bee.id, name: nathan.name, email: nathan.email, token: inviteToken(), status: "PENDING" as const,
     invitedById: ctx.p("frank").id, inviteeId: nathan.id, createdAt: addDays(NOW, -3.2), respondedAt: null,
   };
   ctx.rows.invites.push(invite);

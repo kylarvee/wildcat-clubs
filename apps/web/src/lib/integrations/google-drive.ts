@@ -5,7 +5,7 @@ import type { drive_v3 } from "@googleapis/drive";
 import type { FileVisibility } from "@prisma/client";
 import { db } from "@/lib/db";
 import { integrationLive } from "@/lib/config";
-import { googleJwt } from "@/lib/integrations/google";
+import { CLUB_ACCOUNT_FIELDS, clubGoogleAccount, googleJwt } from "@/lib/integrations/google";
 import { getBytes } from "@/lib/files/storage";
 import { resolveVisibility, TOP_LEVEL_DEFAULT } from "@/lib/files/visibility";
 import type { Vis } from "@/lib/files/types";
@@ -15,8 +15,9 @@ import type { Vis } from "@/lib/files/types";
  * (lib/files/storage + FileItem) is the source of truth; when a sysadmin turns
  * on "Google Drive" sync, each club's files are copied into a folder in the
  * club's own Workspace account (Club.contactEmail), so leaders can also open
- * them from Drive. With sync off — or a club without a Google account — every
- * call is a no-op. Personal and university files stay on the platform only.
+ * them from Drive. With sync off — or a club that isn't approved or whose
+ * Google account WSUSA hasn't verified (clubGoogleAccount) — every call is a
+ * no-op. Personal and university files stay on the platform only.
  *
  * What is mirrored: uploads and new folders (FileItem.driveFileId records the
  * copy; Club.googleDriveFolderId the club's top folder), renames, moves,
@@ -47,8 +48,8 @@ import type { Vis } from "@/lib/files/types";
  *      (create and manage only the files and folders this app makes in each
  *      club account's Drive — including sharing them; it can't read anything
  *      else in those accounts.)
- *   3. Turn on Google Drive sync in System settings, and give each club a
- *      Google account email in its Settings.
+ *   3. Turn on Google Drive sync in System settings. Each club adds its Google
+ *      account email in its Settings, and WSUSA verifies it (Admin → Club reviews).
  */
 
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
@@ -58,15 +59,18 @@ export type DriveSyncResult = { status: "queued" | "synced" | "off" | "skipped" 
 
 type ClubRow = { id: string; name: string; contactEmail: string; googleDriveFolderId: string | null };
 
-export type DriveState = "live" | "off" | "needs-account" | "not-club";
+/** "pending": the club has an account, but isn't approved or WSUSA hasn't verified the account yet. */
+export type DriveState = "live" | "off" | "needs-account" | "pending" | "not-club";
 
 /** Whether this club's files mirror to Drive right now (for the explorer's status line). */
 export async function driveReady(clubId: string | null): Promise<{ live: boolean; state: DriveState; account: string | null; reason?: string }> {
   if (!clubId) return { live: false, state: "not-club", account: null, reason: "Only club files are copied to Google Drive." };
   if (!(await integrationLive("googleDrive"))) return { live: false, state: "off", account: null, reason: "Google Drive sync is off." };
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { contactEmail: true } });
+  const club = await db.club.findUnique({ where: { id: clubId }, select: CLUB_ACCOUNT_FIELDS });
   if (!club?.contactEmail) return { live: false, state: "needs-account", account: null, reason: "Add the club's Google account email in Settings to copy its files to Drive." };
-  return { live: true, state: "live", account: club.contactEmail };
+  const account = clubGoogleAccount(club);
+  if (!account.email) return { live: false, state: "pending", account: null, reason: account.reason };
+  return { live: true, state: "live", account: account.email };
 }
 
 /** Loaded on first use, so mock mode never pulls in the Google client. */
@@ -76,8 +80,9 @@ async function client(subject: string): Promise<drive_v3.Drive> {
 }
 
 async function liveClub(clubId: string): Promise<ClubRow | null> {
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, name: true, contactEmail: true, googleDriveFolderId: true } });
-  return club?.contactEmail ? { ...club, contactEmail: club.contactEmail } : null;
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, name: true, googleDriveFolderId: true, ...CLUB_ACCOUNT_FIELDS } });
+  const account = clubGoogleAccount(club);
+  return club && account.email ? { id: club.id, name: club.name, googleDriveFolderId: club.googleDriveFolderId, contactEmail: account.email } : null;
 }
 
 function errorText(e: unknown) {

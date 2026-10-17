@@ -30,10 +30,11 @@ export type Block =
 /**
  * Links we allow: site paths ("/clubs/x", never "//host"), http(s) and mailto.
  * Anything else (javascript:, data:, relative tricks) renders as plain text.
+ * Site paths can't contain a backslash: browsers read "/\host" as "//host".
  */
 export function safeHref(raw: string): string | null {
   const href = raw.trim();
-  if (/^\/(?!\/)[^\s]*$/.test(href)) return href;
+  if (/^\/(?![/\\])[^\s\\]*$/.test(href)) return href;
   if (/^https?:\/\/[^\s/]+[^\s]*$/i.test(href)) return href;
   if (/^mailto:[^\s@]+@[^\s@]+$/i.test(href)) return href;
   return null;

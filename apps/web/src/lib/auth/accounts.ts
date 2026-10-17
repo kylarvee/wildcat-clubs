@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
 import { emailKind } from "@/lib/institution";
 import { logActivity } from "@/lib/lake/activity";
@@ -32,11 +33,20 @@ export async function findOrCreateUserByEmail(input: { email: string; name: stri
       kind,
       avatarUrl: input.avatarUrl ?? null,
       avatarColor: colorFor(email),
+      calendarToken: newCalendarToken(),
     },
   });
   await logActivity({ actorId: user.id, action: "user.created", entityType: "user", entityId: user.id });
   await linkPendingInvites(user.id, email);
   return user;
+}
+
+/**
+ * The only secret on a person's private calendar feed: 256 random bits. Not the
+ * schema's cuid() default, which is mostly timestamp and counter (~41 random bits).
+ */
+export function newCalendarToken() {
+  return randomBytes(32).toString("base64url");
 }
 
 /** Links advisor invites sent before this person had an account, and puts them in their task inbox. */

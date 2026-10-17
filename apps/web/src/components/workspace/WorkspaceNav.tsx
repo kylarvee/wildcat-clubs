@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, FileText, FolderOpen, Gavel, Home, Megaphone, Network, Palette, Settings, Users, Vote, Wallet, BadgeCheck,
+  BarChart3, CalendarDays, ClipboardCheck, FileText, FolderOpen, Gavel, Home, Lock, Megaphone, Network, Palette, Settings, Users, Vote, Wallet, BadgeCheck,
 } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 
@@ -25,14 +25,22 @@ export function WorkspaceNav({ links }: { links: WorkspaceLink[] }) {
           <Link
             key={l.key}
             href={l.href}
+            aria-current={active ? "page" : undefined}
             className={cn(
               "flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium",
               active ? "bg-brand-50 text-brand" : "text-ink-2 hover:bg-muted hover:text-ink",
               l.locked && "opacity-55",
             )}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-4 w-4" aria-hidden="true" />
             {l.label}
+            {/* Dimming alone doesn't reach screen readers or every eye. */}
+            {l.locked ? (
+              <>
+                <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="sr-only"> (no access)</span>
+              </>
+            ) : null}
           </Link>
         );
       })}

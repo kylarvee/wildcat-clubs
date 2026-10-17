@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth/session";
-import { apiRoute } from "@/lib/domain/kit";
+import { apiRoute, assertSignedIn } from "@/lib/domain/kit";
+import { readUploadForm } from "@/lib/files/upload";
 import { addClubDocument } from "@/lib/domain/clubs";
 import { submitCustomDocument } from "@/lib/domain/constitution";
 
@@ -12,7 +13,9 @@ import { submitCustomDocument } from "@/lib/domain/constitution";
 export async function POST(req: Request) {
   return apiRoute(async () => {
     const actor = await getCurrentUser();
-    const form = await req.formData();
+    // Before reading the body, so signed-out requests can't make us buffer it.
+    assertSignedIn(actor);
+    const form = await readUploadForm(req);
     const raw = form.get("file");
     const file = raw instanceof File && raw.size > 0 ? { name: raw.name, mimeType: raw.type, bytes: Buffer.from(await raw.arrayBuffer()) } : { name: "", mimeType: null, bytes: Buffer.alloc(0) };
     const text = (k: string) => {

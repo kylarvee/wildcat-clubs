@@ -1,6 +1,6 @@
 import "server-only";
 import { OAuth2Client } from "google-auth-library";
-import { emailKind } from "@/lib/institution";
+import { emailKind, INSTITUTION } from "@/lib/institution";
 
 /**
  * Google sign-in for Weber State accounts (Google Workspace).
@@ -21,12 +21,23 @@ export function googleAuthUrl(origin: string, state: string) {
     scope: ["openid", "email", "profile"],
     state,
     prompt: "select_account",
-    // Google only allows one hosted-domain hint; the callback enforces both domains.
+    // Google only allows one hosted-domain hint; verifyIdToken enforces both domains.
     hd: "*",
   });
 }
 
 export type GoogleIdentity = { email: string; name: string; picture: string | null };
+
+/** Google signed the person in, but not with a Weber State account. The message is safe to show. */
+export class NotUniversityAccount extends Error {
+  constructor() {
+    super(`Sign in with your ${INSTITUTION.shortName} Google account (@${INSTITUTION.studentEmailDomain} or @${INSTITUTION.staffEmailDomain}).`);
+    this.name = "NotUniversityAccount";
+  }
+}
+
+/** Workspace domains whose accounts may sign in (the `hd` claim). */
+const HOSTED_DOMAINS: string[] = [INSTITUTION.studentEmailDomain, INSTITUTION.staffEmailDomain];
 
 export async function exchangeCode(origin: string, code: string): Promise<GoogleIdentity> {
   const c = client(`${origin}/api/auth/google/callback`);
@@ -42,16 +53,25 @@ export async function verifyIdToken(idToken: string): Promise<GoogleIdentity> {
   );
   const ticket = await client().verifyIdToken({ idToken, audience: audiences });
   const p = ticket.getPayload();
-  if (!p?.email || !p.email_verified) throw new Error("Google account email is not verified.");
-  if (!emailKind(p.email)) throw new Error("Sign in with your Weber State email (@mail.weber.edu or @weber.edu).");
+  if (!p?.email || !p.email_verified) throw new NotUniversityAccount();
+  // The email suffix alone isn't proof: a personal Google account can be registered with a
+  // @weber.edu address (say, by someone who has since left). Only accounts managed by the
+  // university's Workspace carry its `hd` claim, so require that too.
+  if (!p.hd || !HOSTED_DOMAINS.includes(p.hd.toLowerCase())) throw new NotUniversityAccount();
+  if (!emailKind(p.email)) throw new NotUniversityAccount();
   return { email: p.email, name: p.name ?? p.email.split("@")[0], picture: p.picture ?? null };
 }
 
-/** "mock" = test personas only; "google" = Google only; "both" = both (default outside production). */
+/**
+ * "mock" = test personas only; "google" = Google only; "both" = both (default outside production).
+ * Test sign-in needs no password, so production is Google-only unless the operator also sets
+ * ALLOW_TEST_SIGNIN=1 (a demo server) — a copied .env can't turn it on by accident.
+ */
 export function authMode(): "mock" | "google" | "both" {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_SIGNIN !== "1") return "google";
   const m = process.env.AUTH_MODE;
   if (m === "mock" || m === "google" || m === "both") return m;
-  return process.env.NODE_ENV === "production" ? "google" : "both";
+  return "both";
 }
 
 /** The mobile app's Google sign-in: verifying an ID token needs only a client id, not the web secret. */

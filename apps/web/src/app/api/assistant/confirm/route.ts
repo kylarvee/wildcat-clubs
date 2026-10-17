@@ -10,8 +10,9 @@ import { buildView } from "@/lib/ai/view";
  * POST /api/assistant/confirm — the person's answer to an action card.
  * Body: { conversationId, toolUseId, approve }. Approving runs the same domain
  * function the app's own buttons use, as the signed-in person. Once every
- * card of the round is decided, Claude continues with the results; the
- * response streams like POST /api/assistant.
+ * card of the round is decided, Claude continues with the results (unless the
+ * person is past the hourly limit: then runTurn leaves a "Try again" notice);
+ * the response streams like POST /api/assistant.
  */
 
 const Body = z.object({

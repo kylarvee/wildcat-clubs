@@ -61,7 +61,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
     user ? viewerClubStates(user.id) : Promise.resolve(null),
     user && approved ? shouldPromptForApp(user.id) : Promise.resolve(false),
     clubMetricsFor(club.id),
-    isPublic ? clubUpcomingEvents(club.id, user, access) : Promise.resolve([]),
+    isPublic ? clubUpcomingEvents(club.id, user) : Promise.resolve([]),
     visibleAnnouncementCount(club.id, access),
     getConfig(),
   ]);
@@ -150,13 +150,14 @@ export default async function ClubPage({ params, searchParams }: Props) {
                 id="events"
                 title="Upcoming events"
                 action={
-                  <Link href="/calendar" className="text-sm font-medium text-brand-600 hover:underline">
+                  // The club's own calendar is in the hero; /calendar isn't filtered to this club.
+                  <Link href="#club-calendar" className="text-sm font-medium text-brand-600 hover:underline">
                     Full calendar
                   </Link>
                 }
               >
                 {events.length ? (
-                  <EventList events={events} showHost={false} />
+                  <EventList events={events} showHost={false} clubId={club.id} />
                 ) : (
                   <div className="flex items-center gap-3 rounded-[var(--radius-card)] border border-dashed border-line-2 bg-surface px-5 py-6 text-sm text-ink-3">
                     <CalendarX2 className="h-5 w-5 shrink-0" aria-hidden="true" />

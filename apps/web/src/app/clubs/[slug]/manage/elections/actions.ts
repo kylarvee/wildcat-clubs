@@ -55,8 +55,9 @@ export async function cancel(slug: string, electionId: string) {
   return r;
 }
 
-export async function applyResult(slug: string, electionId: string, winnerCandidateId: string | null) {
-  const r = await act((actor) => elections.applyElectionResult(actor, electionId, { winnerCandidateId }));
+/** `permissions`: what the winner may do in an officer / ambassador seat (omit to use the seat's defaults). */
+export async function applyResult(slug: string, electionId: string, winnerCandidateId: string | null, permissions?: string[]) {
+  const r = await act((actor) => elections.applyElectionResult(actor, electionId, { winnerCandidateId, permissions }));
   refresh(slug);
   return r;
 }

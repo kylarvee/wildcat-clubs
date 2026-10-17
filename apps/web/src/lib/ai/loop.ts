@@ -9,7 +9,7 @@ import { SYSTEM_PROMPT } from "@/lib/ai/knowledge";
 import { buildContextNote } from "@/lib/ai/context";
 import { API_TOOLS, findTool, prepareWrite, runRead, toolErrorText, validateCall } from "@/lib/ai/tools";
 import { ToolError } from "@/lib/ai/resolve";
-import { apiMessages, claimAction, DEFAULT_TITLE, titleFrom, type ActionRecord, type ActionsContent, type ChipRecord, type Thread } from "@/lib/ai/conversations";
+import { apiMessages, claimAction, DEFAULT_TITLE, LIMIT_TEXT, overHourlyLimit, titleFrom, type ActionRecord, type ActionsContent, type ChipRecord, type Thread } from "@/lib/ai/conversations";
 import { EMPTY_PLACEHOLDER, modelTag, REFUSAL_PLACEHOLDER } from "@/lib/ai/view";
 import type { StreamEvent } from "@/lib/ai/types";
 
@@ -248,6 +248,13 @@ export async function runTurn({ client, actor, thread, mode, emit }: { client: A
     const stats = routingStats(thread);
     model = modelInCurrentTurn(thread) ?? routeAssistant({ message: stats.lastText ?? "", turnsSoFar: Math.max(0, stats.turnsSoFar - 1), lastTurnUsedTools: false });
   } else {
+    // Confirming an action is free, but Claude reading the result is a model call: past the
+    // hourly limit, pause here. "Try again" resumes later through POST /api/assistant, which checks it too.
+    if (await overHourlyLimit(actor.id)) {
+      await thread.append([{ role: "notice", content: { tone: "info", text: LIMIT_TEXT, retry: true } }]);
+      emit({ type: "notice", tone: "info", text: LIMIT_TEXT, retryText: "Try again" });
+      return;
+    }
     const last = thread.lastModel();
     model = isAiModel(last) ? last : AI_MODELS.sonnet;
   }

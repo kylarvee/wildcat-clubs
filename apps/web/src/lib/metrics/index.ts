@@ -36,18 +36,22 @@ import type {
  * HELD EVENT — a SCHEDULED occurrence that has started and has ≥1 check-in.
  *   Co-hosted events count for the host and every approved co-host.
  *
+ * REGISTERED MEMBERS — ACTIVE memberships of student accounts. Advisors hold
+ *   memberships too (for announcements and chat) but are never counted, as
+ *   members or as active members.
+ *
  * ACTIVE CLUB — status APPROVED and either in its PILOT PERIOD, or
  *   (≥ `activity.clubMinEvents` (2) held events in the current term or the
  *   previous activity term) AND ≥ `activity.clubMinMembers` (8) registered
- *   (ACTIVE) members.
+ *   members.
  *
  * PILOT PERIOD — from approval (or creation if never approved) until the end
  *   of the first full activity-counting term that starts after the club was
  *   created. Created mid-Fall → pilot runs through Spring.
  *
- * ATTENDANCE RATE (event) — members who checked in ÷ ACTIVE members at the
- *   time of the event (joinedAt ≤ start, not ended before it). Non-member
- *   attendees are counted separately as guests.
+ * ATTENDANCE RATE (event) — student members who checked in ÷ student members
+ *   at the time of the event (joinedAt ≤ start, not ended before it). Everyone
+ *   else who checked in (non-members, advisors) is counted as a guest.
  *
  * RETENTION (period P) — of the people who attended ≥1 club event in the
  *   period before P, the share who attended ≥1 in P. Periods: calendar month,
@@ -173,8 +177,10 @@ async function standingRows(o: {
   activeMembersOnly?: boolean;
   studentsOnly?: boolean;
 }): Promise<StandingRow[]> {
+  // REGISTERED MEMBERS only, so "active members" is a subset of "members" (an advisor's membership doesn't count).
   const member = o.activeMembersOnly
-    ? Prisma.sql`JOIN "Membership" m ON m."userId" = a."userId" AND m."clubId" = h.club_id AND m.status = 'ACTIVE'`
+    ? Prisma.sql`JOIN "Membership" m ON m."userId" = a."userId" AND m."clubId" = h.club_id AND m.status = 'ACTIVE'
+       JOIN "User" mu ON mu.id = a."userId" AND mu.kind = 'STUDENT'`
     : Prisma.empty;
   const student = o.studentsOnly ? Prisma.sql`JOIN "User" u ON u.id = a."userId" AND u.kind = 'STUDENT' AND u.status = 'ACTIVE'` : Prisma.empty;
   const user = o.userId ? Prisma.sql`AND a."userId" = ${o.userId}` : Prisma.empty;
@@ -253,6 +259,11 @@ async function registeredCounts(clubIds: string[]): Promise<Map<string, number>>
   return new Map(rows.map((r) => [r.clubId, r._count._all]));
 }
 
+/** REGISTERED MEMBERS of one club now — the "Members" number every screen shows. */
+export async function registeredMemberCount(clubId: string): Promise<number> {
+  return (await registeredCounts([clubId])).get(clubId) ?? 0;
+}
+
 // ─── Active students ─────────────────────────────────────────────────────────
 
 /**
@@ -266,7 +277,7 @@ export async function isMemberActive(userId: string, clubId: string, at?: Date):
   return P.isActiveStudent(standingOf(standings.get(clubId)), when, rule);
 }
 
-/** Ids of ACTIVE-membership users who are active per the definition. */
+/** Ids of REGISTERED MEMBERS (students with an ACTIVE membership) who are active per the definition. */
 export async function activeMemberIdsFor(clubId: string, at?: Date): Promise<string[]> {
   const map = await activeAttendees(idsKey([clubId]), nowOr(at).getTime(), true, false);
   return [...(map.get(clubId) ?? [])];
@@ -422,7 +433,8 @@ export async function memberRetention(userId: string, clubId: string, period: Re
  */
 export async function clubAttendanceByOccurrence(clubId: string, opts: { from?: Date; to?: Date } = {}): Promise<OccurrenceAttendance[]> {
   const to = opts.to ?? requestNow();
-  const memberAt = memberAtSql("m", Prisma.sql`co.starts_at`);
+  // Student members only (REGISTERED MEMBERS): an advisor's membership isn't a seat to fill.
+  const memberAt = Prisma.sql`${memberAtSql("m", Prisma.sql`co.starts_at`)} AND EXISTS (SELECT 1 FROM "User" u WHERE u.id = m."userId" AND u.kind = 'STUDENT')`;
   const rows = await db.$queryRaw<
     { occurrence_id: string; starts_at: Date; event_id: string; title: string; attendees: number; member_attendees: number; members_at_time: number }[]
   >`
@@ -483,6 +495,14 @@ export async function clubMemberAttendanceCounts(clubId: string, opts: { from?: 
   return out;
 }
 
+/** HELD EVENTS a club ran or co-hosted, up to `to` (e.g. its retirement date). */
+export async function clubHeldEventCount(clubId: string, opts: { to?: Date } = {}): Promise<number> {
+  const rows = await db.$queryRaw<{ n: number }[]>`
+    WITH co AS (${clubOccurrences({ clubs: [clubId], to: opts.to ?? requestNow() })})
+    SELECT count(DISTINCT co.occurrence_id)::int AS n FROM co WHERE ${HAS_CHECKIN(Prisma.sql`co.occurrence_id`)}`;
+  return rows[0]?.n ?? 0;
+}
+
 async function rangedAttendance(clubId: string, from: Date | undefined, to: Date): Promise<Map<string, { attended: number; lastAt: Date }>> {
   const rows = await db.$queryRaw<{ user_id: string; attended: number; last_at: Date }[]>`
     WITH co AS (${clubOccurrences({ clubs: [clubId], from, to })})
@@ -496,13 +516,16 @@ async function rangedAttendance(clubId: string, from: Date | undefined, to: Date
 
 type MembershipRow = { clubId: string; status: MembershipStatus; joinedAt: Date | null; endedAt: Date | null };
 
+/** The account facts the review gate needs (kind, status), once per request. */
+const reviewerAccount = cache((userId: string) => db.user.findUnique({ where: { id: userId }, select: { kind: true, status: true } }));
+
 /**
  * Summaries for one person in the given clubs (all of their clubs when
  * `onlyClubId` is null): their ACTIVE memberships plus every club whose
  * events they've attended.
  */
 async function summariesFor(userId: string, onlyClubId: string | null, at: Date): Promise<Map<string, { summary: MemberClubSummary; membership: MembershipRow | null }>> {
-  const [memberships, standings, cfg, rule] = await Promise.all([
+  const [memberships, standings, cfg, rule, account] = await Promise.all([
     db.membership.findMany({
       where: { userId, ...(onlyClubId ? { clubId: onlyClubId } : {}) },
       select: { clubId: true, status: true, joinedAt: true, endedAt: true },
@@ -510,6 +533,7 @@ async function summariesFor(userId: string, onlyClubId: string | null, at: Date)
     userStandings(userId, at.getTime()),
     getConfig(),
     activityRule(),
+    reviewerAccount(userId),
   ]);
   const byClub = new Map(memberships.map((m) => [m.clubId, m]));
   const clubIds = onlyClubId
@@ -529,6 +553,7 @@ async function summariesFor(userId: string, onlyClubId: string | null, at: Date)
     const s = standings.get(id);
     const attended = s?.attended ?? 0;
     const heldSinceJoined = held.get(id) ?? 0;
+    const gate = P.reviewGate(account, attended, threshold);
     out.set(id, {
       membership: byClub.get(id) ?? null,
       summary: {
@@ -537,7 +562,8 @@ async function summariesFor(userId: string, onlyClubId: string | null, at: Date)
         rate: heldSinceJoined > 0 ? Math.min(1, attended / heldSinceJoined) : null,
         lastAttendedAt: s?.lastAt ?? null,
         active: P.isActiveStudent(standingOf(s), at, rule),
-        reviewEligible: attended >= threshold,
+        canReview: gate.canReview,
+        reviewEligible: gate.eligible,
         reviewThreshold: threshold,
       },
     });
@@ -593,12 +619,12 @@ export const memberClubSummaries = cache(async (userId: string): Promise<MemberC
     .sort((a, b) => Number(b.membershipStatus === "ACTIVE") - Number(a.membershipStatus === "ACTIVE") || a.club.name.localeCompare(b.club.name));
 });
 
-/** Review gate: has this student attended at least `reviews.minAttendance` of the club's events? */
-export async function reviewEligibility(userId: string, clubId: string): Promise<{ eligible: boolean; attended: number; required: number }> {
-  const [standings, cfg] = await Promise.all([userStandings(userId, requestNow().getTime()), getConfig()]);
+/** Review gate: is this an active student who has attended at least `reviews.minAttendance` of the club's events? */
+export async function reviewEligibility(userId: string, clubId: string): Promise<{ eligible: boolean; canReview: boolean; attended: number; required: number }> {
+  const [standings, cfg, account] = await Promise.all([userStandings(userId, requestNow().getTime()), getConfig(), reviewerAccount(userId)]);
   const attended = standings.get(clubId)?.attended ?? 0;
   const required = cfg["reviews.minAttendance"];
-  return { eligible: attended >= required, attended, required };
+  return { ...P.reviewGate(account, attended, required), attended, required };
 }
 
 // ─── Clubs list ──────────────────────────────────────────────────────────────

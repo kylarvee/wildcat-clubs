@@ -364,6 +364,19 @@ export function summarizeOccurrence(c: { attendees: number; memberAttendees: num
   return { ...c, guests: Math.max(0, c.attendees - c.memberAttendees), rate: attendanceRate(c.memberAttendees, c.membersAtTime) };
 }
 
+// ─── Reviews ─────────────────────────────────────────────────────────────────
+
+/**
+ * REVIEW GATE — only active student accounts write reviews (faculty, staff and
+ * alumni can't; domain/reviews refuses them), and only after `required`
+ * check-ins. `canReview` is the account half, so screens can leave the
+ * "N of M events" progress out for people who can never review.
+ */
+export function reviewGate(account: { kind: string; status: string } | null, attended: number, required: number): { canReview: boolean; eligible: boolean } {
+  const canReview = account?.kind === "STUDENT" && account.status === "ACTIVE";
+  return { canReview, eligible: canReview && attended >= required };
+}
+
 // ─── Interconnection ─────────────────────────────────────────────────────────
 
 /** Check-ins that share the same participating clubs and the same attendee memberships, counted together. */

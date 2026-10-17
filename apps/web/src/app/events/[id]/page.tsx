@@ -55,6 +55,8 @@ export default async function EventPage({ params, searchParams }: Props) {
   if (!(await canViewEvent(viewer, event))) notFound();
 
   const now = new Date();
+  // A date in another (campus) year shows it, so a 2024 meeting doesn't read as upcoming.
+  const dayLabel = (d: Date) => fmtDate(d, fmtDate(d, "yyyy") === fmtDate(now, "yyyy") ? "EEE, MMM d" : "EEE, MMM d, yyyy");
   const [upcoming, pastCount, requested, manage, seeCosts, hostAccess] = await Promise.all([
     db.eventOccurrence.findMany({ where: { eventId: id, endsAt: { gte: now } }, orderBy: { startsAt: "asc" }, take: 12 }),
     db.eventOccurrence.count({ where: { eventId: id, endsAt: { lt: now } } }),
@@ -244,7 +246,7 @@ export default async function EventPage({ params, searchParams }: Props) {
                           className={cn("flex items-center gap-3 px-5 py-2.5 text-sm hover:bg-muted/60", current && "bg-brand-50")}
                         >
                           <span className={cn("min-w-0 flex-1", cancelled && "text-ink-3 line-through")}>
-                            {fmtDate(x.startsAt, "EEE, MMM d")} · {event.allDay ? "All day" : fmtTime(x.startsAt)}
+                            {dayLabel(x.startsAt)} · {event.allDay ? "All day" : fmtTime(x.startsAt)}
                           </span>
                           {x.roomOverride && !cancelled ? <Badge tone="info">{roomLabel(x.roomOverride)}</Badge> : null}
                           {cancelled ? <Badge tone="danger">Cancelled</Badge> : null}
@@ -275,11 +277,6 @@ export default async function EventPage({ params, searchParams }: Props) {
                 ) : (
                   <MapEmbed query={mapQuery} height={200} />
                 )
-              ) : null}
-              {mapQuery ? (
-                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-600 hover:underline">
-                  Open in Google Maps
-                </a>
               ) : null}
               {event.locationType === "VIRTUAL" ? (
                 event.virtualUrl ? (

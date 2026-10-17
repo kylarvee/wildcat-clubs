@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Ban, CalendarX2, Clock, KeyRound, QrCode, SearchX } from "lucide-react";
+import { Ban, CalendarX2, Clock, KeyRound, Lock, QrCode, SearchX } from "lucide-react";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
@@ -50,6 +50,27 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
   const actor = await getCurrentUser();
   const preview = await checkinPreview(actor, decoded, token);
 
+  // ── A real code for an event this viewer can't see: no details, just the way in. ──
+  if (!preview.found && preview.hidden) {
+    const code = norm.ok ? norm.code : raw;
+    return (
+      <Frame code={code}>
+        <Card className="p-5 sm:p-7">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand">
+            {actor ? <QrCode className="h-6 w-6" aria-hidden /> : <Lock className="h-6 w-6" aria-hidden />}
+          </div>
+          <h1 className="mt-4 text-xl font-bold tracking-tight">{actor ? "Scan the QR code shown at the event" : "Log in to check in"}</h1>
+          <p className="mt-1.5 text-ink-2">{preview.message}</p>
+          {actor ? null : (
+            <div className="mt-6">
+              <LoginToCheckIn next={`/c/${code}?go=1`} />
+            </div>
+          )}
+        </Card>
+      </Frame>
+    );
+  }
+
   if (!preview.found) {
     return (
       <Frame footer={false}>
@@ -88,15 +109,7 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
             ) : (
               <>
                 <p className="text-ink-2">Log in with your {INSTITUTION.shortName} account to check in.</p>
-                <Link
-                  href={`/login?next=${encodeURIComponent(next)}`}
-                  className="flex h-16 w-full items-center justify-center rounded-2xl bg-brand text-lg font-semibold text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
-                >
-                  Log in to check in
-                </Link>
-                <p className="text-center text-sm text-ink-3">
-                  Use your @{INSTITUTION.studentEmailDomain} account. First time on {PLATFORM.name}? Logging in creates your account.
-                </p>
+                <LoginToCheckIn next={next} />
                 {preview.scan === "LIVE" ? (
                   <Callout tone="success" icon={<QrCode />}>
                     Your scan is saved for {passMinutes} minutes while you log in — you&apos;ll be checked in as soon as you&apos;re back.
@@ -198,6 +211,23 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
         </div>
       </Card>
     </Frame>
+  );
+}
+
+/** The big log-in button; `next` brings them back here to finish. */
+function LoginToCheckIn({ next }: { next: string }) {
+  return (
+    <div className="space-y-3">
+      <Link
+        href={`/login?next=${encodeURIComponent(next)}`}
+        className="flex h-16 w-full items-center justify-center rounded-2xl bg-brand text-lg font-semibold text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
+      >
+        Log in to check in
+      </Link>
+      <p className="text-center text-sm text-ink-3">
+        Use your @{INSTITUTION.studentEmailDomain} account. First time on {PLATFORM.name}? Logging in creates your account.
+      </p>
+    </div>
   );
 }
 

@@ -1,14 +1,16 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { integrationLive } from "@/lib/config";
-import { googleJwt } from "@/lib/integrations/google";
+import { CLUB_ACCOUNT_FIELDS, clubGoogleAccount, googleJwt } from "@/lib/integrations/google";
 import { PLATFORM } from "@/lib/institution";
 
 /**
  * Google Chat mirror. Our Conversation/Message tables are the source of truth;
  * when a sysadmin turns on "Google Chat" sync, each club chat gets a Chat space
  * (created as the club's own Workspace account, Club.contactEmail, through the
- * service account) and new messages, edits and deletions are copied into it.
+ * service account — only for approved clubs whose account WSUSA verified, see
+ * clubGoogleAccount) and new messages, edits and deletions are copied into it.
  * Direct messages and leader groups stay in-app only.
  *
  * Mirrored messages are posted by the club account as "*Name*: text", because
@@ -26,11 +28,8 @@ export type ChatMirrorResult = { status: "synced" | "off" | "skipped" | "failed"
 /** Whether this club's chat mirrors to Google right now (and why not). */
 export async function googleChatReady(clubId: string): Promise<{ live: boolean; reason?: string }> {
   if (!(await integrationLive("googleChat"))) return { live: false, reason: "Google Chat sync is off." };
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { contactEmail: true, status: true } });
-  if (!club) return { live: false, reason: "Club not found." };
-  if (club.status !== "APPROVED") return { live: false, reason: "Only approved clubs have a Chat space." };
-  if (!club.contactEmail) return { live: false, reason: "Add the club's Google account email in club settings to mirror its chat." };
-  return { live: true };
+  const account = clubGoogleAccount(await db.club.findUnique({ where: { id: clubId }, select: CLUB_ACCOUNT_FIELDS }));
+  return account.email ? { live: true } : { live: false, reason: account.reason };
 }
 
 /** Loaded on first use, so mock mode never pulls in the Google client. */
@@ -64,15 +63,18 @@ export async function ensureClubChatSpace(clubId: string): Promise<ChatMirrorRes
   try {
     const ready = await googleChatReady(clubId);
     if (!ready.live) return { status: (await integrationLive("googleChat")) ? "skipped" : "off", message: ready.reason };
-    const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, name: true, contactEmail: true, googleChatSpaceId: true } });
-    if (!club?.contactEmail) return { status: "skipped", message: "The club has no Google account." };
+    const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, name: true, googleChatSpaceId: true, ...CLUB_ACCOUNT_FIELDS } });
+    const account = clubGoogleAccount(club);
+    if (!club || !account.email) return { status: "skipped", message: account.reason };
 
     let spaceName = club.googleChatSpaceId;
     if (!spaceName) {
-      const chat = await client(club.contactEmail);
+      const chat = await client(account.email);
       const res = await chat.spaces.create({
         // Stable request id: a retry after a timeout returns the same space instead of making a second one.
-        requestId: `wildcat-clubs-${club.id}`,
+        // It names the account too, because Chat refuses a request id another user already used — after
+        // the club changes its Google account, the new account must be able to make its own space.
+        requestId: `wildcat-clubs-${club.id}-${createHash("sha256").update(account.email).digest("hex").slice(0, 16)}`,
         requestBody: {
           spaceType: "SPACE",
           displayName: club.name.slice(0, 128),
@@ -98,9 +100,14 @@ async function loadForMirror(messageId: string) {
       body: true,
       deletedAt: true,
       author: { select: { name: true } },
-      conversation: { select: { type: true, clubId: true, googleSpaceId: true, club: { select: { contactEmail: true, googleChatSpaceId: true } } } },
+      conversation: { select: { type: true, clubId: true, googleSpaceId: true, club: { select: { googleChatSpaceId: true, ...CLUB_ACCOUNT_FIELDS } } } },
     },
   });
+}
+
+/** The account a club chat message is mirrored as, or null when that club's sync may not run. */
+function mirrorAccount(m: Awaited<ReturnType<typeof loadForMirror>>): string | null {
+  return m?.conversation.club ? clubGoogleAccount(m.conversation.club).email : null;
 }
 
 /** Copies a new club-chat message into the club's Chat space. */
@@ -110,8 +117,9 @@ export async function mirrorNewMessage(messageId: string): Promise<ChatMirrorRes
     const m = await loadForMirror(messageId);
     if (!m || m.deletedAt || m.conversation.type !== "CLUB" || !m.conversation.clubId) return { status: "skipped" };
     const space = await ensureClubChatSpace(m.conversation.clubId);
-    if (space.status !== "synced" || !space.spaceName || !m.conversation.club?.contactEmail) return { status: space.status, message: space.message };
-    const chat = await client(m.conversation.club.contactEmail);
+    const account = mirrorAccount(m);
+    if (space.status !== "synced" || !space.spaceName || !account) return { status: space.status === "synced" ? "skipped" : space.status, message: space.message };
+    const chat = await client(account);
     await chat.spaces.messages.create({
       parent: space.spaceName,
       messageId: clientMessageId(m.id) ?? undefined,
@@ -131,8 +139,9 @@ export async function mirrorEditedMessage(messageId: string): Promise<ChatMirror
     const m = await loadForMirror(messageId);
     const space = m?.conversation.googleSpaceId ?? m?.conversation.club?.googleChatSpaceId;
     const id = m ? clientMessageId(m.id) : null;
-    if (!m || m.deletedAt || !space || !id || !m.conversation.club?.contactEmail) return { status: "skipped" };
-    const chat = await client(m.conversation.club.contactEmail);
+    const account = mirrorAccount(m);
+    if (!m || m.deletedAt || !space || !id || !account) return { status: "skipped" };
+    const chat = await client(account);
     await chat.spaces.messages.patch({ name: `${space}/messages/${id}`, updateMask: "text", requestBody: { text: chatText(m.author.name, m.body) } });
     return { status: "synced" };
   } catch (e) {
@@ -147,8 +156,9 @@ export async function mirrorDeletedMessage(messageId: string): Promise<ChatMirro
     const m = await loadForMirror(messageId);
     const space = m?.conversation.googleSpaceId ?? m?.conversation.club?.googleChatSpaceId;
     const id = m ? clientMessageId(m.id) : null;
-    if (!m || !space || !id || !m.conversation.club?.contactEmail) return { status: "skipped" };
-    const chat = await client(m.conversation.club.contactEmail);
+    const account = mirrorAccount(m);
+    if (!m || !space || !id || !account) return { status: "skipped" };
+    const chat = await client(account);
     await chat.spaces.messages.delete({ name: `${space}/messages/${id}` });
     return { status: "synced" };
   } catch (e) {

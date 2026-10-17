@@ -73,8 +73,9 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
     throw new ApiError('ERROR', `Wildcat Clubs sent an unexpected answer (HTTP ${res.status}). Please try again in a moment.`, res.status);
   }
   if (!json.ok) {
-    // A stored token that stopped working (expired or signed out elsewhere): drop it.
-    if (res.status === 401 && token) onUnauthorized();
+    // The stored token stopped working (expired or signed out elsewhere): drop it. Not for a
+    // token passed in (finishing an old sign-out), which says nothing about who's signed in now.
+    if (res.status === 401 && token && opts.token === undefined) onUnauthorized();
     throw new ApiError(json.code, json.error, res.status);
   }
   return json.data;

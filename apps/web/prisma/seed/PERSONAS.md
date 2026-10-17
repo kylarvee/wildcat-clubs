@@ -231,7 +231,8 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
   hours; members flagged them. One older Anime Club review is already hidden.
 - **Reports:** five (two anonymous — opening one requires acknowledging the
   anonymity notice, and every opening is logged).
-- **Tests:** five officer-test attempts with open answers to grade.
+- **Tests:** five officer-test attempts with open answers to grade (each also a
+  task in Tasks).
 - **Officer requirements:** one officer is past the grace period, so their
   permissions are paused (the seed prints who).
 
@@ -266,6 +267,11 @@ push), scheduled jobs, and granting admin.
 - **Files:** each approved club has Meeting Minutes, Flyers & Photos, Resources
   (featured on the club page), Constitution & Bylaws (PDFs) and leaders-only
   Officer Notes. Bytes live in `apps/web/storage/seed/`.
+- **Role history contributions:** in most approved and retired clubs, one or
+  two past leaders have a project tied to the seat they held, usually with a
+  file (a club file they made that term, or a write-up in their own files).
+- **Event Safety Quiz:** Wildcat Robotics members who haven't passed it have a
+  *Take: Event Safety Quiz* task.
 
 All policy text is sample text and says so at the top. Names, people and
 incidents are fictional; building coordinates are approximate.

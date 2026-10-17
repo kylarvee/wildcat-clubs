@@ -979,8 +979,8 @@ export async function searchPeopleToShare(actor: Actor | null, fileId: string, r
 // ─── Uploads ─────────────────────────────────────────────────────────────────
 
 export type UploadInput = {
+  /** Its extension sets the stored type (lib/files/storage guessMime); the browser's claimed type is not used. */
   name: string;
-  mimeType?: string | null;
   bytes: Buffer;
   /** "club" needs clubId; "user" = the uploader's own files; "university" = admins only. */
   scope: "club" | "user" | "university";
@@ -1042,7 +1042,7 @@ export async function uploadFile(actor: Actor | null, input: UploadInput, opts: 
       ownerId,
       parentId,
       name,
-      mimeType: guessMime(name, input.mimeType),
+      mimeType: guessMime(name),
       sizeBytes: input.bytes.length,
       storageKey,
       visibility,

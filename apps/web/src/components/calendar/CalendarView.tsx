@@ -104,7 +104,8 @@ export function CalendarView({ source, initialView, compact, height = "auto", cl
               eventTimeFormat={{ hour: "numeric", minute: "2-digit", meridiem: "short" }}
               scrollTime="08:00:00"
               eventClassNames={(arg) => ((arg.event.extendedProps as CalendarEventProps).cancelled ? ["line-through", "opacity-60"] : [])}
-              noEventsContent={() => <p className="py-6 text-center text-sm text-ink-3">{emptyMessage ?? "No events in this stretch. Try the next month."}</p>}
+              // Don't say "no events" while they're still on their way.
+              noEventsContent={() => <p className="py-6 text-center text-sm text-ink-3">{loading ? "Loading events…" : (emptyMessage ?? "No events in this stretch. Try the next month.")}</p>}
               loading={setLoading}
               datesSet={(arg) => {
                 setTitle(arg.view.title);

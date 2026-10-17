@@ -17,6 +17,7 @@ import {
   occurrenceCounts,
   pilotPeriodEnd,
   retentionSeries,
+  reviewGate,
   standingFromHistory,
   termEnd,
   type ClubActivityInput,
@@ -364,5 +365,18 @@ describe("interconnection", () => {
   it("ignores self pairs and lines that cancel out", () => {
     expect(linesFromCounts([{ a: "A", b: "A", count: 4 }], [])).toEqual([]);
     expect(linesFromCounts([{ a: "A", b: "B", count: 1 }], [{ a: "B", b: "A", count: 1 }])).toEqual([]);
+  });
+});
+
+describe("review gate", () => {
+  it("opens for active students who reached the threshold", () => {
+    expect(reviewGate({ kind: "STUDENT", status: "ACTIVE" }, 3, 3)).toEqual({ canReview: true, eligible: true });
+    expect(reviewGate({ kind: "STUDENT", status: "ACTIVE" }, 2, 3)).toEqual({ canReview: true, eligible: false });
+  });
+
+  it("stays shut for alumni, faculty/staff and unknown accounts however often they came", () => {
+    expect(reviewGate({ kind: "STUDENT", status: "ALUMNI" }, 81, 3)).toEqual({ canReview: false, eligible: false });
+    expect(reviewGate({ kind: "FACULTY_STAFF", status: "ACTIVE" }, 10, 3)).toEqual({ canReview: false, eligible: false });
+    expect(reviewGate(null, 10, 3)).toEqual({ canReview: false, eligible: false });
   });
 });

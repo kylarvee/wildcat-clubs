@@ -1,9 +1,9 @@
 import "server-only";
-import { Prisma, type BudgetItem, type Event, type Term } from "@prisma/client";
+import { Prisma, type BudgetItem, type Event, type FundingStatus, type Term } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { canViewEvent as canViewEventRule } from "@/lib/authz/events";
+import { canViewEvent as canViewEventRule, type EventGate } from "@/lib/authz/events";
 import { can, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -15,6 +15,7 @@ import { expandOccurrences, MAX_OCCURRENCES, type OccurrenceTimes } from "@/lib/
 import { generateCheckinCode, generateCheckinSecret } from "@/lib/attendance/token";
 import { budgetTermFor, getTerms } from "@/lib/terms";
 import { defaultFundingSource } from "@/lib/funding/defaults";
+import { ACTIVE_REQUEST_STATUSES } from "@/lib/funding/math";
 import { removeEventFromGoogle, syncEventToGoogle, type GoogleSyncResult } from "@/lib/integrations/google-calendar";
 import { isHttpUrl, joinEventLinks, splitEventLinks } from "@/lib/events/links";
 import { campusParts, toDateInput } from "@/lib/events/wallclock";
@@ -28,14 +29,17 @@ import { campusDate } from "@/lib/time";
  * or `admin.trainings` for university events (clubId = null).
  *
  * Occurrences: an event's schedule is expanded (lib/events/recurrence) into
- * EventOccurrence rows. On every change, past meetings and meetings with
- * check-ins are kept as history; upcoming meetings are matched to the new rule
- * by campus date (so their check-in codes and one-off cancellations survive),
- * the rest are added or removed. Every new occurrence gets a unique check-in
- * code and QR secret.
+ * EventOccurrence rows. When the meeting times change, past meetings and
+ * meetings with check-ins are kept as history (a meeting with check-ins can't
+ * move or be cancelled); upcoming meetings are matched to the new rule by
+ * campus date (so their check-in codes and one-off cancellations survive), the
+ * rest are added or removed. Saves that keep the times only add meetings the
+ * rule now produces (e.g. after new terms), never remove any. Every new
+ * occurrence gets a unique check-in code and QR secret.
  *
  * Costs are BudgetItem rows with eventId — entered only here; the Budget tool
- * reads them through eventCostSummary() to request funding.
+ * reads them through eventCostSummary() to request funding. A line that a
+ * submitted or approved funding request covers is locked (costLineLocks).
  */
 
 // ─── Input schemas ───────────────────────────────────────────────────────────
@@ -162,9 +166,10 @@ export async function canManageEvent(actor: Actor | null, event: { clubId: strin
 /**
  * Visibility: PUBLIC anyone · UNIVERSITY signed-in accounts · MEMBERS members and
  * leaders of the host and approved co-host clubs. Ideas (drafts) only for managers.
- * Admins see everything.
+ * Admins see everything. Pass `cohosts` as { clubId, status } rows (or leave it
+ * out to have them loaded); the EventGate type rejects other shapes.
  */
-export async function canViewEvent(actor: Actor | null, event: { id: string; clubId: string | null; visibility: Event["visibility"]; status: Event["status"] }): Promise<boolean> {
+export async function canViewEvent(actor: Actor | null, event: EventGate): Promise<boolean> {
   // Drafts: university drafts belong to admins (trainings), club drafts to the club's planners.
   if (event.status === "DRAFT" && !event.clubId) return canManageEvent(actor, event);
   return canViewEventRule(actor, event);
@@ -335,10 +340,12 @@ async function withCodeRetry<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Brings an event's occurrences in line with `desired`. See the module comment:
  * history (past or attended) stays; upcoming meetings are matched by campus date.
+ * `prune: false` only adds: upcoming meetings the rule doesn't produce stay.
  */
-async function materialize(tx: Tx, eventId: string, desired: OccurrenceTimes[], opts: { status?: "SCHEDULED" | "CANCELLED"; now?: Date } = {}) {
+async function materialize(tx: Tx, eventId: string, desired: OccurrenceTimes[], opts: { status?: "SCHEDULED" | "CANCELLED"; prune?: boolean; now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const status = opts.status ?? "SCHEDULED";
+  const prune = opts.prune ?? true;
   const existing = await tx.eventOccurrence.findMany({
     where: { eventId },
     orderBy: { startsAt: "asc" },
@@ -352,10 +359,13 @@ async function materialize(tx: Tx, eventId: string, desired: OccurrenceTimes[], 
   if (existing.length === 0) {
     toCreate.push(...desired);
   } else if (existing.length === 1 && desired.length === 1) {
-    // A one-time event that moved: keep its id and check-in code.
+    // A one-time event that moved: keep its id and check-in code. Check-ins pin its
+    // start (they're history); the end can still change.
     const [o] = existing;
     const [d] = desired;
-    if (o.startsAt.getTime() !== d.startsAt.getTime() || o.endsAt.getTime() !== d.endsAt.getTime()) toUpdate.push({ id: o.id, ...d });
+    const startMoved = o.startsAt.getTime() !== d.startsAt.getTime();
+    if (startMoved && o._count.attendances > 0) throw conflict("People already checked in to this event, so its start can't change. Create a new event instead.");
+    if (startMoved || o.endsAt.getTime() !== d.endsAt.getTime()) toUpdate.push({ id: o.id, ...d });
   } else {
     const locked = existing.filter((o) => o.startsAt < now || o._count.attendances > 0);
     const free = existing.filter((o) => !(o.startsAt < now || o._count.attendances > 0));
@@ -378,7 +388,7 @@ async function materialize(tx: Tx, eventId: string, desired: OccurrenceTimes[], 
         toCreate.push(d);
       }
     }
-    toDelete = free.filter((o) => !used.has(o.id)).map((o) => o.id);
+    if (prune) toDelete = free.filter((o) => !used.has(o.id)).map((o) => o.id);
   }
 
   if (toDelete.length) await tx.eventOccurrence.deleteMany({ where: { id: { in: toDelete } } });
@@ -428,23 +438,35 @@ async function syncCohosts(tx: Tx, event: { id: string; title: string; clubId: s
     const row = await tx.eventCohost.create({
       data: { eventId: event.id, clubId: club.id, status: auto ? "APPROVED" : "PENDING", requestedById: actor.id, ...(auto ? { decidedAt: now } : {}) },
     });
-    if (!auto) {
-      await createTask(
-        {
-          kind: "APPROVAL",
-          title: `${host.name} invited ${club.name} to co-host “${event.title}”`,
-          description: "Approve it to put the event on your club's calendar, or decline.",
-          assignee: { type: "CLUB", clubId: club.id, capability: "events" },
-          href: `/clubs/${club.slug}/manage/events?tab=cohosts`,
-          source: { type: "cohost", id: row.id },
-          createdById: actor.id,
-        },
-        tx,
-      );
-    }
+    if (!auto) await cohostTask(tx, row.id, club, host, event.title, actor.id);
     changes.push({ cohostId: row.id, clubId: club.id, clubName: club.name, clubSlug: club.slug, status: auto ? "APPROVED" : "PENDING" });
   }
   return changes;
+}
+
+/** The invited club's approval task for a pending co-host invitation. */
+async function cohostTask(tx: Tx, cohostId: string, club: { id: string; name: string; slug: string }, host: HostClub, eventTitle: string, actorId: string) {
+  await createTask(
+    {
+      kind: "APPROVAL",
+      title: `${host.name} invited ${club.name} to co-host “${eventTitle}”`,
+      description: "Approve it to put the event on your club's calendar, or decline.",
+      assignee: { type: "CLUB", clubId: club.id, capability: "events" },
+      href: `/clubs/${club.slug}/manage/events?tab=cohosts`,
+      source: { type: "cohost", id: cohostId },
+      createdById: actorId,
+    },
+    tx,
+  );
+}
+
+/** Cancelling an event closes its pending co-host tasks; restoring it opens them again. */
+async function reopenCohostTasks(tx: Tx, event: { id: string; title: string }, host: HostClub, actorId: string) {
+  const pending = await tx.eventCohost.findMany({ where: { eventId: event.id, status: "PENDING" }, select: { id: true, club: { select: { id: true, name: true, slug: true } } } });
+  if (pending.length === 0) return;
+  const open = await tx.task.findMany({ where: { sourceType: "cohost", sourceId: { in: pending.map((p) => p.id) }, status: "OPEN" }, select: { sourceId: true } });
+  const hasTask = new Set(open.map((t) => t.sourceId));
+  for (const p of pending) if (!hasTask.has(p.id)) await cohostTask(tx, p.id, p.club, host, event.title, actorId);
 }
 
 async function announceCohostChanges(changes: CohostChange[], host: HostClub, eventTitle: string, actor: Actor, bulk: boolean) {
@@ -476,15 +498,58 @@ function costData(c: CostRow, host: HostClub) {
   };
 }
 
+export type CostLock = { title: string; status: FundingStatus };
+
+/**
+ * Event cost lines that a submitted or approved funding request covers, by line
+ * id. Like general costs (lib/domain/funding), they're locked so the line keeps
+ * matching what the club asked for.
+ */
+export async function costLineLocks(itemIds: string[], tx: Tx = db): Promise<Map<string, CostLock>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await tx.fundingRequestItem.findMany({
+    where: { budgetItemId: { in: itemIds }, request: { status: { in: ACTIVE_REQUEST_STATUSES } } },
+    select: { budgetItemId: true, request: { select: { title: true, status: true } } },
+  });
+  return new Map(rows.map((r) => [r.budgetItemId!, r.request]));
+}
+
+function lockedCost(description: string, lock: CostLock) {
+  const where = lock.status === "SUBMITTED" ? "is being reviewed" : "was approved";
+  return conflict(`“${description}” is part of the funding request “${lock.title}”, which ${where}, so it's locked to match what you asked for. Add a new cost line instead.`);
+}
+
+/** Would saving `c` change what a funding request copied from line `b`? (An omitted source keeps the line's.) */
+function costChanged(b: BudgetItem, c: CostRow) {
+  return (
+    b.description !== c.description ||
+    b.category !== c.category ||
+    b.quantity !== c.quantity ||
+    b.unitCostCents !== toCents(c.unitCost) ||
+    b.perOccurrence !== c.perOccurrence ||
+    (c.fundingSource != null && b.fundingSource !== c.fundingSource)
+  );
+}
+
 async function syncCosts(tx: Tx, eventId: string, host: HostClub, actor: Actor, costs: CostRow[], termId: string | null) {
   const existing = await tx.budgetItem.findMany({ where: { eventId } });
   const byId = new Map(existing.map((b) => [b.id, b]));
   for (const c of costs) if (c.id && !byId.has(c.id)) throw invalid("One of the cost lines was removed by someone else. Reload and try again.");
   const keep = new Set(costs.map((c) => c.id).filter(Boolean) as string[]);
   const removed = existing.filter((b) => !keep.has(b.id));
+  const locks = await costLineLocks(existing.map((b) => b.id), tx);
+  for (const b of removed) {
+    const lock = locks.get(b.id);
+    if (lock) throw lockedCost(b.description, lock);
+  }
   if (removed.length) await tx.budgetItem.deleteMany({ where: { id: { in: removed.map((b) => b.id) } } });
   for (const c of costs) {
-    if (c.id) await tx.budgetItem.update({ where: { id: c.id }, data: { ...costData(c, host), ...(termId ? { termId } : {}) } });
+    const lock = c.id ? locks.get(c.id) : undefined;
+    if (c.id && lock) {
+      // Unchanged locked lines are left exactly as requested, term included.
+      const b = byId.get(c.id)!;
+      if (costChanged(b, c)) throw lockedCost(b.description, lock);
+    } else if (c.id) await tx.budgetItem.update({ where: { id: c.id }, data: { ...costData(c, host), ...(termId ? { termId } : {}) } });
     else {
       if (!termId) throw invalid("The academic calendar isn't set up yet, so costs can't be filed under a semester.");
       await tx.budgetItem.create({ data: { ...costData(c, host), clubId: host.id, eventId, termId, createdById: actor.id } });
@@ -574,18 +639,17 @@ type EventFields = {
   costs?: CostRow[];
 };
 
-function sameSchedule(a: Event, s: NormalizedSchedule) {
-  return (
-    a.startsAt?.getTime() === s.startsAt.getTime() &&
-    a.durationMinutes === s.durationMinutes &&
-    a.allDay === s.allDay &&
-    a.recurrence === s.recurrence &&
-    a.recurrenceInterval === s.recurrenceInterval &&
-    a.recurrenceWeekdays.join() === s.recurrenceWeekdays.join() &&
-    (a.recurrenceUntil?.getTime() ?? null) === (s.recurrenceUntil?.getTime() ?? null) &&
-    (a.recurrenceCount ?? null) === (s.recurrenceCount ?? null)
+/** The meetings an event's saved rule produces (null for an idea, which has none). */
+function savedTimes(e: Event, terms: Term[]): OccurrenceTimes[] | null {
+  if (e.status === "DRAFT" || !e.startsAt) return null;
+  return expandOccurrences(
+    { startsAt: e.startsAt, durationMinutes: e.durationMinutes, allDay: e.allDay, recurrence: e.recurrence, interval: e.recurrenceInterval, weekdays: e.recurrenceWeekdays, until: e.recurrenceUntil, count: e.recurrenceCount },
+    terms,
   );
 }
+
+const sameTimes = (a: OccurrenceTimes[], b: OccurrenceTimes[]) =>
+  a.length === b.length && a.every((o, i) => o.startsAt.getTime() === b[i].startsAt.getTime() && o.endsAt.getTime() === b[i].endsAt.getTime());
 
 /** The one place events are written. Create (existing = null), update, schedule an idea, or move. */
 async function writeEvent(actor: Actor, club: HostClub | null, existing: Event | null, f: EventFields, action: string): Promise<EventWriteResult> {
@@ -599,7 +663,11 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
     const already = existing ? (await db.eventAttachment.findMany({ where: { eventId: existing.id }, select: { fileId: true } })).map((a) => a.fileId) : [];
     await assertAttachable(actor, f.attachmentFileIds, already);
   }
-  const scheduleChanged = existing ? existing.status === "DRAFT" || !sameSchedule(existing, f.schedule) : true;
+  // Compare the meetings, not the rule's fields: the editor re-sends an equivalent
+  // rule (e.g. the repeat end as 11:59 PM), and extra meetings outside the rule
+  // (training makeup sessions) must survive saves that don't change the times.
+  const saved = existing ? savedTimes(existing, terms) : null;
+  const timesChanged = !saved || !sameTimes(saved, desired);
   const status: Event["status"] = existing && existing.status === "CANCELLED" ? "CANCELLED" : "SCHEDULED";
 
   const { event, cohostChanges } = await withCodeRetry(() =>
@@ -620,7 +688,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
           ? await tx.event.update({ where: { id: existing.id }, data })
           : await tx.event.create({ data: { ...data, clubId: club?.id ?? null, createdById: actor.id } });
 
-        await materialize(tx, event.id, desired, { status: status === "CANCELLED" ? "CANCELLED" : "SCHEDULED" });
+        await materialize(tx, event.id, desired, { status: status === "CANCELLED" ? "CANCELLED" : "SCHEDULED", prune: timesChanged });
 
         if (f.attachmentFileIds) {
           const want = [...new Set(f.attachmentFileIds)];
@@ -632,10 +700,11 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
         if (club && f.cohosts) cohostChanges = await syncCohosts(tx, { id: event.id, title: event.title, clubId: club.id }, club, actor, f.cohosts);
 
         if (club && f.costs !== undefined) await syncCosts(tx, event.id, club, actor, f.costs, costTermId);
-        else if (club && scheduleChanged) {
-          // Keep existing cost lines filed under the term of the (new) first meeting.
+        else if (club && timesChanged) {
+          // Keep existing cost lines filed under the term of the (new) first meeting,
+          // except lines a funding request locked to its own term.
           const t = budgetTermFor(terms, desired[0].startsAt);
-          if (t) await tx.budgetItem.updateMany({ where: { eventId: event.id }, data: { termId: t.id } });
+          if (t) await tx.budgetItem.updateMany({ where: { eventId: event.id, requestItems: { none: { request: { status: { in: ACTIVE_REQUEST_STATUSES } } } } }, data: { termId: t.id } });
         }
 
         await logActivity(
@@ -658,7 +727,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
   );
 
   if (club && cohostChanges.length) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
-  if (club && existing && existing.status !== "DRAFT" && scheduleChanged) await tellCohostsAboutChange(event, club, actor, "moved");
+  if (club && existing && existing.status !== "DRAFT" && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
   const google = await mirror(event.id, actor, f.createMeetLink);
   return { id: event.id, google: { status: google.status, message: google.message } };
 }
@@ -790,7 +859,11 @@ export async function scheduleIdea(actor: Actor | null, eventId: string, input: 
   return writeEvent(a, club, event, fieldsFromEvent(event, normalizeSchedule(d)), "event.scheduled");
 }
 
-/** Cancel the whole event: every upcoming meeting is marked cancelled (history stays). */
+/**
+ * Cancel the whole event: every upcoming meeting is marked cancelled (history
+ * stays, and so does a meeting people already checked in to). Meetings that were
+ * already cancelled on their own are noted in the log so restoring leaves them be.
+ */
 export async function cancelEvent(actor: Actor | null, eventId: string, reason?: string | null) {
   const { actor: a, club, event } = await loadManaged(actor, eventId);
   if (event.status === "DRAFT") throw invalid("Ideas aren't on the calendar. Delete the idea instead.");
@@ -799,23 +872,40 @@ export async function cancelEvent(actor: Actor | null, eventId: string, reason?:
   const now = new Date();
   const pending = await db.eventCohost.findMany({ where: { eventId, status: "PENDING" }, select: { id: true } });
   await db.$transaction(async (tx) => {
+    const kept = await tx.eventOccurrence.findMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: now } }, select: { id: true } });
     await tx.event.update({ where: { id: eventId }, data: { status: "CANCELLED" } });
-    await tx.eventOccurrence.updateMany({ where: { eventId, status: "SCHEDULED", startsAt: { gte: now } }, data: { status: "CANCELLED", note } });
+    await tx.eventOccurrence.updateMany({ where: { eventId, status: "SCHEDULED", startsAt: { gte: now }, attendances: { none: {} } }, data: { status: "CANCELLED", note } });
     for (const p of pending) await resolveTasks("cohost", p.id, a.id, tx, "CANCELLED");
-    await logActivity({ actorId: a.id, action: "event.cancelled", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title, reason: note } }, tx);
+    await logActivity(
+      { actorId: a.id, action: "event.cancelled", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title, reason: note, keptCancelledIds: kept.map((o) => o.id) } },
+      tx,
+    );
   });
   if (club) await tellCohostsAboutChange(event, club, a, "cancelled");
   await mirror(eventId, a);
   return { id: event.id };
 }
 
-/** Undo a cancellation: upcoming meetings go back on the calendar. */
+/** Upcoming meetings that were cancelled on their own before the event's latest cancellation. */
+async function cancelledBeforeEvent(eventId: string): Promise<string[]> {
+  const log = await db.activityLog.findFirst({ where: { action: "event.cancelled", entityType: "event", entityId: eventId }, orderBy: { id: "desc" }, select: { data: true } });
+  const ids = (log?.data as { keptCancelledIds?: unknown } | null)?.keptCancelledIds;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * Undo a cancellation: upcoming meetings go back on the calendar, except ones
+ * cancelled on their own before (a holiday), and pending co-host invitations
+ * get their approval tasks back.
+ */
 export async function restoreEvent(actor: Actor | null, eventId: string) {
-  const { actor: a, event } = await loadManaged(actor, eventId);
+  const { actor: a, club, event } = await loadManaged(actor, eventId);
   if (event.status !== "CANCELLED") return { id: event.id };
+  const kept = await cancelledBeforeEvent(eventId);
   await db.$transaction(async (tx) => {
     await tx.event.update({ where: { id: eventId }, data: { status: "SCHEDULED" } });
-    await tx.eventOccurrence.updateMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: new Date() } }, data: { status: "SCHEDULED", note: null } });
+    await tx.eventOccurrence.updateMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: new Date() }, id: { notIn: kept } }, data: { status: "SCHEDULED", note: null } });
+    if (club) await reopenCohostTasks(tx, event, club, a.id);
     await logActivity({ actorId: a.id, action: "event.restored", entityType: "event", entityId: eventId, clubId: event.clubId }, tx);
   });
   await mirror(eventId, a);
@@ -829,10 +919,13 @@ async function loadManagedOccurrence(actor: Actor | null, occurrenceId: string) 
   return { occ, ...host };
 }
 
-/** Cancel one meeting of an event (others stay). */
+/** Cancel one meeting of an event (others stay). A meeting people checked in to is history and stays. */
 export async function cancelOccurrence(actor: Actor | null, occurrenceId: string, note?: string | null) {
   const { actor: a, occ } = await loadManagedOccurrence(actor, occurrenceId);
   if (occ.status === "CANCELLED") return { id: occ.id };
+  if (await db.attendance.count({ where: { occurrenceId: occ.id } })) {
+    throw conflict("People already checked in to this meeting, so it can't be cancelled. Remove their check-ins first if it didn't happen.");
+  }
   await db.eventOccurrence.update({ where: { id: occ.id }, data: { status: "CANCELLED", note: note?.trim().slice(0, 300) || null } });
   await logActivity({ actorId: a.id, action: "event.occurrence_cancelled", entityType: "occurrence", entityId: occ.id, clubId: occ.event.clubId, data: { eventId: occ.eventId, startsAt: occ.startsAt.toISOString() } });
   await mirror(occ.eventId, a);
@@ -840,12 +933,15 @@ export async function cancelOccurrence(actor: Actor | null, occurrenceId: string
 }
 
 export async function restoreOccurrence(actor: Actor | null, occurrenceId: string) {
-  const { actor: a, occ } = await loadManagedOccurrence(actor, occurrenceId);
+  const { actor: a, club, occ } = await loadManagedOccurrence(actor, occurrenceId);
   if (occ.status === "SCHEDULED") return { id: occ.id };
   await db.$transaction(async (tx) => {
     await tx.eventOccurrence.update({ where: { id: occ.id }, data: { status: "SCHEDULED", note: null } });
     // Bringing back a meeting of a cancelled event brings the event back too.
-    if (occ.event.status === "CANCELLED") await tx.event.update({ where: { id: occ.eventId }, data: { status: "SCHEDULED" } });
+    if (occ.event.status === "CANCELLED") {
+      await tx.event.update({ where: { id: occ.eventId }, data: { status: "SCHEDULED" } });
+      if (club) await reopenCohostTasks(tx, occ.event, club, a.id);
+    }
     await logActivity({ actorId: a.id, action: "event.occurrence_restored", entityType: "occurrence", entityId: occ.id, clubId: occ.event.clubId, data: { eventId: occ.eventId } }, tx);
   });
   await mirror(occ.eventId, a);
@@ -861,15 +957,22 @@ export async function setOccurrenceRoom(actor: Actor | null, occurrenceId: strin
   return { id: occ.id };
 }
 
-/** Delete an event or idea. Events with check-ins can only be cancelled, so attendance history stays. */
+/**
+ * Delete an event or idea. Events with check-ins can only be cancelled, so attendance
+ * history stays; so can events whose cost lines a funding request locked (deleting
+ * the event would delete those lines).
+ */
 export async function deleteEvent(actor: Actor | null, eventId: string) {
   const { actor: a, event } = await loadManaged(actor, eventId);
-  const [attended, requirement] = await Promise.all([
+  const [attended, requirement, costLines] = await Promise.all([
     db.attendance.count({ where: { occurrence: { eventId } } }),
     db.roleRequirement.findFirst({ where: { trainingEventId: eventId, active: true }, select: { name: true } }),
+    db.budgetItem.findMany({ where: { eventId }, select: { id: true } }),
   ]);
   if (attended > 0) throw conflict("People already checked in to this event, so it can't be deleted. Cancel it instead — its history stays.");
   if (requirement) throw conflict(`This training is the officer requirement “${requirement.name}”. Change that requirement first, or cancel the event instead.`);
+  const [lock] = (await costLineLocks(costLines.map((b) => b.id))).values();
+  if (lock) throw conflict(`This event's costs are part of the funding request “${lock.title}”, so it can't be deleted. Cancel it instead — its costs stay.`);
   const cohosts = await db.eventCohost.findMany({ where: { eventId }, select: { id: true } });
   await db.$transaction(async (tx) => {
     for (const c of cohosts) await resolveTasks("cohost", c.id, a.id, tx, "CANCELLED");
@@ -947,6 +1050,11 @@ export async function updateEventCost(actor: Actor | null, itemId: string, input
   const item = await db.budgetItem.findUnique({ where: { id: itemId } });
   if (!item?.eventId) throw notFound("Cost line");
   const { a, club } = await loadCostHost(actor, item.eventId);
+  const lock = (await costLineLocks([item.id])).get(item.id);
+  if (lock) {
+    if (costChanged(item, c)) throw lockedCost(item.description, lock);
+    return item; // unchanged: nothing to save
+  }
   const updated = await db.budgetItem.update({ where: { id: item.id }, data: costData(c, club) });
   await logActivity({ actorId: a.id, action: "event.cost_updated", entityType: "budgetItem", entityId: item.id, clubId: club.id, data: { eventId: item.eventId, cents: lineCents(updated) } });
   return updated;
@@ -956,6 +1064,8 @@ export async function removeEventCost(actor: Actor | null, itemId: string) {
   const item = await db.budgetItem.findUnique({ where: { id: itemId } });
   if (!item?.eventId) throw notFound("Cost line");
   const { a, club } = await loadCostHost(actor, item.eventId);
+  const lock = (await costLineLocks([item.id])).get(item.id);
+  if (lock) throw lockedCost(item.description, lock);
   await db.budgetItem.delete({ where: { id: item.id } });
   await logActivity({ actorId: a.id, action: "event.cost_removed", entityType: "budgetItem", entityId: item.id, clubId: club.id, data: { eventId: item.eventId } });
   return { id: item.id };

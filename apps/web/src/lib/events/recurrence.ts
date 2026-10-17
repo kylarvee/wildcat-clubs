@@ -14,6 +14,8 @@ import { TZ, campusDate } from "@/lib/time";
  *  YEARLY           same month/day every `interval` years
  *  SEMESTERLY       once per term that counts for activity, same offset from the term's first day
  *  ACADEMIC_YEARLY  once per academic year, in the same kind of term (fall/spring), same offset
+ *                   (for both: a start between terms means each term's first day)
+ *  All-day meetings run from campus midnight to the next campus midnight.
  *
  * Without `until` or `count`, recurrence runs one year past the start. With only
  * a `count`, the count decides (up to MAX_OCCURRENCES, within five years).
@@ -59,7 +61,13 @@ function daysInMonth(y: number, m: number) {
 
 export function expandOccurrences(spec: RecurrenceSpec, terms: Term[] = []): OccurrenceTimes[] {
   const start = local(spec.startsAt);
-  const durMs = (spec.allDay ? 24 * 60 : Math.max(5, spec.durationMinutes)) * 60_000;
+  const durMs = Math.max(5, spec.durationMinutes) * 60_000;
+  // An all-day meeting ends at the next campus midnight (23 or 25 hours away on daylight-saving days).
+  const endOf = (s: Date) => {
+    if (!spec.allDay) return new Date(s.getTime() + durMs);
+    const n = shiftDays(local(s), 1);
+    return campusDate(n.y, n.m, n.d);
+  };
   const interval = Math.max(1, spec.interval ?? 1);
   const horizon = spec.until ?? new Date(spec.startsAt.getTime() + (spec.count ? COUNT_HORIZON_DAYS : DEFAULT_HORIZON_DAYS) * 86_400_000);
   const limit = Math.min(spec.count ?? MAX_OCCURRENCES, MAX_OCCURRENCES);
@@ -68,14 +76,14 @@ export function expandOccurrences(spec: RecurrenceSpec, terms: Term[] = []): Occ
   const push = (y: number, m: number, d: number) => {
     const s = spec.allDay ? campusDate(y, m, d, 0, 0) : campusDate(y, m, d, start.H, start.M);
     if (s < spec.startsAt || s > endOfLocalDay(horizon)) return false;
-    out.push({ startsAt: s, endsAt: new Date(s.getTime() + durMs) });
+    out.push({ startsAt: s, endsAt: endOf(s) });
     return true;
   };
   const done = () => out.length >= limit;
 
   switch (spec.recurrence) {
     case "NONE":
-      out.push({ startsAt: spec.startsAt, endsAt: new Date(spec.startsAt.getTime() + durMs) });
+      out.push({ startsAt: spec.startsAt, endsAt: endOf(spec.startsAt) });
       break;
 
     case "DAILY":
@@ -124,10 +132,11 @@ export function expandOccurrences(spec: RecurrenceSpec, terms: Term[] = []): Occ
       const sorted = [...terms].sort((a, b) => a.startsOn.getTime() - b.startsOn.getTime());
       const home = sorted.find((t) => t.startsOn <= spec.startsAt && spec.startsAt <= t.endsOn) ?? sorted.find((t) => t.startsOn > spec.startsAt);
       if (!home) {
-        out.push({ startsAt: spec.startsAt, endsAt: new Date(spec.startsAt.getTime() + durMs) });
+        out.push({ startsAt: spec.startsAt, endsAt: endOf(spec.startsAt) });
         break;
       }
-      const offset = daysBetween(local(home.startsOn), start);
+      // A start between terms has no place in a term, so it lands on each term's first day.
+      const offset = Math.max(0, daysBetween(local(home.startsOn), start));
       const candidates = sorted.filter(
         (t) => t.startsOn >= home.startsOn && (spec.recurrence === "SEMESTERLY" ? t.countsForActivity || t.id === home.id : t.kind === home.kind),
       );

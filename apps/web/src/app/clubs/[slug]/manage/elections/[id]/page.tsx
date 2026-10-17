@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2, ExternalLink, Info } from "lucide-react";
 import { db } from "@/lib/db";
-import { ROLE_LABEL } from "@/lib/authz";
+import { ALL_CAPABILITIES, CAPABILITIES, ROLE_LABEL } from "@/lib/authz";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { currentLeaderIds, electionResults, eligibleVoterIds, syncElection } from "@/lib/domain/elections";
 import { electionCandidates, resultRows } from "@/lib/roles/election-queries";
@@ -53,6 +53,12 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
   const clearWinner = leadersRows.length === 1 ? leadersRows[0] : null;
   const winnerUserId = clearWinner ? byId.get(clearWinner.id)?.userId : null;
   const replacing = holders.filter((h) => h.user.id !== winnerUserId).map((h) => h.user.name);
+  // Officer and ambassador seats get the same permissions step as assigning them in the org chart.
+  const setup =
+    e.position.role === "OFFICER" || e.position.role === "AMBASSADOR"
+      ? { options: ALL_CAPABILITIES.map((k) => ({ key: k, label: CAPABILITIES[k].label, description: CAPABILITIES[k].description })), defaults: e.position.defaultPermissions }
+      : null;
+  const sittingIds = candidates.filter((c) => holders.some((h) => h.user.id === c.userId)).map((c) => c.id);
 
   return (
     <div className="space-y-6">
@@ -123,7 +129,16 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
                 </div>
               ) : canApply ? (
                 <div className="border-t border-line pt-4">
-                  <ApplyResultPanel slug={club.slug} electionId={e.id} seatName={e.position.name} winner={clearWinner} tied={clearWinner ? [] : leadersRows} replacing={replacing} />
+                  <ApplyResultPanel
+                    slug={club.slug}
+                    electionId={e.id}
+                    seatName={e.position.name}
+                    winner={clearWinner}
+                    tied={clearWinner ? [] : leadersRows}
+                    replacing={replacing}
+                    setup={setup}
+                    sittingIds={sittingIds}
+                  />
                 </div>
               ) : (
                 <Callout tone="info" icon={<Info />}>

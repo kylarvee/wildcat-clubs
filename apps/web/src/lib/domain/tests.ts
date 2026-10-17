@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma, Test, TestAttempt, TestAudience } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import type { Actor } from "@/lib/auth/session";
+import { loadActor, type Actor } from "@/lib/auth/session";
 import { can, getClubAccess } from "@/lib/authz";
 import { adminIds, clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
 import { aiLive } from "@/lib/config";
@@ -11,6 +11,8 @@ import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid,
 import { notify } from "@/lib/domain/notify";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { requirementSourceId } from "@/lib/domain/requirements";
+import { decideMembership } from "@/lib/domain/memberships";
+import { setRolePermissions } from "@/lib/domain/roles";
 import { suggestGrade } from "@/lib/ai/grading";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { getTerms } from "@/lib/terms";
@@ -24,12 +26,15 @@ import {
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
   DEFAULT_AUTOMATIONS,
+  automationAllowed,
   fmtPercent,
   isChoice,
+  isClubAction,
   isOpen,
   parseAutomations,
   parseOptions,
   type Automation,
+  type AutomationAction,
   type AutomationTrigger,
 } from "@/lib/tests/types";
 
@@ -43,7 +48,9 @@ import {
  * open answers wait for a reviewer (NEEDS_REVIEW; Claude may suggest points,
  * never decides) → GRADED → outcomes: passing completes the assignment and
  * meets officer requirements (using up every attempt without passing also
- * completes it — they took it); automations notify / open follow-up tasks.
+ * completes it — they took it); automations notify, open follow-up tasks
+ * and, for club tests, approve join requests or pause / give back officer
+ * permissions.
  * Scheduled jobs (lib/jobs) start recurring cycles, mark missed deadlines and
  * submit abandoned attempts.
  *
@@ -149,6 +156,17 @@ function isOpenForTaking(test: TestRow, now: Date) {
 }
 
 /**
+ * Closes the "Take: …" tasks of these assignments. MISSED assignments keep
+ * their task open while the test can still be taken late, so every path that
+ * ends someone's chance (released, archived, closed, out of attempts) closes
+ * theirs too, without changing the MISSED record.
+ */
+async function cancelAssignmentTasks(assignmentIds: string[], now: Date) {
+  if (!assignmentIds.length) return;
+  await db.task.updateMany({ where: { sourceType: "testAssignment", sourceId: { in: assignmentIds }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } });
+}
+
+/**
  * Makes the current cycle's assignments match the audience: creates missing
  * ones (with a task and a notification), re-opens excused people who are back,
  * and excuses people who left the audience. Requirement tests are handled by
@@ -161,33 +179,37 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
 
   // Tasks left over from earlier rounds close once a new round starts.
   const stale = await db.testAssignment.findMany({ where: { testId, cycleKey: { not: cycle.key }, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true } });
-  if (stale.length) await db.task.updateMany({ where: { sourceType: "testAssignment", sourceId: { in: stale.map((s) => s.id) }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } });
+  await cancelAssignmentTasks(stale.map((s) => s.id), now);
 
   if (!ASSIGNED_AUDIENCES.includes(test.audience)) {
     // Switched to "anyone" or to an officer requirement: release the people the old audience assigned
-    // (requirement-made assignments have no testAssignment task, so they're untouched).
-    const open = await db.testAssignment.findMany({ where: { testId, status: "ASSIGNED" }, select: { id: true } });
+    // (requirement-made assignments have no testAssignment task, so they're untouched). Missed ones stay missed.
+    const open = await db.testAssignment.findMany({ where: { testId, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true, status: true } });
     const tasks = open.length ? await db.task.findMany({ where: { sourceType: "testAssignment", status: "OPEN", sourceId: { in: open.map((a) => a.id) } }, select: { sourceId: true } }) : [];
-    const ids = tasks.map((t) => t.sourceId!).filter(Boolean);
-    if (ids.length) {
-      await db.testAssignment.updateMany({ where: { id: { in: ids } }, data: { status: "EXCUSED", resolvedAt: now } });
-      await db.task.updateMany({ where: { sourceType: "testAssignment", sourceId: { in: ids }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } });
-    }
+    const withTask = new Set(tasks.map((t) => t.sourceId!).filter(Boolean));
+    const ids = open.filter((a) => a.status === "ASSIGNED" && withTask.has(a.id)).map((a) => a.id);
+    if (ids.length) await db.testAssignment.updateMany({ where: { id: { in: ids } }, data: { status: "EXCUSED", resolvedAt: now } });
+    await cancelAssignmentTasks([...withTask], now);
     return { created: 0, excused: ids.length };
   }
-  // A closed round's open assignments become MISSED (markMissedAssignments), not excused.
-  if (!isOpenForTaking(test, now)) return { created: 0, excused: 0 };
+  // A closed round's open assignments become MISSED (markMissedAssignments), not excused;
+  // the late-take tasks of people who already missed it close now.
+  if (!isOpenForTaking(test, now)) {
+    const missed = await db.testAssignment.findMany({ where: { testId, cycleKey: cycle.key, status: "MISSED" }, select: { id: true } });
+    await cancelAssignmentTasks(missed.map((a) => a.id), now);
+    return { created: 0, excused: 0 };
+  }
 
   const audience = new Set(await audienceUserIds(test));
   const existing = await db.testAssignment.findMany({ where: { testId, cycleKey: cycle.key }, select: { id: true, userId: true, status: true } });
   const byUser = new Map(existing.map((a) => [a.userId, a]));
 
-  // People who left the audience (left the club, taken off the list): excuse what they still owe.
-  const extras = existing.filter((a) => a.status === "ASSIGNED" && !audience.has(a.userId));
-  if (extras.length) {
-    await db.testAssignment.updateMany({ where: { id: { in: extras.map((a) => a.id) } }, data: { status: "EXCUSED", resolvedAt: now } });
-    await db.task.updateMany({ where: { sourceType: "testAssignment", sourceId: { in: extras.map((a) => a.id) }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } });
-  }
+  // People who left the audience (left the club, taken off the list): excuse what they still owe
+  // (a missed assignment stays missed, but its late-take task closes).
+  const gone = existing.filter((a) => (a.status === "ASSIGNED" || a.status === "MISSED") && !audience.has(a.userId));
+  const extras = gone.filter((a) => a.status === "ASSIGNED");
+  if (extras.length) await db.testAssignment.updateMany({ where: { id: { in: extras.map((a) => a.id) } }, data: { status: "EXCUSED", resolvedAt: now } });
+  await cancelAssignmentTasks(gone.map((a) => a.id), now);
   if (!audience.size) return { created: 0, excused: extras.length };
 
   const dueAt = assignmentDueAt({ assignedAt: now, dueDays: test.dueDays, closesAt: test.closesAt, cycle, oneOff: test.recurrence === "ONE_OFF" });
@@ -339,6 +361,20 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
   if (closesAt && test.closesAt?.getTime() !== closesAt.getTime() && closesAt <= new Date()) throw invalid("Choose a closing time in the future.");
   const allowed = scope === "club" ? ["CLUB_MEMBERS", "SELECTED_USERS", "OPEN"] : ["ROLE_REQUIREMENT", "ALL_STUDENTS", "SELECTED_USERS", "OPEN"];
   if (!allowed.includes(v.audience)) throw invalid("That audience isn't available for this test.");
+  if (v.automations.some((x) => !automationAllowed(x, scope))) throw invalid("One of the automations can't run after that result. Pick a different step for it.");
+  if (test.clubId) {
+    // Club steps run in the creator's name, so adding one takes the permission to take that step by hand
+    // (otherwise anyone with the Tests permission could approve members or pause officers through a test).
+    const had = new Set(parseAutomations(test.automations).map((x) => `${x.trigger}:${x.action}`));
+    const added = new Set(v.automations.filter((x) => isClubAction(x.action) && !had.has(`${x.trigger}:${x.action}`)).map((x) => x.action));
+    if (added.size) {
+      const access = await getClubAccess(a, test.clubId);
+      if (added.has("APPROVE_JOIN_REQUEST") && !access?.capabilities.has("roster")) throw forbidden("Only people who approve join requests can make a test approve them.");
+      if ((added.has("PAUSE_PERMISSIONS") || added.has("RESUME_PERMISSIONS")) && !access?.assignableRoles.includes("OFFICER")) {
+        throw forbidden("Only the President, a Vice President or an advisor can make a test change officer permissions.");
+      }
+    }
+  }
   if (test.audience === "ROLE_REQUIREMENT" && v.audience !== "ROLE_REQUIREMENT") {
     const req = await db.roleRequirement.findFirst({ where: { testId, active: true }, select: { name: true } });
     if (req) throw invalid(`“${req.name}” uses this test, so its audience has to stay “Student leaders”. Turn that requirement off first.`);
@@ -492,11 +528,11 @@ export async function archiveTest(actor: Actor | null, testId: string): Promise<
   if (req) throw invalid(`“${req.name}” requires this test. Turn that requirement off in Officer requirements first.`);
   const now = new Date();
   await db.test.update({ where: { id: testId }, data: { status: "ARCHIVED" } });
-  const open = await db.testAssignment.findMany({ where: { testId, status: "ASSIGNED" }, select: { id: true } });
-  if (open.length) {
-    await db.testAssignment.updateMany({ where: { id: { in: open.map((o) => o.id) } }, data: { status: "EXCUSED", resolvedAt: now } });
-    await db.task.updateMany({ where: { sourceType: "testAssignment", sourceId: { in: open.map((o) => o.id) }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } });
-  }
+  // Open assignments are excused; missed ones stay missed. Both lose their "Take: …" task.
+  const owing = await db.testAssignment.findMany({ where: { testId, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true, status: true } });
+  const open = owing.filter((o) => o.status === "ASSIGNED");
+  if (open.length) await db.testAssignment.updateMany({ where: { id: { in: open.map((o) => o.id) } }, data: { status: "EXCUSED", resolvedAt: now } });
+  await cancelAssignmentTasks(owing.map((o) => o.id), now);
   await logActivity({ actorId: a.id, action: "test.archived", entityType: "test", entityId: testId, clubId: test.clubId, data: { title: test.title, excused: open.length } });
 }
 
@@ -934,14 +970,14 @@ async function applyOutcome(attempt: OutcomeAttempt, test: TestRow, opts: { revi
     await logActivity({ actorId: taker.id, action: "test.passed", entityType: "test", entityId: test.id, clubId: test.clubId, data: { attemptId: attempt.id, scorePercent: attempt.scorePercent }, isPublic: false });
   } else if (test.maxAttempts !== null) {
     // Out of attempts for this round: they finished taking it (without passing), so it's no longer
-    // on their to-do list and the deadline job won't call it "missed". Follow-ups are the automations' job.
+    // on their to-do list and the deadline job won't call it "missed". A late taker's assignment
+    // stays MISSED, but its task closes too. Follow-ups are the automations' job.
     const used = await db.testAttempt.count({ where: { testId: test.id, userId: taker.id, cycleKey: attempt.cycleKey } });
     if (used >= test.maxAttempts) {
-      const open = await db.testAssignment.findMany({ where: { testId: test.id, userId: taker.id, cycleKey: attempt.cycleKey, status: "ASSIGNED" }, select: { id: true } });
-      if (open.length) {
-        await db.testAssignment.updateMany({ where: { id: { in: open.map((o) => o.id) } }, data: { status: "COMPLETED", resolvedAt: now } });
-        for (const o of open) await resolveTasks("testAssignment", o.id, null);
-      }
+      const open = await db.testAssignment.findMany({ where: { testId: test.id, userId: taker.id, cycleKey: attempt.cycleKey, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true, status: true } });
+      const assigned = open.filter((o) => o.status === "ASSIGNED");
+      if (assigned.length) await db.testAssignment.updateMany({ where: { id: { in: assigned.map((o) => o.id) } }, data: { status: "COMPLETED", resolvedAt: now } });
+      for (const o of open) await resolveTasks("testAssignment", o.id, null);
     }
   }
   await runAutomations(attempt.passed ? "PASSED" : "FAILED", automations, ctx, { forceTaker: opts.reviewed });
@@ -1001,7 +1037,8 @@ async function advisorIdsFor(ctx: AutomationContext): Promise<string[]> {
  * permission for club tests.
  */
 export async function runAutomations(trigger: AutomationTrigger, automations: Automation[], ctx: AutomationContext, opts: { forceTaker?: boolean } = {}) {
-  const actions = new Set(automations.filter((a) => a.trigger === trigger).map((a) => a.action));
+  const scope = ctx.test.clubId ? "club" : "university";
+  const actions = new Set(automations.filter((a) => a.trigger === trigger && automationAllowed(a, scope)).map((a) => a.action));
   const { test, taker } = ctx;
   const verb = trigger === "PASSED" ? "passed" : trigger === "FAILED" ? "didn't pass" : "missed the deadline for";
   const scoreNote = ctx.scorePercent !== null && ctx.scorePercent !== undefined ? ` (${fmtPercent(ctx.scorePercent)})` : "";
@@ -1053,6 +1090,86 @@ export async function runAutomations(trigger: AutomationTrigger, automations: Au
       });
     }
   }
+  await runClubActions(actions, automations, ctx, verb);
+}
+
+const PERMISSIONS_PAUSED = "test.permissions_paused";
+const PERMISSIONS_RESUMED = "test.permissions_resumed";
+
+/**
+ * The automations that change something in the club: approving the taker's
+ * join request, and pausing or giving back their officer permissions. They go
+ * through the same write paths a leader uses by hand
+ * (memberships.decideMembership, roles.setRolePermissions), in the name of the
+ * person who built the test, and only while that person could still take the
+ * step themselves; otherwise it's skipped (a join request stays in the roster
+ * holders' inbox). Never throws: the result is already recorded by now.
+ */
+async function runClubActions(actions: Set<AutomationAction>, automations: Automation[], ctx: AutomationContext, verb: string) {
+  const { test, taker } = ctx;
+  const clubId = test.clubId;
+  if (!clubId || !test.club || ![...actions].some(isClubAction)) return;
+  try {
+    const creator = await loadActor(test.createdById);
+    if (!creator || creator.status === "DEACTIVATED") return;
+    const access = await getClubAccess(creator, clubId);
+    if (!access) return;
+
+    if (actions.has("APPROVE_JOIN_REQUEST") && access.capabilities.has("roster")) {
+      const m = await db.membership.findUnique({ where: { userId_clubId: { userId: taker.id, clubId } }, select: { id: true, status: true } });
+      if (m?.status === "PENDING") await decideMembership(creator, m.id, true);
+    }
+
+    const pause = actions.has("PAUSE_PERMISSIONS");
+    if (!pause && !actions.has("RESUME_PERMISSIONS")) return;
+    const roles = access.assignableRoles.filter((r) => r === "OFFICER" || r === "AMBASSADOR");
+    const seats = roles.length ? await db.roleAssignment.findMany({ where: { clubId, userId: taker.id, endedAt: null, role: { in: roles } }, select: { id: true, permissions: true } }) : [];
+    let changed = 0;
+    for (const seat of seats) {
+      // Pausing empties the seat's permissions and remembers them; giving back restores exactly
+      // that, unless a leader has set the seat's permissions again since.
+      let next: string[] = [];
+      if (pause) {
+        if (!seat.permissions.length) continue;
+      } else {
+        if (seat.permissions.length) continue;
+        next = await pausedPermissions(seat.id);
+        if (!next.length) continue;
+      }
+      await setRolePermissions(creator, seat.id, next);
+      await logActivity({ actorId: null, action: pause ? PERMISSIONS_PAUSED : PERMISSIONS_RESUMED, entityType: "roleAssignment", entityId: seat.id, clubId, data: { testId: test.id, userId: taker.id, permissions: pause ? seat.permissions : next } });
+      changed++;
+    }
+    if (!changed) return;
+    const comesBack = automations.some((a) => a.trigger === "PASSED" && a.action === "RESUME_PERMISSIONS");
+    await notify({
+      userIds: [taker.id],
+      kind: pause ? "test.permissions_paused" : "test.permissions_resumed",
+      title: pause ? `Your officer permissions in ${test.club.name} are paused` : `Your officer permissions in ${test.club.name} are back`,
+      body: pause
+        ? `You ${verb} ${test.title}. ${comesBack ? "They come back when you pass it." : "Ask the President or a Vice President about getting them back."}`
+        : `You passed ${test.title}.`,
+      href: pause ? `/tests/${test.id}` : `/clubs/${test.club.slug}/manage`,
+    });
+  } catch (e) {
+    console.error("test club automation", e);
+  }
+}
+
+/**
+ * What a test automation took away from a seat, if that pause is still the
+ * latest word on it. The pause's own "role.permissions_set" row comes just
+ * before it, so any later one means a leader has set the permissions since.
+ */
+async function pausedPermissions(assignmentId: string): Promise<string[]> {
+  const last = await db.activityLog.findFirst({
+    where: { entityType: "roleAssignment", entityId: assignmentId, action: { in: [PERMISSIONS_PAUSED, PERMISSIONS_RESUMED, "role.permissions_set"] } },
+    orderBy: { id: "desc" },
+    select: { action: true, data: true },
+  });
+  if (last?.action !== PERMISSIONS_PAUSED) return [];
+  const saved = (last.data as { permissions?: unknown } | null)?.permissions;
+  return Array.isArray(saved) ? saved.filter((p): p is string => typeof p === "string") : [];
 }
 
 // ─── Scheduled work (lib/jobs) ───────────────────────────────────────────────

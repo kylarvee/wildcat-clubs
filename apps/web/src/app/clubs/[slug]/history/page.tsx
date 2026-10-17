@@ -84,7 +84,7 @@ export default async function RoleHistoryPage({ params }: { params: Promise<{ sl
           </nav>
 
           {seats.map((s) => (
-            <SeatHistory key={s.key} seat={s} slug={club.slug} clubId={club.id} viewerId={viewer.id} canCurate={canCurate} visibleFiles={visibleFiles} now={now} clubEnd={clubEnd} clubRetired={club.status === "RETIRED"} />
+            <SeatHistory key={s.key} seat={s} slug={club.slug} clubId={club.id} viewerId={viewer.id} viewerActive={viewer.status === "ACTIVE"} canCurate={canCurate} visibleFiles={visibleFiles} now={now} clubEnd={clubEnd} clubRetired={club.status === "RETIRED"} />
           ))}
         </div>
       )}
@@ -101,6 +101,7 @@ function SeatHistory({
   slug,
   clubId,
   viewerId,
+  viewerActive,
   canCurate,
   visibleFiles,
   now,
@@ -111,6 +112,7 @@ function SeatHistory({
   slug: string;
   clubId: string;
   viewerId: string;
+  viewerActive: boolean;
   canCurate: boolean;
   visibleFiles: Set<string>;
   now: Date;
@@ -164,7 +166,8 @@ function SeatHistory({
             <ol className="relative space-y-5 border-l border-line pl-5">
               {seat.terms.map((t) => {
                 const isSelf = t.person.id === viewerId;
-                const curator = isSelf || canCurate;
+                // Mirrors roles.canCurateRole: alumni profiles are frozen, so only active holders curate their own.
+                const curator = (isSelf && viewerActive) || canCurate;
                 const current = !t.endedAt;
                 return (
                   <li key={t.assignmentId} className="relative">
@@ -213,7 +216,7 @@ function SeatHistory({
                                     c.title
                                   )}
                                 </h3>
-                                {curator ? <RemoveContributionButton slug={slug} projectId={c.id} title={c.title} /> : null}
+                                {curator ? <RemoveContributionButton slug={slug} projectId={c.id} title={c.title} holderName={isSelf ? undefined : t.person.name} /> : null}
                               </div>
                               {c.descriptionHtml ? <RichContent html={c.descriptionHtml} className="mt-1 text-sm text-ink-2" /> : null}
                               {files.length ? (

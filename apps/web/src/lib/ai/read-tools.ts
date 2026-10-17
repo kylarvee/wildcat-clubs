@@ -192,7 +192,7 @@ const getClub = readTool({
     ]);
     const [activity, events, review] = await Promise.all([
       club.status === "APPROVED" ? clubActivity(ref.id) : Promise.resolve(null),
-      clubUpcomingEvents(ref.id, actor, access, 6),
+      clubUpcomingEvents(ref.id, actor, 6),
       club.status === "APPROVED" && actor.kind === "STUDENT" && actor.status === "ACTIVE" ? reviewEligibility(actor.id, ref.id) : Promise.resolve(null),
     ]);
     const leaders = chart.seats
@@ -310,6 +310,67 @@ const myClubsAndRoles = readTool({
         follows_calendars_of: subs.filter((s) => !clubIds.includes(s.club.id)).map((s) => ({ club: s.club.name, link: `/clubs/${s.club.slug}` })),
       },
       label: "Checked your clubs and roles",
+    };
+  },
+});
+
+// ─── my_profile ─────────────────────────────────────────────────────────────
+
+const myProfile = readTool({
+  name: "my_profile",
+  running: "Checking your profile",
+  description:
+    "The person's own profile: name, pronouns, headline, About text, majors, minors and class year (students) or title (faculty/staff), LinkedIn link, whether they have a photo, how many experience, education and project entries they have, and which basics are still empty. Use it before update_my_profile and when helping someone set up their account.",
+  schema: z.object({}),
+  async run({ actor }) {
+    const u = await db.user.findUnique({
+      where: { id: actor.id },
+      select: {
+        name: true,
+        handle: true,
+        kind: true,
+        status: true,
+        pronouns: true,
+        headline: true,
+        aboutHtml: true,
+        jobTitle: true,
+        classYear: true,
+        linkedinUrl: true,
+        avatarUrl: true,
+        majors: { select: { isMinor: true, major: { select: { name: true } } }, orderBy: { major: { name: "asc" } } },
+        _count: { select: { experiences: true, educations: true, projects: true } },
+      },
+    });
+    if (!u) throw new ToolError("Their account wasn't found.");
+    const student = u.kind === "STUDENT";
+    const about = richToText(u.aboutHtml, 2000);
+    const majors = u.majors.filter((m) => !m.isMinor).map((m) => m.major.name);
+    const minors = u.majors.filter((m) => m.isMinor).map((m) => m.major.name);
+    const empty = [
+      !u.avatarUrl && "photo",
+      !u.headline && "headline",
+      !about && "about",
+      ...(student ? [!majors.length && "majors", !u.classYear && "class year"] : [!u.jobTitle && "title"]),
+      !u.linkedinUrl && "LinkedIn link",
+      !u._count.experiences && "experience",
+    ].filter((f): f is string => Boolean(f));
+    return {
+      data: {
+        name: u.name,
+        account: student ? "student" : "faculty/staff",
+        ...(u.status === "ALUMNI" ? { note: "Alumni profile: retired and read-only." } : {}),
+        profile_link: `/u/${u.handle}`,
+        edit_link: "/settings",
+        pronouns: u.pronouns,
+        headline: u.headline,
+        about: about || null,
+        ...(student ? { majors, minors, class_year: u.classYear } : { title: u.jobTitle }),
+        linkedin: u.linkedinUrl,
+        has_photo: Boolean(u.avatarUrl),
+        entries: { experience: u._count.experiences, education: u._count.educations, projects: u._count.projects },
+        still_empty: empty,
+      },
+      label: "Checked your profile",
     };
   },
 });
@@ -563,7 +624,8 @@ const eventDetails = readTool({
       include: {
         club: { select: { id: true, name: true, slug: true, status: true } },
         building: { select: { name: true } },
-        cohosts: { where: { status: "APPROVED" }, select: { club: { select: { name: true } } } },
+        // clubId + status: the shape canViewEvent's members-only rule reads.
+        cohosts: { where: { status: "APPROVED" }, select: { clubId: true, status: true, club: { select: { name: true } } } },
         occurrences: { where: { endsAt: { gte: now } }, orderBy: { startsAt: "asc" }, take: 5 },
         _count: { select: { occurrences: true } },
       },
@@ -736,12 +798,19 @@ const orgChart = readTool({
 const findClubMember = readTool({
   name: "find_club_member",
   running: "Looking up members",
-  description: "Find active members of a club by name (for assigning roles). Only for the club's leaders, advisors and admins.",
+  description: "Find active members of a club by name (for assigning roles). Only for people who can see the club's member roster (the Members permission) or assign its roles.",
   schema: z.object({ club: clubRef, name: z.string().min(1).max(100).describe("Part of the person's name") }),
   async run({ actor }, input) {
     const club = await resolveClub(actor, input.club);
     const access = await getClubAccess(actor, club.id);
-    if (!access?.isLeader) throw new ToolError(`Only ${club.name}'s leaders, advisors and WSUSA can look up its members.`);
+    // The same people the roster page shows members to, plus those who assign roles (assign_role needs a name).
+    if (!access || !(access.capabilities.has("roster") || access.assignableRoles.length > 0)) {
+      throw new ToolError(
+        access?.suspended
+          ? `Their permissions in ${club.name} are paused until they finish an overdue officer requirement (see their Tasks).`
+          : `Looking up ${club.name}'s members needs the ${CAPABILITIES.roster.label} permission there, which they don't have. The President, a Vice President or the club's advisor can grant it in the org chart.`,
+      );
+    }
     const rows = await db.membership.findMany({
       where: { clubId: club.id, status: "ACTIVE", user: { name: { contains: input.name.trim(), mode: "insensitive" } } },
       select: { joinedAt: true, user: { select: { id: true, name: true, kind: true, status: true } } },
@@ -803,6 +872,7 @@ export const READ_TOOLS = [
   searchClubs,
   getClub,
   myClubsAndRoles,
+  myProfile,
   myTasks,
   myCalendar,
   myAttendance,

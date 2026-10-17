@@ -96,7 +96,8 @@ export function CalendarToolbar({
           Today
         </Button>
       </div>
-      <h2 className={cn("min-w-0 flex-1 truncate font-semibold text-ink", compact ? "text-sm" : "text-base sm:text-lg")} aria-live="polite">
+      {/* min-w: in a narrow container the view switcher wraps to its own line instead of squeezing the title to "O…". */}
+      <h2 className={cn("min-w-[10rem] flex-1 truncate font-semibold text-ink", compact ? "text-sm" : "text-base sm:text-lg")} aria-live="polite">
         {title}
         {loading ? <span className="sr-only"> (loading)</span> : null}
       </h2>

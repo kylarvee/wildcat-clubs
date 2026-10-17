@@ -146,7 +146,7 @@ export function ClubHero({
           </div>
 
           {showCalendar ? (
-            <div className="min-w-0 rounded-[var(--radius-card)] border border-line bg-surface p-3 shadow-[var(--shadow-card)] sm:p-4">
+            <div id="club-calendar" className="min-w-0 scroll-mt-24 rounded-[var(--radius-card)] border border-line bg-surface p-3 shadow-[var(--shadow-card)] sm:p-4">
               <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
                 <h2 className="text-sm font-semibold text-ink">Calendar</h2>
                 <span className="text-xs text-ink-3">{signedIn ? "Events you can see, in campus time" : "Public events, in campus time"}</span>

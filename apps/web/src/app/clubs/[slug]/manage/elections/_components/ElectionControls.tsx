@@ -7,6 +7,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/components/ui/cn";
 import { ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Callout } from "@/components/ui/layout";
+import { PermissionChecklist, type CapabilityOption } from "@/components/roles/PermissionChecklist";
 import { PersonPicker, type PickerPerson } from "@/components/roles/PersonPicker";
 import { useRunAction } from "@/components/roles/useRunAction";
 import { applyResult, cancel, closeVotingNow, nominateMember, openVotingNow, removeCandidate } from "../actions";
@@ -151,12 +152,36 @@ export type TiedCandidate = { id: string; name: string; avatarUrl: string | null
 /**
  * Apply the result through the org chart. A clear winner applies in one
  * click; a tie asks the applier to choose, and that choice is recorded.
+ * Officer and ambassador seats first ask what the winner may do (pre-filled
+ * from the seat's defaults), like assigning the seat in the org chart does;
+ * a re-elected holder (`sittingIds`) keeps the permissions they have.
  */
-export function ApplyResultPanel({ slug, electionId, seatName, winner, tied, replacing }: { slug: string; electionId: string; seatName: string; winner: TiedCandidate | null; tied: TiedCandidate[]; replacing: string[] }) {
+export function ApplyResultPanel({
+  slug,
+  electionId,
+  seatName,
+  winner,
+  tied,
+  replacing,
+  setup,
+  sittingIds,
+}: {
+  slug: string;
+  electionId: string;
+  seatName: string;
+  winner: TiedCandidate | null;
+  tied: TiedCandidate[];
+  replacing: string[];
+  /** Officer / ambassador seats only. */
+  setup: { options: CapabilityOption[]; defaults: string[] } | null;
+  sittingIds: string[];
+}) {
   const [choice, setChoice] = useState<string | null>(winner?.id ?? null);
   const [confirming, setConfirming] = useState(false);
+  const [perms, setPerms] = useState<string[]>(setup?.defaults ?? []);
   const { pending, error, run } = useRunAction();
   const chosen = winner ?? tied.find((t) => t.id === choice) ?? null;
+  const askPerms = Boolean(setup && chosen && !sittingIds.includes(chosen.id));
   return (
     <div className="space-y-4">
       {winner ? (
@@ -183,6 +208,14 @@ export function ApplyResultPanel({ slug, electionId, seatName, winner, tied, rep
           </div>
         </fieldset>
       )}
+      {askPerms && setup && chosen ? (
+        <div className="space-y-2">
+          <p className="text-sm text-ink-2">
+            What can <strong>{chosen.name.split(" ")[0]}</strong> do as {seatName}? These start from the seat&apos;s defaults; you can change them any time in the org chart.
+          </p>
+          <PermissionChecklist options={setup.options} value={perms} onChange={setPerms} legend="Tool permissions" />
+        </div>
+      ) : null}
       {error ? <Callout tone="danger">{error}</Callout> : null}
       <Button onClick={() => setConfirming(true)} disabled={!chosen || pending}>
         {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trophy className="h-4 w-4" aria-hidden />}
@@ -199,7 +232,7 @@ export function ApplyResultPanel({ slug, electionId, seatName, winner, tied, rep
         }
         confirmLabel="Apply result"
         onConfirm={() => {
-          if (chosen) void run(() => applyResult(slug, electionId, chosen.id), { success: `${chosen.name} is now ${seatName}.` });
+          if (chosen) void run(() => applyResult(slug, electionId, chosen.id, askPerms ? perms : undefined), { success: `${chosen.name} is now ${seatName}.` });
         }}
       />
     </div>

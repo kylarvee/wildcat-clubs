@@ -7,8 +7,9 @@ import { parseCheckinInput } from '@/lib/checkin-link';
 /**
  * Notifications and announcements carry web paths ("/clubs/chess-club",
  * "/events/…?o=…"). The phone app has screens for the everyday ones; anything
- * else (budgets, tasks, tests, messages…) opens on the web, signed-in pages
- * included, so nothing is a dead end.
+ * else (budgets, tasks, tests, messages…) opens on the web in the in-app
+ * browser. That browser keeps its own web sign-in: the first signed-in page
+ * asks you to sign in there once, and it remembers you after that.
  */
 export function routeForHref(href: string): Href | null {
   let url: URL;
