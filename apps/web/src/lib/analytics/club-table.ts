@@ -1,0 +1,242 @@
+import type { ClubScope, ClubStatus, ClubType } from "@prisma/client";
+
+/**
+ * The admin club-analytics table: one row per club, with filters, sorting and
+ * the CSV columns. Pure and client-safe — the page builds rows on the server
+ * (lib/analytics/clubs), the table filters and sorts them in the browser, and
+ * the CSV export applies these same functions to the same query string, so
+ * the download always matches what's on screen.
+ */
+
+/** Where a club stands: the activity standing for approved clubs, else its lifecycle stage. */
+export type ClubStage = "active" | "pilot" | "inactive" | "founding" | "retired" | "rejected";
+
+export type ClubAnalyticsRow = {
+  id: string;
+  name: string;
+  slug: string;
+  type: ClubType;
+  status: ClubStatus;
+  stage: ClubStage;
+  scope: ClubScope;
+  collegeId: string | null;
+  collegeName: string | null;
+  collegeShort: string | null;
+  /** Registered (ACTIVE) members. */
+  registered: number;
+  /** Members active by attendance (lib/metrics). */
+  active: number;
+  /** Month retention: last complete month vs. the one before (lib/metrics clubListMetrics). */
+  retention: number | null;
+  /** Average member attendance rate over this term's held events (same as the Attendance Tracker). */
+  avgAttendance: number | null;
+  /** Held events this term (≥1 check-in), hosted or co-hosted. */
+  heldEvents: number;
+  rating: number | null;
+  reviews: number;
+  /** Clubs it shares cross-club attendance with in the last 12 months, and the total of those lines. */
+  connections: number;
+  crossCheckins: number;
+};
+
+export const CLUB_TYPE_NAMES: Record<ClubType, string> = {
+  SPONSORED: "Sponsored",
+  AFFILIATE: "Affiliate",
+  REGISTERED: "Registered",
+  COLLEGE_AMBASSADORS: "College Ambassadors",
+};
+
+export const STAGES: { key: ClubStage; label: string; hint: string }[] = [
+  { key: "active", label: "Active", hint: "Approved and meeting the activity bar on its own record" },
+  { key: "pilot", label: "In pilot", hint: "New club, counted as active until its pilot period ends" },
+  { key: "inactive", label: "Inactive", hint: "Approved but below the activity bar" },
+  { key: "founding", label: "In founding", hint: "Draft, waiting on WSUSA, or sent back for changes" },
+  { key: "retired", label: "Retired", hint: "Wound down; history kept" },
+  { key: "rejected", label: "Not approved", hint: "WSUSA decided not to approve it" },
+];
+
+export const STAGE_TONE: Record<ClubStage, "success" | "info" | "warning" | "neutral" | "brand" | "danger"> = {
+  active: "success",
+  pilot: "info",
+  inactive: "warning",
+  founding: "brand",
+  retired: "neutral",
+  rejected: "neutral",
+};
+
+const FOUNDING_LABEL: Partial<Record<ClubStatus, string>> = { DRAFT: "Draft", SUBMITTED: "Waiting on WSUSA", CHANGES_REQUESTED: "Changes requested" };
+
+/** The badge text for a row: "Active", "In pilot", "Draft", "Waiting on WSUSA"… */
+export function stageLabel(row: Pick<ClubAnalyticsRow, "stage" | "status">): string {
+  if (row.stage === "founding") return FOUNDING_LABEL[row.status] ?? "In founding";
+  return STAGES.find((s) => s.key === row.stage)!.label;
+}
+
+export function stageOf(status: ClubStatus, activity: { active: boolean; inPilot: boolean } | undefined): ClubStage {
+  if (status === "APPROVED") return activity?.inPilot ? "pilot" : activity?.active ? "active" : "inactive";
+  if (status === "RETIRED") return "retired";
+  if (status === "REJECTED") return "rejected";
+  return "founding";
+}
+
+// ─── Filters & sorting ──────────────────────────────────────────────────────
+
+export type SortKey = "name" | "stage" | "registered" | "active" | "retention" | "attendance" | "events" | "rating" | "connections";
+export type SortDir = "asc" | "desc";
+/** "approved" = active + pilot + inactive. */
+export type StageFilter = ClubStage | "approved";
+
+export type TableFilters = {
+  q: string;
+  /** A college id, or "none" for clubs that aren't part of a college. */
+  college: string | null;
+  type: ClubType | null;
+  stage: StageFilter | null;
+  sort: SortKey;
+  dir: SortDir;
+};
+
+export const SORT_KEYS: SortKey[] = ["name", "stage", "registered", "active", "retention", "attendance", "events", "rating", "connections"];
+const WORD_SORTS: SortKey[] = ["name", "stage"];
+const TYPES: ClubType[] = ["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"];
+const STAGE_FILTERS: StageFilter[] = ["approved", "active", "pilot", "inactive", "founding", "retired", "rejected"];
+
+/** Words sort A–Z first, numbers high-to-low first (the clubs list does the same). */
+export function defaultDir(sort: SortKey): SortDir {
+  return WORD_SORTS.includes(sort) ? "asc" : "desc";
+}
+
+export const DEFAULT_FILTERS: TableFilters = { q: "", college: null, type: null, stage: null, sort: "name", dir: "asc" };
+
+type ParamSource = URLSearchParams | Record<string, string | string[] | undefined>;
+function read(src: ParamSource, key: string): string | null {
+  if (src instanceof URLSearchParams) return src.get(key);
+  const v = src[key];
+  return (Array.isArray(v) ? v[0] : v) ?? null;
+}
+
+export function parseTableFilters(src: ParamSource): TableFilters {
+  const sort = SORT_KEYS.find((k) => k === read(src, "sort")) ?? DEFAULT_FILTERS.sort;
+  const dirRaw = read(src, "dir");
+  return {
+    q: (read(src, "q") ?? "").trim().slice(0, 100),
+    college: read(src, "college") || null,
+    type: TYPES.find((t) => t === read(src, "type")) ?? null,
+    stage: STAGE_FILTERS.find((s) => s === read(src, "status")) ?? null,
+    sort,
+    dir: dirRaw === "asc" || dirRaw === "desc" ? dirRaw : defaultDir(sort),
+  };
+}
+
+/** The query string for a set of filters (defaults left out, so URLs stay short). */
+export function filtersToQuery(f: TableFilters): string {
+  const p = new URLSearchParams();
+  if (f.q) p.set("q", f.q);
+  if (f.college) p.set("college", f.college);
+  if (f.type) p.set("type", f.type);
+  if (f.stage) p.set("status", f.stage);
+  if (f.sort !== DEFAULT_FILTERS.sort) p.set("sort", f.sort);
+  if (f.dir !== defaultDir(f.sort)) p.set("dir", f.dir);
+  return p.toString();
+}
+
+export function hasFilters(f: TableFilters) {
+  return Boolean(f.q || f.college || f.type || f.stage);
+}
+
+const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+export function filterRows(rows: ClubAnalyticsRow[], f: TableFilters): ClubAnalyticsRow[] {
+  const q = fold(f.q.trim());
+  return rows.filter((r) => {
+    if (q && !fold(r.name).includes(q)) return false;
+    if (f.college && (f.college === "none" ? r.collegeId !== null : r.collegeId !== f.college)) return false;
+    if (f.type && r.type !== f.type) return false;
+    if (f.stage === "approved" ? r.status !== "APPROVED" : f.stage && r.stage !== f.stage) return false;
+    return true;
+  });
+}
+
+const STAGE_ORDER: Record<ClubStage, number> = { active: 0, pilot: 1, inactive: 2, founding: 3, retired: 4, rejected: 5 };
+
+function value(r: ClubAnalyticsRow, key: SortKey): string | number | null {
+  switch (key) {
+    case "name":
+      return r.name;
+    case "stage":
+      return STAGE_ORDER[r.stage];
+    case "registered":
+      return r.registered;
+    case "active":
+      return r.active;
+    case "retention":
+      return r.retention;
+    case "attendance":
+      return r.avgAttendance;
+    case "events":
+      return r.heldEvents;
+    case "rating":
+      return r.rating;
+    case "connections":
+      return r.crossCheckins;
+  }
+}
+
+/** Sorted copy. Missing values always go last, whichever way the column is sorted; ties fall back to the name. */
+export function sortRows(rows: ClubAnalyticsRow[], sort: SortKey, dir: SortDir): ClubAnalyticsRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const va = value(a, sort);
+    const vb = value(b, sort);
+    if (va === null && vb !== null) return 1;
+    if (vb === null && va !== null) return -1;
+    if (va !== null && vb !== null && va !== vb) {
+      const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
+      if (c !== 0) return c * sign;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+// ─── CSV ─────────────────────────────────────────────────────────────────────
+
+const pctCell = (r: number | null) => (r === null ? "" : Math.round(r * 1000) / 10);
+
+/** Header + one line per club. Rates are percentages (one decimal); blanks mean "no data yet". `link` turns a path into a full URL. */
+export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link: (path: string) => string = (p) => p): (string | number | null)[][] {
+  const term = termName ? ` (${termName})` : " (this term)";
+  return [
+    [
+      "Club",
+      "Type",
+      "College",
+      "Status",
+      "Registered members",
+      "Active members",
+      "Retention, last month (%)",
+      `Average attendance rate${term} (%)`,
+      `Events held${term}`,
+      "Average rating",
+      "Reviews",
+      "Connected clubs (12 months)",
+      "Cross-club check-ins (12 months)",
+      "Club page",
+    ],
+    ...rows.map((r) => [
+      r.name,
+      CLUB_TYPE_NAMES[r.type],
+      r.collegeName ?? "",
+      stageLabel(r),
+      r.registered,
+      r.active,
+      pctCell(r.retention),
+      pctCell(r.avgAttendance),
+      r.heldEvents,
+      r.rating === null ? "" : Math.round(r.rating * 10) / 10,
+      r.reviews,
+      r.connections,
+      r.crossCheckins,
+      link(`/clubs/${r.slug}`),
+    ]),
+  ];
+}

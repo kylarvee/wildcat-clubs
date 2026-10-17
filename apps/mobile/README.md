@@ -1,56 +1,169 @@
-# Welcome to your Expo app 👋
+# Wildcat Clubs — mobile app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The phone version of Wildcat Clubs for Weber State students, faculty and staff.
+It keeps to what people need on the go:
 
-## Get started
+- **Scan to check in** — even before signing in. The scan is kept while you sign
+  in (or create your account), then the check-in finishes on its own.
+- **"Check in?" pop-up** — open a club you belong to while its event is on and
+  the app offers to check you in (**Not now** just closes it).
+- **Clubs** — search every approved club, Register / Request to join, and
+  follow a club's calendar without joining.
+- **Calendar** — your subscribed clubs (plus university events if you follow
+  them), grouped by day.
+- **Inbox** — your notifications, and push notifications on the phone.
+- **Me** — attendance in every club, your roles, settings and sign-out.
 
-1. Install dependencies
+Everything else (leader tools, budgets, tests, messages, reviews) opens the web
+app. Built with Expo SDK 58 and expo-router; it talks only to the web app's
+mobile API (`apps/web/src/app/api/m`), which calls the same domain functions as
+the web — the app never has its own rules.
 
-   ```bash
-   npm install
-   ```
+## Run it
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+You need the web app running first (from `apps/web`: `npm run dev -- --port 3100`,
+with a seeded database — see `apps/web/prisma/seed/PERSONAS.md`).
 
 ```bash
-npm run reset-project
+cd apps/mobile
+npm install            # first time only
+npx expo start         # then press i (iOS simulator), a (Android) or w (web)
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+### On your own phone with Expo Go
 
-### Other setup steps
+1. Install **Expo Go** from the App Store or Google Play.
+2. Put the phone on the **same Wi-Fi** as your computer.
+3. Find your computer's LAN IP (macOS: `ipconfig getifaddr en0`; Windows:
+   `ipconfig`). "localhost" on a phone means the phone itself, so the app needs
+   the computer's address:
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+   ```bash
+   EXPO_PUBLIC_API_URL=http://192.168.1.23:3100 npx expo start
+   ```
 
-## Learn more
+   (or put `EXPO_PUBLIC_API_URL=…` in `apps/mobile/.env.local`, which git ignores).
+4. Scan the QR code Expo prints with the phone's camera (iOS) or Expo Go
+   (Android).
 
-To learn more about developing your project with Expo, look at the following resources:
+If the app says it can't reach Wildcat Clubs, check that the web server is
+running, the IP is right, and your firewall allows port 3100.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### In a browser
 
-## Join the community
+```bash
+npx expo start --web   # opens http://localhost:8081, API at http://localhost:3100
+```
 
-Join our community of developers creating universal apps.
+The web preview is handy for quick checks. The camera scanner works in Chrome
+(other browsers: type the code instead), and push notifications are phone-only.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Signing in
+
+- **Test personas** — while the server's `AUTH_MODE` is `mock` or `both` (the
+  default outside production) the sign-in screen lists the seeded personas
+  (Maya the club member, Priya the president, Sam the new student…). One tap
+  signs you in.
+- **Weber State Google** — "Continue with Weber State Google" appears when the
+  server can verify Google tokens (`GOOGLE_CLIENT_ID` and/or
+  `GOOGLE_IOS_CLIENT_ID` / `GOOGLE_ANDROID_CLIENT_ID` set in `apps/web`) **and**
+  this build has the client id for its platform:
+
+  ```bash
+  EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=…apps.googleusercontent.com
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=…apps.googleusercontent.com
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=…apps.googleusercontent.com   # the web preview
+  ```
+
+  The app gets an ID token from Google and the server checks it's a verified
+  `@mail.weber.edu` / `@weber.edu` account; the first sign-in creates the
+  account. Google sign-in needs a development or store build (Google won't
+  redirect back into Expo Go). expo-auth-session's Google helper is deprecated
+  upstream; when the app moves to EAS builds, `@react-native-google-signin/google-signin`
+  is the drop-in replacement for `GoogleSignInButton` — the server side stays
+  the same.
+
+The session token is kept in the phone's keychain / keystore (expo-secure-store;
+the web preview uses localStorage). Sessions last 180 days; signing out ends the
+session on the server and stops pushes to the phone.
+
+## Try scanning with the seed data
+
+The seed creates check-in codes relative to when it ran (re-seed right before a
+session, `npm run db:seed` in `apps/web`; the seed prints the codes):
+
+| Code | Event | Good for |
+|---|---|---|
+| `HERE26` | Service & Volunteer Club — Care Kit Assembly (live when seeded, self check-in on) | A new student checking in (Sam): open club → becomes a member |
+| `BUILD8` | Wildcat Robotics — Open Build Night (live, members only) | Approval-gated club → join request sent |
+| `LATER7` | Psychology Club — Grad School Q&A (about 3 hours after seeding) | Maya's "check in?" pop-up and Home banner once it opens |
+
+- **Real QR:** sign in on the web as a leader of the hosting club (Priya for
+  Wildcat Robotics) and open the live check-in screen from the Attendance tool
+  (`/checkin/live/<occurrenceId>`), then scan it with the **Scan** tab. The QR
+  changes every 30 seconds; the app trades a fresh scan for a 10-minute pass, so
+  you can sign in after scanning.
+- **No camera:** Scan → **Enter code**, type the code.
+- **Deep link:** `wildcatclubs://c/HERE26` opens the check-in screen (it waits
+  for you to tap **Check in** — a link alone never checks anyone in).
+
+Check-in windows come from System settings (by default from 30 minutes before
+an event until 30 minutes after it ends).
+
+## Push notifications
+
+The app asks for notification permission right after you sign in and registers
+the phone's Expo push token with the server (`POST /api/m/push-token`). The
+server sends through Expo's push service once a sysadmin switches **Push** on in
+System settings; until then pushes land in the outbox (`/system/outbox`) so you
+can see what would have been sent. Tapping a notification opens the matching
+screen (club, event, calendar, inbox, check-in) or the web page for anything the
+app doesn't do.
+
+Getting a push token needs an **EAS project id**. Run `npx eas-cli@latest init`
+once — it adds `extra.eas.projectId` to `app.json`. Without it (and in the web
+preview, or Expo Go on Android, which can't receive pushes) the app skips push
+quietly and Me → Settings says why; the in-app inbox still works.
+
+## Building for the App Store and Google Play (EAS)
+
+```bash
+npm install -g eas-cli          # or use npx eas-cli@latest
+eas login
+eas init                        # links the project, sets extra.eas.projectId
+eas build:configure             # creates eas.json
+eas build --profile development --platform ios   # a dev build (Google sign-in, push)
+eas build --platform all        # store builds
+eas submit --platform ios       # / android
+```
+
+Before a store release:
+
+- Replace the placeholder ids `edu.weber.wildcatclubs` (`ios.bundleIdentifier`,
+  `android.package` in `app.json`) with the university's registered ones.
+- Set `EXPO_PUBLIC_API_URL` to the production web address for the build (an EAS
+  environment variable), and the Google client ids above.
+- Replace the placeholder icon and splash in `assets/images` with WSU-approved
+  artwork.
+- For QR codes to open the app instead of the browser, add the web domain as
+  iOS associated domains / Android app links (the in-app scanner works either
+  way).
+
+## Code map
+
+```
+src/app/              screens (expo-router)
+  (tabs)/             Home, Scan, Clubs, Calendar, Inbox, Me
+  welcome.tsx         sign in (Google / test personas)
+  c/[code].tsx        the check-in flow (scan, typed code, pop-up, deep link)
+  club/[slug].tsx     a club: Register / Subscribe, events, your attendance, pop-up
+  event/[id].tsx      one meeting
+src/api/              typed client; types.ts mirrors apps/web/src/app/api/m/_types.ts
+src/auth/session.tsx  sign-in state, secure token storage, push registration
+src/components/       shared UI (buttons, cards, rows, states, result views)
+src/lib/              links, push, storage, data hook, formatting
+src/theme.ts          colors (light + dark), spacing, type scale
+```
+
+Checks: `npx tsc --noEmit` and `npx expo export --platform web` (delete `dist/`
+afterwards).
