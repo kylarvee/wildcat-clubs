@@ -130,7 +130,7 @@ model User {
   classYear            Int? // expected graduation year (students)
   graduatedAt          DateTime?
   linkedinUrl          String?
-  calendarToken        String       @unique @default(cuid())
+  calendarToken        String       @unique @default(uuid()) // private feed link: 122 random bits
   subscribeUniversity  Boolean      @default(true) // university-wide events on my calendar
   emailNotifications   Boolean      @default(true)
   appPromptDismissedAt DateTime?
@@ -185,6 +185,7 @@ model User {
   fundingDecisions    FundingRequest[]       @relation("FundingDecider")
   invoices            Invoice[]
   aiConversations     AiConversation[]
+  aiUsage             AiUsage[]
   activity            ActivityLog[]
   clubDecisions       ClubDecision[]
   cohostRequests      EventCohost[]          @relation("CohostRequester")
@@ -484,7 +485,7 @@ model AdvisorInvite {
   club        Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
   name        String
   email       String
-  token       String       @unique @default(cuid())
+  token       String       @unique @default(uuid())
   status      InviteStatus @default(PENDING)
   invitedById String
   invitedBy   User         @relation("Inviter", fields: [invitedById], references: [id])
@@ -1148,7 +1149,7 @@ model Test {
   recurrence       TestRecurrence    @default(ONE_OFF)
   dueDays          Int               @default(30) // days to finish after being assigned / a cycle starts
   closesAt         DateTime? // one-off deadline
-  /// [{ trigger: "PASSED"|"FAILED"|"MISSED_DEADLINE", action: "NOTIFY_TAKER"|"NOTIFY_ADVISOR"|"NOTIFY_ADMINS"|"CREATE_ADMIN_TASK" }]
+  /// [{ trigger: "PASSED"|"FAILED"|"MISSED_DEADLINE", action: "NOTIFY_TAKER"|"NOTIFY_ADVISOR"|"NOTIFY_ADMINS"|"CREATE_ADMIN_TASK"|"APPROVE_JOIN_REQUEST"|"PAUSE_PERMISSIONS"|"RESUME_PERMISSIONS" }] — the last three for club tests only
   automations      Json              @default("[]")
   createdById      String
   createdBy        User              @relation(fields: [createdById], references: [id])
@@ -1467,6 +1468,18 @@ model AiConversation {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   messages  AiMessage[]
+}
+
+/// One row per Claude call, kept even when conversations are deleted, so the
+/// hourly limit can't be reset by deleting chats.
+model AiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model     String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model AiMessage {
