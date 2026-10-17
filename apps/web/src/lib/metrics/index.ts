@@ -58,8 +58,10 @@ import type {
  *   30 days plus the next 30 days.
  *
  * INTERCONNECTION — for each check-in at an event whose participating clubs
- *   are P (host + approved co-hosts), and each club M the attendee was a
- *   member of: every club X in P with X ≠ M gains weight 1 on edge (M, X).
+ *   are P (host + approved co-hosts): a guest visit (none of the attendee's
+ *   clubs is in P) adds 1 to edge (M, X) for each of their clubs M and each X
+ *   in P; at one of their own clubs' events, only edges between their clubs in
+ *   P and the other clubs in P (co-hosting) count.
  *   Node size = check-ins at the club's events. Centrality emerges from the
  *   force layout; nothing is placed by hand.
  *
@@ -692,7 +694,9 @@ function checkinsWithClubs(from: Date, to: Date, extra: { select: Prisma.Sql; jo
 /**
  * Cross-club attendance in a window, aggregated in the database so only a
  * row per pair of clubs comes back however many check-ins there are:
- *   directed  check-ins per (member club M → participating club X), M ≠ X
+ *   directed  check-ins per (member club M → participating club X), M ≠ X —
+ *             guest visits (no club of theirs participates), or co-hosted events
+ *             where M is one of the participating clubs
  *   overlap   check-ins by someone in two of the participating clubs
  *   cross     check-ins that drew at least one line (only when asked)
  *   sizes     check-ins at each club's events (hosted or co-hosted)
@@ -703,18 +707,21 @@ async function networkCounts(from: Date, to: Date, withCross = false): Promise<N
     select: Prisma.sql`m."clubId" AS m_club`,
     join: Prisma.sql`JOIN "Membership" m ON m."userId" = a."userId" AND ${memberAtSql("m", Prisma.sql`o."startsAt"`)}`,
   });
-  // A check-in draws a line unless every club the attendee belonged to is the event's only club.
+  // A check-in draws a line when it's a guest visit (none of the attendee's clubs
+  // put on the event) or the event is co-hosted. Attending your own club's
+  // regular meeting is not inter-club activity, even if you belong to others.
   const cross = withCross
     ? Prisma.sql`UNION ALL
       SELECT 'cross', NULL, NULL, count(*)::int
-        FROM (SELECT 1 FROM mem WHERE cardinality(mem.clubs) > 1 OR mem.clubs[1] <> mem.m_club GROUP BY mem.checkin_id) t`
+        FROM (SELECT 1 FROM memf WHERE NOT memf.own OR cardinality(memf.clubs) > 1 GROUP BY memf.checkin_id) t`
     : Prisma.empty;
   const [pairs, sizes] = await Promise.all([
     db.$queryRaw<{ kind: "directed" | "overlap" | "cross"; a: string | null; b: string | null; n: number }[]>`
-      WITH mem AS (${mem})
-      SELECT 'directed' AS kind, mem.m_club AS a, x.club AS b, count(*)::int AS n
-        FROM mem, unnest(mem.clubs) AS x(club)
-       WHERE x.club <> mem.m_club
+      WITH mem AS (${mem}),
+      memf AS (SELECT mem.*, bool_or(mem.m_club = ANY(mem.clubs)) OVER (PARTITION BY mem.checkin_id) AS own FROM mem)
+      SELECT 'directed' AS kind, memf.m_club AS a, x.club AS b, count(*)::int AS n
+        FROM memf, unnest(memf.clubs) AS x(club)
+       WHERE x.club <> memf.m_club AND (NOT memf.own OR memf.m_club = ANY(memf.clubs))
        GROUP BY 2, 3
       UNION ALL
       SELECT 'overlap', t.ins[i], t.ins[j], count(*)::int

@@ -370,15 +370,21 @@ export function summarizeOccurrence(c: { attendees: number; memberAttendees: num
 export type CheckinGroup = { participants: string[]; memberOf: string[]; count: number };
 
 /**
- * The lines one check-in draws on the network: every club M the attendee
- * belonged to, paired with every participating club X (host + approved
- * co-hosts) other than M. Lines are undirected and each line counts once per
- * check-in, so a member of both co-hosts doesn't double a line.
+ * The lines one check-in draws on the network (participating clubs = host +
+ * approved co-hosts):
+ *  - a guest visit (none of the attendee's clubs participates): every club M
+ *    they belong to is linked to every participating club;
+ *  - at one of their own clubs' events: only links between that club and the
+ *    event's other participating clubs (co-hosting). Going to your own club's
+ *    meeting isn't inter-club activity, even if you belong to other clubs.
+ * Lines are undirected and count once per check-in.
  */
 export function checkinLines(participants: string[], memberOf: string[]): Array<[string, string]> {
   const seen = new Set<string>();
   const out: Array<[string, string]> = [];
-  for (const m of new Set(memberOf)) {
+  const parts = new Set(participants);
+  const inside = [...new Set(memberOf)].filter((m) => parts.has(m));
+  for (const m of inside.length ? inside : new Set(memberOf)) {
     for (const x of new Set(participants)) {
       if (m === x) continue;
       const pair: [string, string] = m < x ? [m, x] : [x, m];
@@ -465,8 +471,10 @@ export function countsFromCheckins(groups: CheckinGroup[]): { directed: PairCoun
   for (const g of groups) {
     const participants = [...new Set(g.participants)];
     const memberOf = [...new Set(g.memberOf)];
-    for (const m of memberOf) for (const x of participants) if (m !== x) bump(directed, m, x, g.count);
     const inside = memberOf.filter((m) => participants.includes(m)).sort();
+    // At one of their own clubs' events, only that club's co-hosts count; otherwise it's a guest visit.
+    const from = inside.length ? inside : memberOf;
+    for (const m of from) for (const x of participants) if (m !== x) bump(directed, m, x, g.count);
     for (let i = 0; i < inside.length; i++) for (let j = i + 1; j < inside.length; j++) bump(overlaps, inside[i], inside[j], g.count);
   }
   return { directed: [...directed.values()], overlaps: [...overlaps.values()] };

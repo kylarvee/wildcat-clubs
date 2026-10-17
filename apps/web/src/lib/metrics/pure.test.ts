@@ -295,6 +295,13 @@ describe("interconnection", () => {
     expect(checkinLines(["B", "C"], ["B"])).toEqual([["B", "C"]]);
   });
 
+  it("doesn't link your other clubs when you go to your own club's event", () => {
+    // A member of A and B at B's regular meeting: just B attendance.
+    expect(checkinLines(["B"], ["A", "B"])).toEqual([]);
+    // At a B event co-hosted with C, only the co-hosting link counts.
+    expect(checkinLines(["B", "C"], ["A", "B"])).toEqual([["B", "C"]]);
+  });
+
   it("counts a line once per check-in, even for a member of both clubs", () => {
     expect(checkinLines(["A", "B"], ["A", "B"])).toEqual([["A", "B"]]);
   });
