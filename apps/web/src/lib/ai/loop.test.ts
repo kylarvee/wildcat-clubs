@@ -30,8 +30,8 @@ vi.mock("@/lib/db", () => {
           const row = store.rows.find((r) => r.id === where.id);
           return row ? pick(row) : null;
         },
-        count: async () => store.calls,
       },
+      aiUsage: { createMany: async () => ({ count: 0 }), count: async () => store.calls },
       aiConversation: { update: async () => ({}) },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({

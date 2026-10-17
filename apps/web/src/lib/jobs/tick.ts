@@ -43,7 +43,8 @@ export async function runAllJobs(now: Date = new Date()): Promise<JobReport[]> {
  * Order matters: abandoned attempts are handed in first (a pass there
  * completes an assignment before the deadline check sees it), new rounds are
  * assigned before misses are counted, and requirements are re-checked after
- * tests settle.
+ * attempts are handed in but before misses are marked, so people whose roles
+ * ended are excused from officer tests instead of marked MISSED.
  */
 async function runSequence(now: Date): Promise<JobReport[]> {
   const reports: JobReport[] = [];
@@ -63,16 +64,16 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
-    await job("Missed test deadlines", async () => {
-      const r = await markMissedAssignments(now);
-      return r.missed ? `Marked ${plural(r.missed, "assignment")} missed and ran their automations.` : "No deadlines passed since the last run.";
-    }),
-  );
-  reports.push(
     await job("Officer requirements", async () => {
       const synced = await syncAllRequirementHolders({ notify: "due", now });
       const overdue = await notifyOverdueRequirements(now);
       return `Re-checked ${plural(synced.people, "student leader")}; opened ${plural(synced.opened, "new requirement task")}; told ${plural(overdue.notified, "person", "people")} their permissions paused.`;
+    }),
+  );
+  reports.push(
+    await job("Missed test deadlines", async () => {
+      const r = await markMissedAssignments(now);
+      return r.missed ? `Marked ${plural(r.missed, "assignment")} missed and ran their automations.` : "No deadlines passed since the last run.";
     }),
   );
   reports.push(

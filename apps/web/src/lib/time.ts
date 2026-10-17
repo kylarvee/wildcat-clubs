@@ -24,18 +24,20 @@ export function fmtTime(d: Date | string) {
   return format(inCampusTime(d), "h:mm a");
 }
 
-/** "Thu, Oct 16 · 6:30 – 8:00 PM" (or across days when needed). */
+/** "Thu, Oct 16 · 6:30 – 8:00 PM" (or across days when needed; dates outside this campus year show it). */
 export function fmtRange(start: Date | string, end: Date | string, allDay = false) {
   const s = inCampusTime(start);
   // All-day ends are exclusive (the next midnight), so the last day is the one before.
   const e = inCampusTime(allDay ? Math.max(s.getTime(), new Date(end).getTime() - 1) : end);
-  if (allDay) return isSameDay(s, e) ? `${format(s, "EEE, MMM d")} · All day` : `${format(s, "MMM d")} – ${format(e, "MMM d")}`;
+  const thisYear = format(inCampusTime(new Date()), "yyyy");
+  const y = (d: Date) => (format(d, "yyyy") === thisYear ? "" : ", yyyy");
+  if (allDay) return isSameDay(s, e) ? `${format(s, `EEE, MMM d${y(s)}`)} · All day` : `${format(s, `MMM d${y(s)}`)} – ${format(e, `MMM d${y(e)}`)}`;
   if (isSameDay(s, e)) {
     // "10:00 AM – 2:00 PM" needs both halves of the day; "6:30 – 8:00 PM" doesn't.
-    const startPattern = format(s, "a") === format(e, "a") ? "EEE, MMM d · h:mm" : "EEE, MMM d · h:mm a";
+    const startPattern = format(s, "a") === format(e, "a") ? `EEE, MMM d${y(s)} · h:mm` : `EEE, MMM d${y(s)} · h:mm a`;
     return `${format(s, startPattern)} – ${format(e, "h:mm a")}`;
   }
-  return `${format(s, "MMM d, h:mm a")} – ${format(e, "MMM d, h:mm a")}`;
+  return `${format(s, `MMM d${y(s)}, h:mm a`)} – ${format(e, `MMM d${y(e)}, h:mm a`)}`;
 }
 
 export function fmtAgo(d: Date | string) {

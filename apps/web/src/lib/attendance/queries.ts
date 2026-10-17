@@ -245,14 +245,18 @@ export async function loadClubMatrix(clubId: string, range: { from: Date; to: Da
   };
 }
 
-/** Distinct people who checked in to a club's events in a range without being members at the time. */
+/**
+ * Distinct people who checked in to a club's events in a range without being
+ * members at the time. Only student memberships count as members, as in
+ * lib/metrics clubAttendanceByOccurrence (an advisor checking in is a guest).
+ */
 export async function distinctGuestCount(clubId: string, from: Date, to: Date): Promise<number> {
   const [rows, memberships] = await Promise.all([
     db.attendance.findMany({
       where: { occurrence: { ...clubOccurrencesWhere(clubId), startsAt: { gte: from, lte: to } } },
       select: { userId: true, occurrence: { select: { startsAt: true } } },
     }),
-    db.membership.findMany({ where: { clubId }, select: { userId: true, status: true, joinedAt: true, endedAt: true } }),
+    db.membership.findMany({ where: { clubId, user: { kind: "STUDENT" } }, select: { userId: true, status: true, joinedAt: true, endedAt: true } }),
   ]);
   const byUser = new Map(memberships.map((m) => [m.userId, m]));
   return new Set(rows.filter((r) => !memberAt(byUser.get(r.userId), r.occurrence.startsAt)).map((r) => r.userId)).size;
@@ -312,8 +316,9 @@ export async function loadOccurrenceAttendees(occurrenceId: string, hostClubId: 
       user: { select: { id: true, name: true, email: true, handle: true, avatarUrl: true, avatarColor: true, status: true } },
     },
   });
+  // Student memberships only, so membersAtTime, memberAttendees, guests and rate match the tracker's columns (lib/metrics).
   const memberships = hostClubId
-    ? await db.membership.findMany({ where: { clubId: hostClubId }, select: { userId: true, status: true, joinedAt: true, endedAt: true } })
+    ? await db.membership.findMany({ where: { clubId: hostClubId, user: { kind: "STUDENT" } }, select: { userId: true, status: true, joinedAt: true, endedAt: true } })
     : [];
   const byUser = new Map(memberships.map((m) => [m.userId, m]));
   const attendees: OccurrenceAttendee[] = rows.map((r) => ({

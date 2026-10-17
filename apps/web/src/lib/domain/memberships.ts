@@ -1,7 +1,7 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
 import type { MembershipSource } from "@prisma/client";
 import { db } from "@/lib/db";
+import { newCalendarToken } from "@/lib/auth/accounts";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, ROLE_RANK } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
@@ -59,11 +59,13 @@ export async function decideMembership(actor: Actor | null, membershipId: string
   const m = await db.membership.findUnique({ where: { id: membershipId }, include: { club: { select: { name: true, slug: true } } } });
   if (!m) throw notFound("Request");
   await assertClubCap(actor, m.clubId, "roster");
-  if (m.status !== "PENDING") throw conflict("This request was already decided.");
-  const updated = await db.membership.update({
-    where: { id: m.id },
+  // Claimed only while still PENDING, so two leaders deciding at once can't both go through.
+  const claimed = await db.membership.updateMany({
+    where: { id: m.id, status: "PENDING" },
     data: approve ? { status: "ACTIVE", joinedAt: new Date() } : { status: "DECLINED", endedAt: new Date() },
   });
+  if (claimed.count === 0) throw conflict("This request was already decided.");
+  const updated = await db.membership.findUniqueOrThrow({ where: { id: m.id } });
   if (approve) await subscribeInternal(m.userId, m.clubId);
   await resolveTasks("membership", m.id, actor!.id);
   await logActivity({ actorId: actor!.id, action: approve ? "membership.approved" : "membership.declined", entityType: "membership", entityId: m.id, clubId: m.clubId, isPublic: approve });
@@ -157,7 +159,7 @@ export async function setUniversityCalendar(actor: Actor | null, on: boolean) {
 /** New private calendar link; the old one stops working (for a link that was shared by mistake). */
 export async function resetCalendarToken(actor: Actor | null) {
   assertSignedIn(actor);
-  await db.user.update({ where: { id: actor.id }, data: { calendarToken: randomUUID().replace(/-/g, "") } });
+  await db.user.update({ where: { id: actor.id }, data: { calendarToken: newCalendarToken() } });
   await logActivity({ actorId: actor.id, action: "calendar.token_reset", entityType: "user", entityId: actor.id });
 }
 

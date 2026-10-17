@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarPlus, Download, QrCode } from "lucide-react";
-import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getTerms } from "@/lib/terms";
 import { fmtDate, fmtTime } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { activeMemberIdsFor, clubAttendanceByOccurrence, clubRetention, type RetentionPoint } from "@/lib/metrics";
+import { activeMemberIdsFor, clubAttendanceByOccurrence, clubRetention, registeredMemberCount, type RetentionPoint } from "@/lib/metrics";
 import { clubCheckinList, distinctGuestCount, loadClubMatrix, type ClubCheckinList } from "@/lib/attendance/queries";
 import { pct, type RowSort } from "@/lib/attendance/matrix";
 import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
@@ -64,7 +63,7 @@ export default async function ClubAttendancePage({ params, searchParams }: { par
     clubCheckinList(club.id, cfg, now),
     clubAttendanceByOccurrence(club.id, { from: term.from, to: termUntil }),
     activeMemberIdsFor(club.id, now),
-    db.membership.count({ where: { clubId: club.id, status: "ACTIVE" } }),
+    registeredMemberCount(club.id),
     distinctGuestCount(club.id, term.from, termUntil),
     clubRetention(club.id, "month", { count: 12, at: now }),
     clubRetention(club.id, "quarter", { count: 8, at: now }),

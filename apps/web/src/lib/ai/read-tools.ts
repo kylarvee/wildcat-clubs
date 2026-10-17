@@ -472,7 +472,12 @@ const myAttendance = readTool({
         attendance_rate: s.membershipStatus ? percent(s.summary.rate) : null,
         last_check_in: s.summary.lastAttendedAt ? fmtDate(s.summary.lastAttendedAt, "MMM d, yyyy") : null,
         counts_as_active: s.summary.active,
-        reviews: s.summary.reviewEligible ? "unlocked" : `${s.summary.attended} of ${s.summary.reviewThreshold} events needed`,
+        // Alumni and faculty/staff can't review, so don't tell them they're working toward one.
+        reviews: !s.summary.canReview
+          ? "not available for this account"
+          : s.summary.reviewEligible
+            ? "unlocked"
+            : `${s.summary.attended} of ${s.summary.reviewThreshold} events needed`,
       }));
     const recent = history.rows
       .filter((r) => !club || r.clubs.some((c) => c.id === club.id))

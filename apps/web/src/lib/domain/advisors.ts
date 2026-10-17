@@ -133,7 +133,8 @@ export async function resendAdvisorInvite(actor: Actor | null, inviteId: string)
 export async function cancelAdvisorInvite(actor: Actor | null, inviteId: string) {
   const invite = await loadInviteForClubAction(actor, inviteId);
   if (invite.status !== "PENDING") throw conflict("This invitation was already answered or cancelled.");
-  await db.advisorInvite.update({ where: { id: invite.id }, data: { status: "CANCELLED", respondedAt: new Date() } });
+  const claimed = await db.advisorInvite.updateMany({ where: { id: invite.id, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: new Date() } });
+  if (claimed.count === 0) throw conflict("This invitation was already answered or cancelled.");
   await resolveTasks("advisorInvite", invite.id, actor!.id, db, "CANCELLED");
   await logActivity({ actorId: actor!.id, action: "advisor.invite_cancelled", entityType: "advisorInvite", entityId: invite.id, clubId: invite.clubId });
 }
@@ -163,12 +164,24 @@ async function loadInviteForAnswer(actor: Actor | null, token: string) {
   return invite;
 }
 
+/** Answers an invite only while it's still PENDING, so a double click, a second tab or a cancel at the same moment can't answer it twice. */
+async function claimInvite(id: string, status: "ACCEPTED" | "DECLINED", inviteeId: string) {
+  const claimed = await db.advisorInvite.updateMany({ where: { id, status: "PENDING" }, data: { status, respondedAt: new Date(), inviteeId } });
+  if (claimed.count === 0) throw conflict("This invitation was already answered or cancelled.");
+}
+
 /** Accepting makes the invitee an ADVISOR (system path, assigned by the inviter). */
 export async function acceptAdvisorInvite(actor: Actor | null, token: string) {
   const invite = await loadInviteForAnswer(actor, token);
-  const already = await db.roleAssignment.count({ where: { clubId: invite.clubId, userId: actor!.id, role: "ADVISOR", endedAt: null } });
-  if (!already) await grantRole({ clubId: invite.clubId, userId: actor!.id, role: "ADVISOR", assignedById: invite.invitedById });
-  await db.advisorInvite.update({ where: { id: invite.id }, data: { status: "ACCEPTED", respondedAt: new Date(), inviteeId: actor!.id } });
+  await claimInvite(invite.id, "ACCEPTED", actor!.id);
+  try {
+    const already = await db.roleAssignment.count({ where: { clubId: invite.clubId, userId: actor!.id, role: "ADVISOR", endedAt: null } });
+    if (!already) await grantRole({ clubId: invite.clubId, userId: actor!.id, role: "ADVISOR", assignedById: invite.invitedById });
+  } catch (e) {
+    // The role didn't go through, so the invitation is still open.
+    await db.advisorInvite.update({ where: { id: invite.id }, data: { status: "PENDING", respondedAt: null, inviteeId: invite.inviteeId } });
+    throw e;
+  }
   await resolveTasks("advisorInvite", invite.id, actor!.id);
   await logActivity({ actorId: actor!.id, action: "advisor.accepted", entityType: "advisorInvite", entityId: invite.id, clubId: invite.clubId, isPublic: true });
   await notify({
@@ -184,7 +197,7 @@ export async function acceptAdvisorInvite(actor: Actor | null, token: string) {
 
 export async function declineAdvisorInvite(actor: Actor | null, token: string) {
   const invite = await loadInviteForAnswer(actor, token);
-  await db.advisorInvite.update({ where: { id: invite.id }, data: { status: "DECLINED", respondedAt: new Date(), inviteeId: actor!.id } });
+  await claimInvite(invite.id, "DECLINED", actor!.id);
   await resolveTasks("advisorInvite", invite.id, actor!.id);
   await logActivity({ actorId: actor!.id, action: "advisor.declined", entityType: "advisorInvite", entityId: invite.id, clubId: invite.clubId });
   await notify({

@@ -342,7 +342,8 @@ function AttendanceCard({ data }: { data: MClubDetail }) {
             Last event {campusDay(a.lastAttendedAt)}
           </Text>
         ) : null}
-        {a.reviewEligible ? (
+        {/* Only active students review clubs; alumni and faculty/staff see no review row. */}
+        {!a.canReview ? null : a.reviewEligible ? (
           <Button title="Leave a review" variant="secondary" icon="star" compact onPress={() => void openWeb(`${data.club.webPath}#reviews`)} style={styles.alignStart} />
         ) : (
           <View style={styles.review}>

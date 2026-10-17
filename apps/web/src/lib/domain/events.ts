@@ -6,7 +6,7 @@ import type { Actor } from "@/lib/auth/session";
 import { canViewEvent as canViewEventRule, type EventGate } from "@/lib/authz/events";
 import { can, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
-import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
+import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notifyClubCapability } from "@/lib/domain/notify";
 import { canViewFile } from "@/lib/domain/files";
@@ -95,7 +95,7 @@ const CostSchema = z.object({
 export type EventCostInput = z.input<typeof CostSchema>;
 
 const DetailsShape = {
-  title: z.string().trim().min(1, "Give the event a title.").max(140, "Keep the title under 140 characters."),
+  title: z.string().overwrite(oneLine).trim().min(1, "Give the event a title.").max(140, "Keep the title under 140 characters."),
   kind: KIND.default("MEETING"),
   descriptionHtml: z.string().max(200_000).nullish(),
   links: z.array(z.object({ label: z.string().trim().max(120).default(""), url: httpUrl })).max(20).default([]),
@@ -113,7 +113,7 @@ const CreateSchema = EventSchema.extend({ clubId: z.string().nullable() });
 const ScheduleSchema = z.object(ScheduleShape);
 const IdeaSchema = z.object({
   clubId: z.string().nullable(),
-  title: z.string().trim().min(1, "Give the idea a title.").max(140),
+  title: z.string().overwrite(oneLine).trim().min(1, "Give the idea a title.").max(140),
   notes: z.string().max(5000).nullish(),
 });
 const MoveSchema = z.object({
@@ -966,7 +966,8 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
   const { actor: a, event } = await loadManaged(actor, eventId);
   const [attended, requirement, costLines] = await Promise.all([
     db.attendance.count({ where: { occurrence: { eventId } } }),
-    db.roleRequirement.findFirst({ where: { trainingEventId: eventId, active: true }, select: { name: true } }),
+    // Any requirement, on or off: the FK sets trainingEventId to null, leaving a requirement nobody can meet.
+    db.roleRequirement.findFirst({ where: { trainingEventId: eventId }, select: { name: true } }),
     db.budgetItem.findMany({ where: { eventId }, select: { id: true } }),
   ]);
   if (attended > 0) throw conflict("People already checked in to this event, so it can't be deleted. Cancel it instead — its history stays.");

@@ -105,7 +105,7 @@ function UpNextCard({ events }: { events: UpcomingEvent[] }) {
       </div>
       <ul>
         {events.map((e) => (
-          <li key={e.occurrenceId} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-muted/60">
+          <li key={e.occurrenceId} className="relative flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-muted/60">
             <span className="flex w-11 shrink-0 flex-col items-center rounded-lg border border-line py-1 leading-none" aria-hidden="true">
               <span className="text-[10px] font-semibold uppercase" style={{ color: safeHex(e.host?.logoColor) }}>
                 {fmtDate(e.startsAt, "MMM")}
@@ -113,14 +113,19 @@ function UpNextCard({ events }: { events: UpcomingEvent[] }) {
               <span className="mt-0.5 text-lg font-bold">{fmtDate(e.startsAt, "d")}</span>
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold">{e.title}</span>
+              <Link
+                href={`/events/${e.eventId}?o=${e.occurrenceId}`}
+                className="block truncate text-sm font-semibold after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-brand"
+              >
+                {e.title}
+              </Link>
               <span className="block truncate text-xs text-ink-3">
                 <span className="sr-only">{fmtDate(e.startsAt, "EEEE, MMMM d")}, </span>
                 {e.happeningNow ? "Happening now" : e.allDay ? "All day" : fmtTime(e.startsAt)} · {e.host ? e.host.name : INSTITUTION.shortName}
               </span>
             </span>
             {e.host ? (
-              <Link href={`/clubs/${e.host.slug}`} className="shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Open ${e.host.name}`}>
+              <Link href={`/clubs/${e.host.slug}`} className="relative shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Open ${e.host.name}`}>
                 <ClubLogo name={e.host.name} src={e.host.logoUrl} color={e.host.logoColor} size="sm" />
               </Link>
             ) : null}

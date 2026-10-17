@@ -33,7 +33,14 @@ export default async function ClubAnalyticsPage({ searchParams }: { searchParams
         title="Club analytics"
         description={`Every club's numbers side by side. A club counts as active with ${cfg["activity.clubMinEvents"]} events with check-ins in a term and ${cfg["activity.clubMinMembers"]} registered members. Select a club for its full picture.`}
       />
-      <ClubAnalyticsTable rows={rows} colleges={colleges} termName={termName} initial={filters} />
+      <ClubAnalyticsTable
+        rows={rows}
+        colleges={colleges}
+        termName={termName}
+        initial={filters}
+        activeDays={cfg["activity.studentWindowDays"]}
+        activeEvents={cfg["activity.studentRecentEvents"]}
+      />
     </div>
   );
 }

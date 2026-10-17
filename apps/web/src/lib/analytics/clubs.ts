@@ -91,9 +91,12 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
 
 // ─── Drill-down ──────────────────────────────────────────────────────────────
 
-/** Members at the end of each month for the last two years (from the club's first member, when that's later). */
+/**
+ * Members at the end of each month for the last two years (from the club's first member, when that's later).
+ * Students only, like the "Registered members" number (lib/metrics registeredMemberCount).
+ */
 export async function membershipGrowthFor(clubId: string, now = new Date()): Promise<GrowthPoint[]> {
-  const memberships = await db.membership.findMany({ where: { clubId }, select: { joinedAt: true, endedAt: true, status: true } });
+  const memberships = await db.membership.findMany({ where: { clubId, user: { kind: "STUDENT" } }, select: { joinedAt: true, endedAt: true, status: true } });
   return trimLeadingEmpty(membershipGrowth(memberships, lastBuckets("month", now, 24), now));
 }
 

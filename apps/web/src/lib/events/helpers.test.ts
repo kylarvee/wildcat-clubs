@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { joinEventLinks, splitEventLinks } from "@/lib/events/links";
 import { describeRecurrence } from "@/lib/events/summary";
 import { fromFakeUtc, fromInputs, toDateInput, toFakeUtc, toTimeInput, toWallClockIso } from "@/lib/events/wallclock";
@@ -29,7 +29,19 @@ describe("event links", () => {
   });
 });
 
+/** Years show only outside the current campus year, so these tests pin "today". */
+function pinToday() {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-17T18:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+}
+
 describe("describeRecurrence", () => {
+  pinToday();
   const tue = campusDate(2026, 9, 1, 18, 0); // Tuesday
   it("names weekly days and the end date", () => {
     expect(describeRecurrence({ startsAt: tue, recurrence: "WEEKLY", weekdays: [2, 4], until: campusDate(2026, 12, 11, 23, 59) })).toBe("Every Tuesday and Thursday until Dec 11");
@@ -40,6 +52,10 @@ describe("describeRecurrence", () => {
     expect(describeRecurrence({ startsAt: tue, recurrence: "DAILY", interval: 3, until: campusDate(2027, 1, 5) })).toBe("Every 3 days until Jan 5, 2027");
     expect(describeRecurrence({ startsAt: tue, recurrence: "WEEKLY", weekdays: [1, 2, 3, 4, 5], count: 10 })).toBe("Every weekday, 10 times");
     expect(describeRecurrence({ startsAt: tue, recurrence: "NONE" })).toBe("Does not repeat");
+  });
+  it("shows the end year for a series from another year", () => {
+    const wed = campusDate(2024, 9, 4, 18, 0); // Wednesday
+    expect(describeRecurrence({ startsAt: wed, recurrence: "WEEKLY", weekdays: [3], until: campusDate(2024, 12, 6, 23, 59) })).toBe("Every Wednesday until Dec 6, 2024");
   });
 });
 
@@ -86,6 +102,7 @@ describe("defaultFundingSource", () => {
 });
 
 describe("fmtRange", () => {
+  pinToday();
   it("names AM and PM on the start when a same-day event crosses noon", () => {
     expect(fmtRange(campusDate(2026, 10, 17, 10, 0), campusDate(2026, 10, 17, 14, 0))).toBe("Sat, Oct 17 · 10:00 AM – 2:00 PM");
   });
@@ -94,9 +111,13 @@ describe("fmtRange", () => {
   });
   it("shows a one-day all-day event as one day (the end is the next midnight)", () => {
     expect(fmtRange(campusDate(2026, 10, 20), campusDate(2026, 10, 21), true)).toBe("Tue, Oct 20 · All day");
-    expect(fmtRange(campusDate(2027, 3, 14), campusDate(2027, 3, 15), true)).toBe("Sun, Mar 14 · All day");
+    expect(fmtRange(campusDate(2027, 3, 14), campusDate(2027, 3, 15), true)).toBe("Sun, Mar 14, 2027 · All day");
   });
   it("shows the last day of a multi-day all-day range", () => {
     expect(fmtRange(campusDate(2026, 10, 20), campusDate(2026, 10, 23), true)).toBe("Oct 20 – Oct 22");
+  });
+  it("shows the year of a date outside the current campus year", () => {
+    expect(fmtRange("2024-12-05T01:00:00Z", "2024-12-05T02:30:00Z")).toBe("Wed, Dec 4, 2024 · 6:00 – 7:30 PM");
+    expect(fmtRange(campusDate(2026, 12, 31, 20, 0), campusDate(2027, 1, 1, 1, 0))).toBe("Dec 31, 8:00 PM – Jan 1, 2027, 1:00 AM");
   });
 });

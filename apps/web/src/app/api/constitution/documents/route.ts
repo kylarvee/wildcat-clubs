@@ -17,7 +17,8 @@ export async function POST(req: Request) {
     assertSignedIn(actor);
     const form = await readUploadForm(req);
     const raw = form.get("file");
-    const file = raw instanceof File && raw.size > 0 ? { name: raw.name, mimeType: raw.type, bytes: Buffer.from(await raw.arrayBuffer()) } : { name: "", mimeType: null, bytes: Buffer.alloc(0) };
+    // The browser's claimed type is ignored: storage decides the type from the file name.
+    const file = raw instanceof File && raw.size > 0 ? { name: raw.name, bytes: Buffer.from(await raw.arrayBuffer()) } : { name: "", bytes: Buffer.alloc(0) };
     const text = (k: string) => {
       const v = form.get(k);
       return typeof v === "string" ? v : undefined;

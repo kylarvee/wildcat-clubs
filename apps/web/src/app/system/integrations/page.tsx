@@ -177,7 +177,7 @@ export default async function IntegrationsPage() {
                 <span className="text-ink-2">{MODE_COPY[mode].text}</span>
               </p>
               <p className="text-xs text-ink-3">
-                Set with <code className="font-mono">AUTH_MODE</code> = <code className="font-mono">mock</code>, <code className="font-mono">google</code> or <code className="font-mono">both</code>. Without it, production uses Google only.
+                Set with <code className="font-mono">AUTH_MODE</code> = <code className="font-mono">mock</code>, <code className="font-mono">google</code> or <code className="font-mono">both</code>. Production always uses Google only unless <code className="font-mono">ALLOW_TEST_SIGNIN=1</code> is also set (demo servers only).
               </p>
               {mode !== "mock" && !googleReady ? <p className="text-xs text-warning">Google sign-in is allowed but not set up, so only test personas can sign in right now.</p> : null}
             </dd>

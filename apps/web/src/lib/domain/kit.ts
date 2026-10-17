@@ -55,6 +55,13 @@ export async function assertClubCap(actor: Actor | null, clubId: string, cap: Ca
   return access;
 }
 
+/**
+ * Control characters (newlines, tabs, NUL…) become one space. For one-line
+ * text that ends up in email subjects and headers (names, titles):
+ * `z.string().overwrite(oneLine).trim()`.
+ */
+export const oneLine = (s: string) => s.replace(/[\u0000-\u001f\u007f]+/g, " ");
+
 /** Parses input with a zod schema, turning failures into a readable INVALID error. */
 export function parse<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   const r = schema.safeParse(input);

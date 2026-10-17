@@ -183,7 +183,6 @@ export async function adoptDraft(actor: Actor | null, input: unknown): Promise<A
         clubId,
         folderId: folder.id,
         name: `${slugify(club.name)}-${kind}-v${version}.pdf`,
-        mimeType: "application/pdf",
         bytes: pdf,
         visibility: "PUBLIC",
         createdById: actor.id,
@@ -251,7 +250,7 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
 
   const folder = await ensureClubFolder(club.id, CONSTITUTION_FOLDER, "PUBLIC", actor.id);
   // Leaders-only until WSUSA approves; approval makes it public like builder documents.
-  const file = await storeClubFile({ clubId: club.id, folderId: folder.id, name: input.file.name, mimeType: input.file.mimeType, bytes: input.file.bytes, visibility: "LEADERS", createdById: actor.id });
+  const file = await storeClubFile({ clubId: club.id, folderId: folder.id, name: input.file.name, bytes: input.file.bytes, visibility: "LEADERS", createdById: actor.id });
   const doc = await db.clubDocument.create({
     data: {
       clubId: club.id,

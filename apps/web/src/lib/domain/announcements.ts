@@ -8,7 +8,7 @@ import { getClubAccess, type ClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { INSTITUTION } from "@/lib/institution";
 import { richToText, sanitizeRichHtml } from "@/lib/rich/sanitize";
-import { assertCan, assertClubCap, assertSignedIn, invalid, notFound, parse } from "@/lib/domain/kit";
+import { assertCan, assertClubCap, assertSignedIn, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
 import { clubLeaderRoleWhere } from "@/lib/domain/messaging";
 import { ANNOUNCEMENT_TITLE_MAX, AUDIENCES } from "@/components/announcements/labels";
@@ -71,6 +71,7 @@ function toView(a: Row): AnnouncementView {
 const Input = z.object({
   title: z
     .string({ error: "Give the announcement a title." })
+    .overwrite(oneLine)
     .trim()
     .min(1, "Give the announcement a title.")
     .max(ANNOUNCEMENT_TITLE_MAX, `Titles can be up to ${ANNOUNCEMENT_TITLE_MAX} characters.`),

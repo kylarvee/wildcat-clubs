@@ -51,12 +51,13 @@ export function ContactEmailForm({ clubId, email }: { clubId: string; email: str
     const r = await setContactEmailAction(clubId, value);
     if (!r.ok) return setError(r.error);
     setValue(r.data.contactEmail ?? "");
-    toast.success(r.data.contactEmail ? "Club Google account saved" : "Club Google account removed");
+    // A new address starts unverified (lib/domain/clubs setClubContactEmail); re-saving the same one changes nothing.
+    toast.success(!r.data.contactEmail ? "Club Google account removed" : r.data.contactEmail !== email ? "Saved. WSUSA will verify it." : "Club Google account saved");
     router.refresh();
   });
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row sm:items-end" noValidate aria-busy={pending}>
-      <Field label="Club Google account" className="flex-1" error={error} hint={!error ? "The shared account your club uses. When WSU turns on Google sync, Drive, Calendar and Chat run as this account." : undefined}>
+      <Field label="Club Google account" className="flex-1" error={error} hint={!error ? "The shared account your club uses. When Google sync is on, Drive, Calendar and Chat run as this account once WSUSA verifies it." : undefined}>
         {(id) => <Input id={id} type="email" inputMode="email" value={value} onChange={(e) => setValue(e.target.value)} placeholder="yourclub@weber.edu" autoComplete="off" aria-invalid={Boolean(error) || undefined} />}
       </Field>
       <Button type="submit" variant="outline" disabled={pending} className="sm:mb-6">

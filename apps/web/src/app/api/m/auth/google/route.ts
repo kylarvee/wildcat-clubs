@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { authMode, verifyIdToken } from "@/lib/auth/google";
+import { authMode, NotUniversityAccount, verifyIdToken } from "@/lib/auth/google";
 import { findOrCreateUserByEmail } from "@/lib/auth/accounts";
 import { createSession } from "@/lib/auth/session";
 import { forbidden, invalid, parse } from "@/lib/domain/kit";
@@ -22,15 +22,20 @@ export async function POST(req: Request) {
     try {
       identity = await verifyIdToken(idToken);
     } catch (e) {
-      // Wrong domain, unverified email, expired or foreign token: say what Google told us.
-      throw invalid(e instanceof Error && e.message ? e.message : "Google sign-in didn't go through. Please try again.");
+      // Wrong domain or unverified email: our own message says which accounts may sign in.
+      // Anything else (expired or foreign token, Google unreachable) stays in the server log;
+      // the library's raw text isn't for the person signing in.
+      if (e instanceof NotUniversityAccount) throw invalid(e.message);
+      console.error("Mobile Google sign-in: ID token check failed", e);
+      throw invalid("Google sign-in didn't go through. Please try again.");
     }
     const existing = await db.user.findUnique({ where: { email: identity.email.toLowerCase() }, select: { id: true } });
     let user;
     try {
       user = await findOrCreateUserByEmail({ email: identity.email, name: identity.name, avatarUrl: identity.picture });
     } catch (e) {
-      throw invalid(e instanceof Error ? e.message : "Only Weber State email addresses can sign in.");
+      console.error("Mobile Google sign-in: account lookup failed", e);
+      throw invalid("Only Weber State email addresses can sign in.");
     }
     if (user.status === "DEACTIVATED") throw forbidden("This account is deactivated. Contact WSUSA if you think that's a mistake.");
     const { token, expiresAt } = await createSession(user.id, "MOBILE");

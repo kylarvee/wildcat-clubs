@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     const actor = await mobileActor(req);
     const { code, token } = checkinInput(await readJson(req));
     const p = await checkinPreview(actor, code, token);
-    if (!p.found) return { found: false, message: p.message };
+    if (!p.found) return { found: false, message: p.message, hidden: p.hidden ?? false };
     return {
       found: true,
       occurrence: toMOccurrence(p.occurrence),

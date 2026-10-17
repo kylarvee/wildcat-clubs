@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
-import { clubCapabilityHolders } from "@/lib/authz/people";
+import { capabilitiesByClub, clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -73,13 +73,13 @@ export async function resolveTasks(sourceType: string, sourceId: string, complet
 
 /** Where clause for every task visible to this person. */
 export async function taskScopeFor(actor: Actor): Promise<Prisma.TaskWhereInput> {
-  // One read of the person's current roles, then the clubs per capability
-  // (same rule as authz/people.clubsWhereUserHolds, without eleven queries).
-  const roles = await db.roleAssignment.findMany({ where: { userId: actor.id, endedAt: null }, select: { clubId: true, role: true, permissions: true } });
+  // The capabilities the person's roles give them per club, once (the shared
+  // authz/people rule, so paused officers and founding clubs match getClubAccess).
+  const clubs = await capabilitiesByClub(actor.id);
   const or: Prisma.TaskWhereInput[] = [{ assigneeType: "USER", assigneeId: actor.id }];
   if (isAdmin(actor)) or.push({ assigneeType: "ADMINS" });
   for (const cap of ALL_CAPABILITIES) {
-    const clubIds = [...new Set(roles.filter((r) => r.role === "ADVISOR" || r.role === "PRESIDENT" || r.role === "VP" || r.permissions.includes(cap)).map((r) => r.clubId))];
+    const clubIds = clubs.filter(([, caps]) => caps.has(cap)).map(([clubId]) => clubId);
     if (clubIds.length) or.push({ assigneeType: "CLUB", capability: cap, clubId: { in: clubIds } });
   }
   return { OR: or };

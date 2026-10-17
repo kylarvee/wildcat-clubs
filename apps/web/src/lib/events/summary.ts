@@ -32,8 +32,10 @@ export function joinWords(words: string[]) {
   return `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
 }
 
+/** The year shows unless the series starts and ends in the current campus year ("until Dec 6, 2024"). */
 function untilText(until: Date | string, startsAt: Date | string) {
-  const sameYear = campusParts(until).y === campusParts(startsAt).y;
+  const y = campusParts(until).y;
+  const sameYear = y === campusParts(startsAt).y && y === campusParts(new Date()).y;
   return fmtDate(until, sameYear ? "MMM d" : "MMM d, yyyy");
 }
 

@@ -120,26 +120,49 @@ export default function CheckinScreen() {
     );
   }
 
+  const signedIn = status === 'signedIn';
+
   if (!preview.found) {
+    // hidden: the code is real, but this viewer can't see the event yet. Signed out, signing
+    // in may be enough (the preview re-runs and checks in on its own); signed in, it takes the
+    // live QR at the event.
+    const hidden = Boolean(preview.hidden);
+    const signInFirst = hidden && !signedIn;
     return (
       <ScrollScreen>
         <Stack.Screen options={{ title }} />
         <View style={styles.notFound}>
           <Icon name="qr" size={44} color={BRAND} />
           <Text variant="title" style={styles.center} accessibilityRole="header">
-            No event with code {code}
+            {!hidden ? `No event with code ${code}` : signedIn ? 'Scan the QR code at the event' : 'Sign in to check in'}
           </Text>
           <Text tone="ink2" style={styles.center}>
             {preview.message}
           </Text>
-          <Button title="Scan again" icon="scan" onPress={() => router.replace('/scan')} style={styles.wide} />
+          {signInFirst ? (
+            <Button
+              title="Sign in to check in"
+              icon="person"
+              onPress={() => {
+                wants.current = true;
+                router.push({ pathname: '/welcome', params: { reason: 'checkin' } });
+              }}
+              style={styles.wide}
+            />
+          ) : null}
+          <Button
+            title={hidden && signedIn ? 'Scan the QR code' : 'Scan again'}
+            icon="scan"
+            variant={signInFirst ? 'ghost' : undefined}
+            onPress={() => router.replace('/scan')}
+            style={styles.wide}
+          />
         </View>
       </ScrollScreen>
     );
   }
 
   const o = preview.occurrence;
-  const signedIn = status === 'signedIn';
 
   return (
     <ScrollScreen>

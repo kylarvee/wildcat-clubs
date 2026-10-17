@@ -7,6 +7,7 @@ import { getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createDefaultPositions, grantRole } from "@/lib/domain/roles";
+import { reopenRequirementTasks } from "@/lib/domain/requirements";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyAdmins } from "@/lib/domain/notify";
 import { guessMime, MAX_UPLOAD_BYTES, putBytes } from "@/lib/files/storage";
@@ -73,15 +74,15 @@ export async function ensureClubFolder(clubId: string, name: string, visibility:
   return tx.fileItem.create({ data: { clubId, name, isFolder: true, visibility, createdById } });
 }
 
-/** Stores bytes as a club file (no permission check — callers have already checked). */
-export async function storeClubFile(input: { clubId: string; folderId: string; name: string; mimeType?: string | null; bytes: Buffer; visibility: FileVisibility; createdById: string }) {
+/** Stores bytes as a club file (no permission check — callers have already checked). The type comes from the name's extension only. */
+export async function storeClubFile(input: { clubId: string; folderId: string; name: string; bytes: Buffer; visibility: FileVisibility; createdById: string }) {
   const storageKey = await putBytes(input.name, input.bytes);
   return db.fileItem.create({
     data: {
       clubId: input.clubId,
       parentId: input.folderId,
       name: input.name.slice(0, 200),
-      mimeType: guessMime(input.name, input.mimeType),
+      mimeType: guessMime(input.name),
       sizeBytes: input.bytes.length,
       storageKey,
       visibility: input.visibility,
@@ -459,7 +460,7 @@ export async function addClubDocument(
   await assertClubCap(actor, v.clubId, "profile");
   checkUpload(input.file, DOC_EXTENSIONS, "Upload a PDF, Word, PowerPoint, Excel, text or image file.");
   const folder = await ensureClubFolder(v.clubId, OTHER_DOCS_FOLDER, "INHERIT", actor!.id);
-  const file = await storeClubFile({ clubId: v.clubId, folderId: folder.id, name: input.file.name, mimeType: input.file.mimeType, bytes: input.file.bytes, visibility: v.visibility, createdById: actor!.id });
+  const file = await storeClubFile({ clubId: v.clubId, folderId: folder.id, name: input.file.name, bytes: input.file.bytes, visibility: v.visibility, createdById: actor!.id });
   const doc = await db.clubDocument.create({
     data: { clubId: v.clubId, kind: "OTHER", title: v.title, source: "CUSTOM_UPLOAD", status: "ACTIVE", fileId: file.id, createdById: actor!.id },
   });
@@ -634,6 +635,12 @@ export async function decideClub(actor: Actor | null, input: unknown) {
     if (!claimed.count) throw conflict("This club isn't waiting for review — someone may have decided it already.");
     await tx.clubDecision.create({ data: { clubId: club.id, action: d.action, note: v.note, byId: actor.id } });
     await resolveTasks("club", club.id, actor.id, tx);
+    if (v.decision === "REJECT") {
+      // A rejected club can't take an advisor, so open invitations close with it (inlined: advisors.ts imports this file).
+      const pending = await tx.advisorInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, select: { id: true } });
+      await tx.advisorInvite.updateMany({ where: { id: { in: pending.map((i) => i.id) }, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
+      for (const i of pending) await resolveTasks("advisorInvite", i.id, actor.id, tx, "CANCELLED");
+    }
     await logActivity({ actorId: actor.id, action: `club.${d.status.toLowerCase()}`, entityType: "club", entityId: club.id, clubId: club.id, data: { note: v.note }, isPublic: v.decision === "APPROVE" }, tx);
   });
   if (v.decision !== "APPROVE") {
@@ -713,6 +720,10 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   if (!club || club.status === "RETIRED") throw conflict("This club is already retired.");
 
   const members = await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE" }, select: { userId: true } });
+  // Everyone whose roles retirement ends, including ambassadors this club placed in other clubs.
+  const leaders = [
+    ...new Set((await db.roleAssignment.findMany({ where: { OR: [{ clubId: club.id }, { viaClubId: club.id }], endedAt: null }, select: { userId: true } })).map((r) => r.userId)),
+  ];
   const now = new Date();
   await db.$transaction(async (tx) => {
     // Claim the transition first, so a double retire can't write two decisions.
@@ -728,14 +739,17 @@ export async function retireClub(actor: Actor | null, input: unknown) {
     await tx.fundingRequest.updateMany({ where: { clubId: club.id, status: "SUBMITTED" }, data: { status: "WITHDRAWN", decidedAt: now, decidedById: null, decisionNote: "The club retired." } });
     await tx.clubDocument.updateMany({ where: { clubId: club.id, status: "PENDING_APPROVAL" }, data: { status: "SUPERSEDED", decidedAt: now } });
     // Approved money still has to be paid out, and review moderation isn't the club's to close.
+    // Requirement tasks are left for the requirement sync below, which also excuses their officer tests.
     // (sourceType: null is spelled out: SQL's NOT IN never matches the club's own to-dos, which have no source.)
     await tx.task.updateMany({
-      where: { clubId: club.id, status: "OPEN", OR: [{ sourceType: null }, { sourceType: { notIn: ["invoice", "reviewFlag", "reviewBombing"] } }] },
+      where: { clubId: club.id, status: "OPEN", OR: [{ sourceType: null }, { sourceType: { notIn: ["invoice", "reviewFlag", "reviewBombing", "requirement"] } }] },
       data: { status: "CANCELLED", completedAt: now, completedById: actor.id },
     });
     await tx.clubDecision.create({ data: { clubId: club.id, action: "RETIRED", note: v.reason, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.retired", entityType: "club", entityId: club.id, clubId: club.id, data: { reason: v.reason, previousStatus: club.status }, isPublic: true }, tx);
   });
+  // Ended roles: requirements they no longer owe close now (tasks and officer tests), not on the next job tick.
+  for (const id of leaders) await reopenRequirementTasks(id);
   await notify({
     userIds: members.map((m) => m.userId),
     kind: "club.retired",

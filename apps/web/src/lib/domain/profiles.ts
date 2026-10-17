@@ -6,7 +6,7 @@ import { canViewFile } from "@/lib/domain/files";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
 import { endAllRolesForUser } from "@/lib/domain/roles";
-import { assertCan, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
+import { assertCan, assertSignedIn, conflict, forbidden, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { campusDate } from "@/lib/time";
 import { positionKey, type YearMonth } from "@/lib/profiles/linkedin";
@@ -90,7 +90,7 @@ const WebUrl = z
 // ─── Profile basics ──────────────────────────────────────────────────────────
 
 const ProfileInput = z.object({
-  name: z.string().trim().min(2, "Enter your name.").max(80, "Names can be up to 80 characters."),
+  name: z.string().overwrite(oneLine).trim().min(2, "Enter your name.").max(80, "Names can be up to 80 characters."),
   pronouns: optionalText(30, "Pronouns"),
   headline: optionalText(120, "Your headline"),
   aboutHtml: z.string().max(100_000, "Your About section is too long.").optional().nullable(),
@@ -109,6 +109,8 @@ export type ProfileInput = z.input<typeof ProfileInput>;
 /** A profile photo must be an image you uploaded to your own files, shared publicly. */
 async function checkAvatar(actor: Actor, url: string | null) {
   if (!url) return null;
+  // Keeping the current photo (e.g. the Google sign-in picture) isn't a new link.
+  if (url === actor.avatarUrl) return url;
   const m = /^\/api\/files\/([A-Za-z0-9_-]+)$/.exec(url);
   if (!m) throw invalid("Upload a photo here rather than linking to one.");
   const file = await db.fileItem.findUnique({ where: { id: m[1] }, select: { ownerId: true, mimeType: true, visibility: true, trashedAt: true, isFolder: true } });

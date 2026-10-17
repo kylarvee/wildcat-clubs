@@ -106,9 +106,11 @@ async function membershipState(actor: Actor, clubId: string | null): Promise<"ME
   return "NONE";
 }
 
+/** Progress toward leaving a review, or null for accounts that can't review this club (alumni, faculty and staff). */
 async function reviewProgressFor(userId: string, clubId: string | null) {
   if (!clubId) return null;
-  return reviewEligibility(userId, clubId);
+  const r = await reviewEligibility(userId, clubId);
+  return r.canReview ? r : null;
 }
 
 /**

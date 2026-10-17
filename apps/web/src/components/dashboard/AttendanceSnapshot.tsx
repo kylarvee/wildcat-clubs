@@ -22,8 +22,10 @@ export function AttendanceSnapshot({
   memberClubs: number;
   summaries: MemberClubSummaryEntry[];
 }) {
-  const locked = summaries.filter((s) => !s.summary.reviewEligible).sort((a, b) => b.summary.attended - a.summary.attended);
-  const unlocked = summaries.filter((s) => s.summary.reviewEligible);
+  // Alumni and faculty/staff can't review, so their clubs show no review progress.
+  const reviewable = summaries.filter((s) => s.summary.canReview);
+  const locked = reviewable.filter((s) => !s.summary.reviewEligible).sort((a, b) => b.summary.attended - a.summary.attended);
+  const unlocked = reviewable.filter((s) => s.summary.reviewEligible);
   return (
     <Panel id="dash-attendance" title="Your attendance" icon={<CalendarCheck2 />} link={{ href: "/me/attendance", label: "Details" }}>
       <dl className={memberClubs ? "grid grid-cols-2 gap-3" : "grid gap-3"}>

@@ -93,7 +93,7 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | Complaints | Report form (`/report`) | admin complaints only |
 | Messages | Messages | — |
 | Push devices | Mobile app sign-in (`lib/domain/devices`) | push delivery |
-| AI conversations | Ask Wildcat Clubs (`lib/ai/conversations`, the write path for AiConversation/AiMessage) | `/assistant` only — private to the owner, never in the activity log |
+| AI conversations | Ask Wildcat Clubs (`lib/ai/conversations`, the write path for AiConversation/AiMessage, and AiUsage — one row per model call, which the hourly limit counts) | `/assistant` only — private to the owner, never in the activity log |
 | Announcements | Announcements tool | club page, dashboard, mobile |
 | System rules | System settings (sysadmin) | everything |
 
@@ -185,4 +185,16 @@ Turning on an integration in System settings + setting its credentials switches 
 | Calendar / Drive / Chat / Gmail | `GOOGLE_SERVICE_ACCOUNT_JSON`, `PLATFORM_SENDER_EMAIL` | System settings |
 | Push | (Expo push service) | System settings |
 | Claude | `ANTHROPIC_API_KEY` | System settings: assistant, grading |
-| Test personas | `AUTH_MODE=mock|google|both` (default both outside production) | — |
+| Test personas | `AUTH_MODE=mock|google|both` (default both outside production; production is Google-only unless `ALLOW_TEST_SIGNIN=1`) | — |
+
+**Club Google accounts.** Drive, Calendar and Chat sync run as a club's own Workspace account (its
+contact email, through domain-wide delegation) only for APPROVED clubs, and only after WSUSA
+verifies the account (Admin → Club reviews → club → Club Google account; an ADMINS task with
+sourceType `googleAccount` asks for it). Changing the address clears the verification and the
+club's Google IDs (calendar, Drive folder, Chat space, and the copies in them), so the next sync
+builds fresh ones in the new account. `lib/integrations/google` `clubGoogleAccount()` is the one
+check every adapter uses.
+
+**Redirects.** Any `next=` / `returnTo` parameter that becomes a redirect goes through
+`safeNext()` from `lib/auth/redirect` (client-safe): it returns the value only when it's a
+same-site path, else `/dashboard`.

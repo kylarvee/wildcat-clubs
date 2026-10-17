@@ -130,6 +130,7 @@ export function toAttendanceSummary(s: MemberClubSummary): MAttendanceSummary {
     rate: s.rate,
     lastAttendedAt: s.lastAttendedAt ? iso(s.lastAttendedAt) : null,
     active: s.active,
+    canReview: s.canReview,
     reviewEligible: s.reviewEligible,
     reviewThreshold: s.reviewThreshold,
   };

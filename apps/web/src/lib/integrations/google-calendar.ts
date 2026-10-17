@@ -8,7 +8,7 @@ import { richToText } from "@/lib/rich/sanitize";
 import { splitEventLinks } from "@/lib/events/links";
 import { roomLabel } from "@/lib/events/labels";
 import { appUrl, campusMapQuery } from "@/lib/events/share";
-import { campusParts, toDateInput } from "@/lib/events/wallclock";
+import { addDaysToDateInput, campusParts, toDateInput } from "@/lib/events/wallclock";
 import { TZ } from "@/lib/time";
 
 /**
@@ -103,7 +103,7 @@ function eventBody(e: Loaded): calendar_v3.Schema$Event {
     .join("\n\n");
   const start: calendar_v3.Schema$EventDateTime = e.allDay ? { date: toDateInput(first.startsAt) } : { dateTime: first.startsAt.toISOString(), timeZone: TZ };
   const end: calendar_v3.Schema$EventDateTime = e.allDay
-    ? { date: toDateInput(new Date(first.startsAt.getTime() + 86_400_000)) }
+    ? { date: addDaysToDateInput(toDateInput(first.startsAt), 1) }
     : { dateTime: first.endsAt.toISOString(), timeZone: TZ };
   const recurrence = rest.length
     ? [e.allDay ? `RDATE;VALUE=DATE:${rest.map((o) => toDateInput(o.startsAt).replace(/-/g, "")).join(",")}` : `RDATE;TZID=${TZ}:${rest.map((o) => localStamp(o.startsAt)).join(",")}`]

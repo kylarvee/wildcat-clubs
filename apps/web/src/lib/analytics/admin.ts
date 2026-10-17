@@ -23,6 +23,8 @@ const QUEUES: { key: string; sources: (string | null)[]; label: string; detail: 
   { key: "club", sources: ["club"], label: "New club submissions", detail: "Clubs asking WSUSA for recognition", href: "/admin/clubs" },
   { key: "departmentRequest", sources: ["departmentRequest"], label: "Department requests", detail: "Departments to add for Sponsored clubs", href: "/admin/clubs?tab=departments" },
   { key: "clubDocument", sources: ["clubDocument"], label: "Custom constitutions & bylaws", detail: "Uploaded documents to approve", href: "/admin/clubs?tab=documents" },
+  // No admin list shows these; each task links to its club's Google account section.
+  { key: "googleAccount", sources: ["googleAccount"], label: "Club Google accounts to verify", detail: "Confirm a club's own Workspace account before Google sync runs as it", href: "/tasks?kind=APPROVAL" },
   { key: "funding", sources: ["funding"], label: "Funding requests", detail: "Requests waiting for a decision", href: "/admin/funding" },
   { key: "invoice", sources: ["invoice"], label: "Invoices to process", detail: "Approved funding to push through", href: "/admin/funding" },
   { key: "reviews", sources: ["reviewBombing", "reviewFlag"], label: "Reviews to check", detail: "Possible review bombing and reported reviews", href: "/admin/reviews" },

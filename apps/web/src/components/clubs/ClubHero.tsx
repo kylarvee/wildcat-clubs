@@ -100,7 +100,10 @@ export function ClubHero({
                 <li>
                   <a href="#reviews" className="flex items-center gap-1.5 hover:text-ink">
                     <Stars value={metrics.avgRating} size={14} />
-                    <span className="font-medium text-ink">{metrics.avgRating.toFixed(1)}</span>
+                    {/* Stars already announces "N.N out of 5 stars". */}
+                    <span className="font-medium text-ink" aria-hidden="true">
+                      {metrics.avgRating.toFixed(1)}
+                    </span>
                     <span className="text-ink-3">
                       ({metrics.reviewCount} {metrics.reviewCount === 1 ? "review" : "reviews"})
                     </span>

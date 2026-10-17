@@ -146,7 +146,8 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
                 occurrence,
                 club: occurrence.club,
                 membership: preview.membership,
-                reviewProgress: review,
+                // Alumni and faculty/staff can't review, so they see no progress toward one.
+                reviewProgress: review?.canReview ? review : null,
                 requirementsMet: [],
               }}
               showGetApp={showGetApp}

@@ -78,6 +78,8 @@ async function adminQueue(): Promise<AdminQueueRow[]> {
     club: { label: "Club submissions to review", href: "/admin/clubs?tab=submissions" },
     departmentRequest: { label: "Departments to add", href: "/admin/clubs?tab=departments" },
     clubDocument: { label: "Custom constitutions & bylaws", href: "/admin/clubs?tab=documents" },
+    // No admin list shows these; each task links to its club's Google account section.
+    googleAccount: { label: "Club Google accounts to verify", href: "/tasks?kind=APPROVAL" },
     funding: { label: "Funding requests", href: "/admin/funding" },
     invoice: { label: "Invoices to process", href: "/admin/funding" },
     reviewBombing: { label: "Possible review bombing", href: "/admin/reviews" },

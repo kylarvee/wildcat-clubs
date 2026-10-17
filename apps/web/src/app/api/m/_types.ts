@@ -249,6 +249,9 @@ export type MAttendanceSummary = {
   rate: number | null;
   lastAttendedAt: string | null;
   active: boolean;
+  /** This account can review clubs at all (active students only; not alumni or faculty/staff). */
+  canReview: boolean;
+  /** canReview and attended ≥ reviewThreshold. */
   reviewEligible: boolean;
   reviewThreshold: number;
 };
@@ -295,7 +298,12 @@ export type MCheckinRequest = { url?: string | null; code?: string | null; token
 
 /** No side effects; works signed out. A live QR token comes back as `pass`, good for 10 minutes — send it as `token` after signing in. */
 export type MCheckinPreview =
-  | { found: false; message: string }
+  | {
+      found: false;
+      message: string;
+      /** The code is real, but this viewer can't see the event yet: sign in, or scan the QR at the event. */
+      hidden?: boolean;
+    }
   | {
       found: true;
       occurrence: MOccurrence;

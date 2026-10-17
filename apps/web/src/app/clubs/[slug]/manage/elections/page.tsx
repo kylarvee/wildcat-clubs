@@ -3,6 +3,7 @@ import { TZDate } from "@date-fns/tz";
 import { ArrowRight, Vote } from "lucide-react";
 import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
+import { getConfig } from "@/lib/config";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { ELECTABLE_ROLES, eligibleVoterIds, electionsAllowed, syncClubElections } from "@/lib/domain/elections";
 import { clubElections } from "@/lib/roles/election-queries";
@@ -61,11 +62,12 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
   }
 
   await syncClubElections(club.id);
-  const [elections, positions, voters, terms] = await Promise.all([
+  const [elections, positions, voters, terms, cfg] = await Promise.all([
     clubElections(club.id),
     db.position.findMany({ where: { clubId: club.id, archivedAt: null, role: { in: ELECTABLE_ROLES } }, orderBy: [{ sortOrder: "asc" }] }),
     eligibleVoterIds(club.id, club.successionMethod),
     getTerms(),
+    getConfig(),
   ]);
   const running = elections.filter((e) => e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED");
   const past = elections.filter((e) => e.status === "APPLIED" || e.status === "CANCELLED");
@@ -98,7 +100,7 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
 
       <Callout tone="info">
         {club.successionMethod === "MEMBER_VOTE"
-          ? "Active members (attended in the last month or at one of the last two events) vote. If no one has checked in yet, every member can vote."
+          ? `Active members (checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events) vote. If no one has checked in yet, every member can vote.`
           : "Current club leaders vote, and no one can vote for themselves. Candidates must be current leaders too."}{" "}
         Ballots are secret: you&apos;ll see counts, never who voted for whom.
       </Callout>

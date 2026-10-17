@@ -57,7 +57,7 @@ const fakeDrive = {
 };
 let driveOn = false;
 vi.mock("@googleapis/drive", () => ({ drive: () => fakeDrive }));
-vi.mock("@/lib/integrations/google", () => ({ googleJwt: () => ({}) }));
+vi.mock("@/lib/integrations/google", async (original) => ({ ...(await original<object>()), googleJwt: () => ({}) }));
 vi.mock("@/lib/config", async (original) => ({ ...(await original<object>()), integrationLive: async (name: string) => driveOn && name === "googleDrive" }));
 
 const RUN = process.env.FILES_SCRATCH_DB === "1" && /\/[^/?]*scratch[^/?]*(\?|$)/.test(process.env.DATABASE_URL ?? "");
@@ -183,7 +183,7 @@ suite("Club Files (scratch database)", async () => {
     const { club, advisor, outsider } = await cast();
     driveOn = true;
     try {
-      await db.club.update({ where: { id: club.id }, data: { contactEmail: "club@weber.edu", googleDriveFolderId: null } });
+      await db.club.update({ where: { id: club.id }, data: { contactEmail: "club@weber.edu", googleAccountVerifiedAt: new Date(), googleDriveFolderId: null } });
       await db.fileItem.updateMany({ where: { clubId: club.id }, data: { driveFileId: null } });
       const scope = { kind: "club" as const, clubId: club.id };
 

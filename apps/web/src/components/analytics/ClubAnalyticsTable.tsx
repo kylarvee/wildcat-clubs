@@ -40,11 +40,16 @@ export function ClubAnalyticsTable({
   colleges,
   termName,
   initial,
+  activeDays,
+  activeEvents,
 }: {
   rows: ClubAnalyticsRow[];
   colleges: { id: string; name: string; shortName: string }[];
   termName: string | null;
   initial: TableFilters;
+  /** The active-student rule from system config (activity.studentWindowDays / activity.studentRecentEvents). */
+  activeDays: number;
+  activeEvents: number;
 }) {
   const [f, setF] = useState<TableFilters>(initial);
   const ids = useId();
@@ -243,7 +248,7 @@ export function ClubAnalyticsTable({
         </div>
       )}
       <p className="text-xs leading-relaxed text-ink-3">
-        This term is {term}. Active members came to an event lately (in the last month or one of the club&rsquo;s last two events). Retention compares the last full month with the one before.
+        This term is {term}. Active members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention compares the last full month with the one before.
         Attendance is the average share of members at each event with check-ins. Connections count members of one club checking in at another&rsquo;s events.
       </p>
     </div>

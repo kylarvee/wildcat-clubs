@@ -163,20 +163,23 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
                         <dd className="text-lg font-semibold text-ink">{summary.lastAttendedAt ? fmtDate(summary.lastAttendedAt, "MMM d") : "—"}</dd>
                       </div>
                     </dl>
-                    <div className="mt-auto pt-4">
-                      {summary.reviewEligible ? (
-                        <Link href={`/clubs/${club.slug}#reviews`} className="flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline">
-                          <Star className="h-4 w-4" aria-hidden /> You can review this club
-                        </Link>
-                      ) : (
-                        <>
-                          <p className="text-xs text-ink-3">
-                            {summary.attended} of {summary.reviewThreshold} events toward leaving a review
-                          </p>
-                          <ProgressBar value={summary.attended} max={summary.reviewThreshold} className="mt-1.5" />
-                        </>
-                      )}
-                    </div>
+                    {/* Alumni and faculty/staff can't review, so they get no progress toward one. */}
+                    {summary.canReview ? (
+                      <div className="mt-auto pt-4">
+                        {summary.reviewEligible ? (
+                          <Link href={`/clubs/${club.slug}#reviews`} className="flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline">
+                            <Star className="h-4 w-4" aria-hidden /> You can review this club
+                          </Link>
+                        ) : (
+                          <>
+                            <p className="text-xs text-ink-3">
+                              {summary.attended} of {summary.reviewThreshold} events toward leaving a review
+                            </p>
+                            <ProgressBar value={summary.attended} max={summary.reviewThreshold} className="mt-1.5" />
+                          </>
+                        )}
+                      </div>
+                    ) : null}
                   </Card>
                 </li>
               ))}

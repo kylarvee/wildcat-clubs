@@ -46,6 +46,11 @@ function cleanPermissions(perms: string[] | undefined | null): Capability[] {
  * System-level grant (no permission check). Used by founding (founder becomes
  * President), advisor acceptance and applying checked decisions. Ensures an
  * ACTIVE membership, records the assignment and opens requirement tasks.
+ *
+ * A seat's row is locked for the transaction, so grants to one seat run one at
+ * a time. With `checkSeat`, the caller's "already holds it / seat is full"
+ * checks are repeated under that lock, so two people assigning at once can't
+ * overfill a seat or seat someone twice.
  */
 export async function grantRole(input: {
   clubId: string;
@@ -57,14 +62,22 @@ export async function grantRole(input: {
   assignedById: string | null;
   endAssignmentIds?: string[];
   endReason?: RoleEndReason;
+  checkSeat?: boolean;
 }) {
   const now = new Date();
   let endedUserIds: string[] = [];
   const assignment = await db.$transaction(async (tx) => {
+    if (input.positionId) await tx.$queryRaw`SELECT id FROM "Position" WHERE id = ${input.positionId} FOR UPDATE`;
     if (input.endAssignmentIds?.length) {
       const where = { id: { in: input.endAssignmentIds }, clubId: input.clubId, endedAt: null };
       endedUserIds = [...new Set((await tx.roleAssignment.findMany({ where, select: { userId: true } })).map((r) => r.userId))];
       await tx.roleAssignment.updateMany({ where, data: { endedAt: now, endReason: input.endReason ?? "SUCCEEDED" } });
+    }
+    if (input.positionId && input.checkSeat) {
+      const seat = await tx.position.findUniqueOrThrow({ where: { id: input.positionId }, select: { name: true, maxHolders: true } });
+      const holders = await tx.roleAssignment.findMany({ where: { positionId: input.positionId, endedAt: null }, select: { userId: true } });
+      if (holders.some((h) => h.userId === input.userId)) throw conflict("They already hold this seat.");
+      if (holders.length >= seat.maxHolders) throw conflict(`${seat.name} just filled up. Reload the org chart and choose who they replace.`);
     }
     await tx.membership.upsert({
       where: { userId_clubId: { userId: input.userId, clubId: input.clubId } },
@@ -167,6 +180,7 @@ export async function assignRole(actor: Actor | null, input: unknown) {
     assignedById: actor.id,
     endAssignmentIds: ending,
     endReason: "SUCCEEDED",
+    checkSeat: true,
   });
 }
 
@@ -305,6 +319,7 @@ export async function handOffPresidency(actor: Actor | null, clubId: string, inp
     assignedById: actor.id,
     endAssignmentIds: [outgoing.id],
     endReason: "SUCCEEDED",
+    checkSeat: true,
   });
 
   if (v.becomeAlumni) {

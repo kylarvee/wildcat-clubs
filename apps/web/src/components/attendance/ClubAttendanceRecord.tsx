@@ -69,20 +69,23 @@ export async function ClubAttendanceRecord({ clubId, userId, showLivePrompt = tr
           </>
         )}
 
-        <div className="mt-3 border-t border-line pt-3">
-          {summary.reviewEligible ? (
-            <a href="#reviews" className="flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline">
-              <Star className="h-4 w-4" aria-hidden /> You can leave a review
-            </a>
-          ) : (
-            <>
-              <p className="text-xs text-ink-2">
-                {summary.attended} of {required} events toward leaving a review
-              </p>
-              <ProgressBar value={summary.attended} max={required} className="mt-1.5" />
-            </>
-          )}
-        </div>
+        {/* Alumni and faculty/staff can't review, so they get no progress toward one. */}
+        {summary.canReview ? (
+          <div className="mt-3 border-t border-line pt-3">
+            {summary.reviewEligible ? (
+              <a href="#reviews" className="flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline">
+                <Star className="h-4 w-4" aria-hidden /> You can leave a review
+              </a>
+            ) : (
+              <>
+                <p className="text-xs text-ink-2">
+                  {summary.attended} of {required} events toward leaving a review
+                </p>
+                <ProgressBar value={summary.attended} max={required} className="mt-1.5" />
+              </>
+            )}
+          </div>
+        ) : null}
       </Card>
     </div>
   );

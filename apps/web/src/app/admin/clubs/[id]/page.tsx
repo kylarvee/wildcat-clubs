@@ -10,6 +10,7 @@ import { fmtLongDate } from "@/lib/time";
 import { fileUrl } from "@/lib/domain/files";
 import { foundingChecklist } from "@/lib/domain/clubs";
 import { statedSettings } from "@/lib/domain/constitution";
+import { registeredMemberCount } from "@/lib/metrics";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
@@ -61,7 +62,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
   });
   if (!club) notFound();
 
-  const [check, documents, leaders, invites, decisions, colleges, members, verifier] = await Promise.all([
+  const [check, documents, leaders, invites, decisions, colleges, members, registered, verifier] = await Promise.all([
     foundingChecklist(club.id),
     db.clubDocument.findMany({ where: { clubId: club.id, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } }, orderBy: [{ kind: "asc" }, { createdAt: "desc" }], include: { createdBy: { select: { name: true } } } }),
     db.roleAssignment.findMany({
@@ -72,7 +73,9 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
     db.advisorInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, select: { id: true, name: true, email: true, createdAt: true } }),
     db.clubDecision.findMany({ where: { clubId: club.id }, orderBy: { at: "desc" }, include: { by: { select: { name: true } } } }),
     db.college.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    // Every active membership becomes Alumni on retirement (RetireClubDialog); the "Members" stat counts students only.
     db.membership.count({ where: { clubId: club.id, status: "ACTIVE" } }),
+    registeredMemberCount(club.id),
     club.googleAccountVerifiedById ? db.user.findUnique({ where: { id: club.googleAccountVerifiedById }, select: { name: true } }) : null,
   ]);
   const pendingDocs = documents.filter((d) => d.status === "PENDING_APPROVAL" && d.kind !== "OTHER");
@@ -147,7 +150,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                   { label: "Where it sits", value: `${SCOPE_LABEL[club.scope]}${club.college ? ` · ${club.college.name}` : ""}` },
                   { label: "Department", value: club.department?.name ?? (club.requestedDepartmentName ? `Requested: ${club.requestedDepartmentName}` : "—") },
                   { label: "Focus", value: club.focusMajor?.name ?? club.focusOther ?? "—" },
-                  { label: "Members", value: members },
+                  { label: "Members", value: registered },
                   { label: "Joining", value: JOIN_LABEL[club.joinPolicy] },
                   { label: "Succession", value: SUCCESSION_LABEL[club.successionMethod] },
                 ]}

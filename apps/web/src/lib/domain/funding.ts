@@ -8,7 +8,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notifyAdmins, notifyClubCapability } from "@/lib/domain/notify";
-import { eventCostSummaries } from "@/lib/domain/events";
+import { costLineLocks, eventCostSummaries } from "@/lib/domain/events";
 import { getConfig } from "@/lib/config";
 import { budgetTermFor, getTerms } from "@/lib/terms";
 import { DAY_MS, fmtDate, fmtMoney } from "@/lib/time";
@@ -363,14 +363,12 @@ async function assertTerm(termId: string) {
 }
 
 /** A general cost line can't change while a submitted or approved request covers it. */
+/** One lock rule for every cost line, general or event (costLineLocks). */
 async function assertNotRequested(itemId: string) {
-  const row = await db.fundingRequestItem.findFirst({
-    where: { budgetItemId: itemId, request: { status: { in: ACTIVE_REQUEST_STATUSES } } },
-    select: { request: { select: { title: true, status: true } } },
-  });
-  if (row) {
-    const where = row.request.status === "SUBMITTED" ? "is being reviewed" : "was approved";
-    throw conflict(`This cost is part of “${row.request.title}”, which ${where}, so it's locked to match what you asked for. Add a new line instead.`);
+  const lock = (await costLineLocks([itemId])).get(itemId);
+  if (lock) {
+    const where = lock.status === "SUBMITTED" ? "is being reviewed" : "was approved";
+    throw conflict(`This cost is part of “${lock.title}”, which ${where}, so it's locked to match what you asked for. Add a new line instead.`);
   }
 }
 

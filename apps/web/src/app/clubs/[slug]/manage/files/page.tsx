@@ -65,6 +65,12 @@ export default async function ClubFilesPage({ params, searchParams }: { params: 
           to keep a copy in Google Drive.
         </span>
       </span>
+    ) : drive.state === "pending" && canManage ? (
+      // An account is set, but the club isn't approved yet or WSUSA hasn't verified the account.
+      <span className="flex items-start gap-1.5">
+        <HardDrive className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span>{drive.reason ?? "Google Drive copies start once WSUSA approves the club and verifies its Google account."}</span>
+      </span>
     ) : null;
 
   return (

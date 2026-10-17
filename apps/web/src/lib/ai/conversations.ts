@@ -9,7 +9,8 @@ import type { ActionCard, ActionStatus, ConversationSummary, NoticeTone } from "
 
 /**
  * The assistant's conversation store (AiConversation / AiMessage) — the write
- * path for these two tables, private to their owner.
+ * path for these two tables, private to their owner — and for AiUsage, one row
+ * per model call, which the hourly limit counts.
  *
  * Rows with role user / assistant / system are Anthropic messages, stored
  * verbatim and only ever appended, so prompt caching and thinking blocks stay
@@ -101,6 +102,9 @@ export class Thread {
       });
       created.push(asRow(row));
     }
+    // One usage row per model call (each answer is one), kept apart from the chat so deleting it doesn't reset the limit.
+    const calls = items.filter((i) => i.role === "assistant");
+    if (calls.length) await db.aiUsage.createMany({ data: calls.map((i) => ({ userId: this.userId, model: i.model ?? "unknown" })) });
     this.rows.push(...created);
     await db.aiConversation.update({ where: { id: this.id }, data: { updatedAt: new Date() } });
     return created;
@@ -241,9 +245,9 @@ export async function claimAction(thread: Thread, toolUseId: string): Promise<{ 
 export const HOURLY_LIMIT = 150;
 export const LIMIT_TEXT = "You've asked a lot in the last hour. Take a short break and try again a little later.";
 
-/** Model calls (assistant rows) this person made since a moment, for the usage limit. */
+/** Model calls this person made since a moment, for the usage limit (AiUsage outlives deleted conversations). */
 async function modelCallsSince(userId: string, since: Date): Promise<number> {
-  return db.aiMessage.count({ where: { role: "assistant", createdAt: { gte: since }, conversation: { userId } } });
+  return db.aiUsage.count({ where: { userId, createdAt: { gte: since } } });
 }
 
 /** True once this person has used the last hour's model calls. Checked before every turn that calls Claude. */
