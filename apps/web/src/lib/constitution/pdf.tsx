@@ -17,7 +17,11 @@ const MUTED = "#77707f";
 const s = StyleSheet.create({
   page: { paddingTop: 64, paddingBottom: 72, paddingHorizontal: 72, fontFamily: "Times-Roman", fontSize: 11, color: INK, lineHeight: 1.45 },
   header: { position: "absolute", top: 28, left: 72, right: 72, flexDirection: "row", justifyContent: "space-between", fontFamily: "Helvetica", fontSize: 7.5, color: MUTED, letterSpacing: 1 },
-  footer: { position: "absolute", bottom: 32, left: 72, right: 72, flexDirection: "row", justifyContent: "space-between", fontFamily: "Helvetica", fontSize: 8, color: MUTED, borderTopWidth: 0.5, borderTopColor: "#d6d0dd", paddingTop: 8 },
+  // Separate absolutely placed pieces: in this react-pdf version a fixed View
+  // holding a page-number `render` Text comes out blank (same fix as invoices).
+  footRule: { position: "absolute", bottom: 46, left: 72, right: 72, height: 0.5, backgroundColor: "#d6d0dd" },
+  footLeft: { position: "absolute", bottom: 32, left: 72, fontFamily: "Helvetica", fontSize: 8, color: MUTED },
+  footRight: { position: "absolute", bottom: 32, right: 72, fontFamily: "Helvetica", fontSize: 8, color: MUTED },
   kicker: { fontFamily: "Helvetica-Bold", fontSize: 9, color: BRAND, letterSpacing: 2, marginBottom: 6 },
   club: { fontFamily: "Times-Bold", fontSize: 24, lineHeight: 1.2, marginBottom: 10 },
   rule: { height: 2, backgroundColor: BRAND, width: 56, marginBottom: 10 },
@@ -106,10 +110,11 @@ function ConstitutionPdf({ doc, meta }: { doc: RenderedDoc; meta: PdfMeta }) {
           </View>
         ) : null}
 
-        <View style={s.footer} fixed>
-          <Text>{`${club} — ${doc.label}`}</Text>
-          <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
-        </View>
+        <View style={s.footRule} fixed />
+        <Text style={s.footLeft} fixed>{`${club} — ${doc.label}`}</Text>
+        <Text style={s.footRight} fixed>
+          {meta.adoptedOn ? `Adopted ${fmtLongDate(meta.adoptedOn)}${meta.version ? ` · v${meta.version}` : ""}` : "Draft preview"}
+        </Text>
       </Page>
     </Document>
   );

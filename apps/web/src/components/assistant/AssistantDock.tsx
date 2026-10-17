@@ -19,7 +19,8 @@ import { ConversationList } from "@/components/assistant/ConversationList";
 
 const STORAGE_KEY = "wc.assistant.conversation";
 /** Pages where a floating button would get in the way. */
-const HIDDEN_ON = [/^\/assistant(\/|$)/, /^\/checkin\/live\//];
+// Hidden where it would cover the page's own controls (the message box's Send, the live QR screen).
+const HIDDEN_ON = [/^\/assistant(\/|$)/, /^\/checkin\/live\//, /^\/messages(\/|$)/];
 
 function remember(id: string | null) {
   try {

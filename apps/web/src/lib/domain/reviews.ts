@@ -210,13 +210,3 @@ export async function closeReviewBombingCheck(actor: Actor | null, clubId: strin
   await logActivity({ actorId: actor.id, action: "review.bombing_reviewed", entityType: "club", entityId: clubId, clubId });
 }
 
-/**
- * Remembers "Not now" on the get-the-app prompt shown after registering.
- * Temporary home; moves to profiles (lib/domain/profiles.ts) with the other
- * user preferences.
- */
-export async function dismissAppPrompt(actor: Actor | null) {
-  assertSignedIn(actor);
-  await db.user.update({ where: { id: actor.id }, data: { appPromptDismissedAt: new Date() } });
-  await logActivity({ actorId: actor.id, action: "user.app_prompt_dismissed", entityType: "user", entityId: actor.id });
-}

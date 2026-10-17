@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, GraduationCap, Settings2, Target, Users } from "lucide-react";
+import { ChevronRight, GraduationCap, MessageSquare, Settings2, Target, Users } from "lucide-react";
 import type { ClubRow } from "@/lib/clubs/context";
 import type { ClubAccess } from "@/lib/authz";
 import type { ClubMetricsView } from "@/lib/clubs/queries";
@@ -127,6 +127,11 @@ export function ClubHero({
                 {leader ? (
                   <ButtonLink href={`/clubs/${club.slug}/manage`} variant="outline" size="lg">
                     <Settings2 className="h-4 w-4" aria-hidden="true" /> Manage club
+                  </ButtonLink>
+                ) : null}
+                {approved && (member || (leader && !access?.viaPlatform)) ? (
+                  <ButtonLink href={`/messages/club/${club.slug}`} variant="outline" size="lg">
+                    <MessageSquare className="h-4 w-4" aria-hidden="true" /> Club chat
                   </ButtonLink>
                 ) : null}
                 {approved ? <MemberMenu clubId={club.id} clubName={club.name} member={member} pending={pending} /> : null}

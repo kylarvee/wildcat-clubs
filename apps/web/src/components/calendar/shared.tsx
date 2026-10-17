@@ -183,7 +183,7 @@ export function OccurrenceDetails({ p, title, showCost = true }: { p: CalendarEv
               {p.recurrence !== "NONE" && p.eventTotalCents != null ? <span className="text-ink-3"> · {fmtMoney(p.eventTotalCents)} for all meetings</span> : null}
             </p>
             {p.clubSlug ? (
-              <Link href={`/clubs/${p.clubSlug}/manage/budget`} className="text-xs font-medium text-brand-600 hover:underline">
+              <Link href={`/clubs/${p.clubSlug}/manage/budget?event=${p.eventId}`} className="text-xs font-medium text-brand-600 hover:underline">
                 Request funding
               </Link>
             ) : null}

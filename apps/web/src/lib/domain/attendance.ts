@@ -9,7 +9,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { DomainError, assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { joinClub } from "@/lib/domain/memberships";
 import { notify } from "@/lib/domain/notify";
-import { requirementSourceId } from "@/lib/domain/requirements";
+import { reopenRequirementTasks, requirementSourceId } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
 import { reviewEligibility } from "@/lib/metrics";
 import { checkinPass, checkinPath, checkinToken, isCheckinPass, tokenWindow, verifyCheckinToken, verifyScanProof } from "@/lib/attendance/token";
@@ -366,6 +366,8 @@ export async function removeAttendance(actor: Actor | null, attendanceId: string
     clubId: row.clubId,
     data: { occurrenceId: row.occurrenceId, eventId: row.occurrence.event.id, userId: row.userId, method: row.method, title: row.occurrence.event.title },
   });
+  // A removed training check-in can un-meet an officer requirement: reopen the task if so.
+  await reopenRequirementTasks(row.userId);
   return { name: row.user.name };
 }
 

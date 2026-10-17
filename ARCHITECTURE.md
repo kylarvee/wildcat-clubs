@@ -92,6 +92,8 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | Reviews | Review form on the club page | clubs list, club page |
 | Complaints | Report form (`/report`) | admin complaints only |
 | Messages | Messages | — |
+| Push devices | Mobile app sign-in (`lib/domain/devices`) | push delivery |
+| AI conversations | Ask Wildcat Clubs (`lib/ai/conversations`, the write path for AiConversation/AiMessage) | `/assistant` only — private to the owner, never in the activity log |
 | Announcements | Announcements tool | club page, dashboard, mobile |
 | System rules | System settings (sysadmin) | everything |
 
@@ -114,12 +116,12 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 
 | Spec tension | Decision |
 |---|---|
-| Funding sources listed differently (University/WSUSA/Department vs University/College/Department) | One list: **University, WSUSA, College, Department**. Default: Registered → WSUSA; Sponsored/Affiliate → Department if the club has one, else WSUSA. |
+| Funding sources listed differently (University/WSUSA/Department vs University/College/Department) | One list: **University, WSUSA, College, Department**. Default: Registered → WSUSA; Sponsored/Affiliate → Department if the club has one, else WSUSA; College Ambassadors orgs → College. |
 | Costs in Events Builder *and* Budget *and* Calendar | Event costs are entered only in the Events Builder (they belong to the event; recurring events multiply by occurrences). General costs and all funding requests are entered only in the Budget tool. Calendars show costs read-only and link to Budget to request funds. |
 | Officer "gate" vs. clubs needing officers to work immediately | Requirements with a grace period (default 30 days; set 0 for a hard gate). Permissions pause, the title stays. |
 | VP permissions vs. role assignment | Rank rule: assign only below your rank; President may also name a President. |
 | Auto-enroll on check-in vs. membership gates | Check-in always records attendance. Open clubs: you become a member. Gated clubs: a join request is filed. |
-| Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. |
+| Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`), started by an admin (Admin → Club reviews → Ambassador programs). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. |
 | Calendar subscription vs. registration | Separate. Registering subscribes you; you can subscribe without registering (once signed in). |
 | Club "college" field (some independent / university-wide / sports) | `scope` = College · University-wide · Independent · Sports; `collegeId` only for College. |
 | Department "Other" | Founder types it (`requestedDepartmentName`); an admin task adds it to the list and links the club. |

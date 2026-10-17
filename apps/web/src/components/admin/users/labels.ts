@@ -37,6 +37,16 @@ export const MEMBERSHIP_SOURCE_LABEL: Record<MembershipSource, string> = {
 
 /** "attendance.checkin" → "Attendance · checkin" is unreadable; these cover what people do most. */
 const ACTION_LABEL: Record<string, string> = {
+  "funding.partially_approved": "Partly approved a funding request",
+  "funding.withdrawn": "Withdrew a funding request",
+  "funding.draft_created": "Started a funding request",
+  "funding.draft_updated": "Edited a funding request draft",
+  "funding.draft_discarded": "Discarded a funding request draft",
+  "invoice.created": "Created a funding invoice",
+  "invoice.processed": "Marked a funding invoice processed",
+  "budget.item_added": "Added a budget cost",
+  "budget.item_updated": "Edited a budget cost",
+  "budget.item_removed": "Removed a budget cost",
   "attendance.checkin": "Checked in to an event",
   "attendance.manual_add": "Added someone to an event's attendance",
   "attendance.removed": "Removed a check-in",

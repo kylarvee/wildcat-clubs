@@ -54,6 +54,11 @@ export function authMode(): "mock" | "google" | "both" {
   return process.env.NODE_ENV === "production" ? "google" : "both";
 }
 
+/** The mobile app's Google sign-in: verifying an ID token needs only a client id, not the web secret. */
+export function googleTokenSignInEnabled() {
+  return authMode() !== "mock" && Boolean(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_IOS_CLIENT_ID || process.env.GOOGLE_ANDROID_CLIENT_ID);
+}
+
 export function personasEnabled() {
   return authMode() !== "google";
 }

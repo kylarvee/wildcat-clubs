@@ -7,8 +7,8 @@ import { isSysadmin } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { campusDate } from "@/lib/time";
 import { assertCan, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
-import { notify } from "@/lib/domain/notify";
 import { endAllRolesForUser } from "@/lib/domain/roles";
+import { markUserGraduated } from "@/lib/domain/profiles";
 
 /**
  * People (admin.users). Admins look people up and change account status:
@@ -149,19 +149,8 @@ export async function markUserGraduatedByAdmin(actor: Actor | null, userId: stri
     if (Number.isNaN(graduatedAt.getTime())) throw invalid("That graduation date isn't a real date.");
     if (graduatedAt.getTime() > Date.now() + 86_400_000) throw invalid("The graduation date can't be in the future.");
   }
-
-  await db.user.update({ where: { id: target.id }, data: { status: "ALUMNI", graduatedAt } });
-  const ended = await endAllRolesForUser(target.id, "GRADUATED", actor.id);
-  await logActivity({ actorId: actor.id, action: "user.graduated", entityType: "user", entityId: target.id, data: { by: "admin", endedRoles: ended.endedAssignments } });
-  await notify({
-    userIds: [target.id],
-    kind: "profile.alumni",
-    title: "Your profile is now an alumni profile",
-    body: "Congratulations, Wildcat! Your club roles, projects and history stay on your profile.",
-    href: `/u/${target.handle}`,
-    email: false,
-  });
-  return ended;
+  // One write path for graduating (profiles.ts): ends roles, retires the profile, logs the public row.
+  return markUserGraduated(actor, target.id, graduatedAt);
 }
 
 /** Undo a graduation marked by mistake. Roles that ended don't come back — leaders reassign them. */

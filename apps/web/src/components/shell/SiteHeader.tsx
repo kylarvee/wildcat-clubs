@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { countOpenTasks } from "@/lib/domain/tasks";
+import { countUnreadConversations } from "@/lib/domain/messaging";
+import { aiLive } from "@/lib/config";
 import { personasEnabled } from "@/lib/auth/google";
 import { Logo } from "@/components/shell/Logo";
 import { NavLinks, MobileNav } from "@/components/shell/NavLinks";
@@ -21,7 +23,9 @@ function CountDot({ n }: { n: number }) {
 
 export async function SiteHeader() {
   const user = await getCurrentUser();
-  const [unread, tasks] = user ? await Promise.all([db.notification.count({ where: { userId: user.id, readAt: null } }), countOpenTasks(user)]) : [0, 0];
+  const [unread, tasks, chats, assistantOn] = user
+    ? await Promise.all([db.notification.count({ where: { userId: user.id, readAt: null } }), countOpenTasks(user), countUnreadConversations(user.id), aiLive("assistant")])
+    : [0, 0, 0, false];
 
   const links = user
     ? [
@@ -46,8 +50,9 @@ export async function SiteHeader() {
         <div className="ml-auto flex items-center gap-1">
           {user ? (
             <>
-              <Link href="/messages" className="relative rounded-lg p-2 text-ink-2 hover:bg-muted hover:text-ink" aria-label="Messages">
+              <Link href="/messages" className="relative rounded-lg p-2 text-ink-2 hover:bg-muted hover:text-ink" aria-label={chats ? `Messages (${chats} with unread messages)` : "Messages"}>
                 <MessageSquare className="h-5 w-5" />
+                <CountDot n={chats} />
               </Link>
               <Link href="/tasks" className="relative rounded-lg p-2 text-ink-2 hover:bg-muted hover:text-ink" aria-label={`Tasks (${tasks} open)`}>
                 <CheckSquare className="h-5 w-5" />
@@ -62,6 +67,7 @@ export async function SiteHeader() {
                 isAdmin={can(user, "admin.access")}
                 isSysadmin={can(user, "system.config")}
                 personas={personasEnabled()}
+                assistantOn={assistantOn}
               />
             </>
           ) : (

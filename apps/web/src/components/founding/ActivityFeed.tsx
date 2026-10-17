@@ -5,9 +5,21 @@ import { Avatar } from "@/components/ui/avatar";
 import type { ClubRole } from "@prisma/client";
 
 /** Busy, low-signal actions that would drown out the rest of a club feed. */
-const NOISY = ["calendar.subscribed", "calendar.unsubscribed", "attendance.checkin", "task.completed", "task.reopened", "constitution.draft_saved", "role.permissions_set"];
+const NOISY = ["calendar.subscribed", "calendar.unsubscribed", "attendance.checkin", "task.completed", "task.reopened", "constitution.draft_saved", "role.permissions_set", "file.renamed", "file.moved"];
 
 const PHRASES: Record<string, string> = {
+  "file.folder_created": "made a folder",
+  "file.renamed": "renamed a file",
+  "file.moved": "moved files",
+  "file.trashed": "moved files to the trash",
+  "file.restored": "restored files from the trash",
+  "file.deleted": "deleted files for good",
+  "file.visibility_set": "changed who can open a file",
+  "file.featured_set": "updated the club page Resources",
+  "file.shared": "shared a file",
+  "file.share_changed": "changed someone's file access",
+  "file.unshared": "removed someone's file access",
+  "file.default_folders": "set up the club's starting folders",
   "club.created": "created the club",
   "club.profile_updated": "updated the club profile",
   "club.submitted": "submitted the club to WSUSA",

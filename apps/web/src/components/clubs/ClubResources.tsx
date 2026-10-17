@@ -33,6 +33,13 @@ export async function ClubResources({ clubId, clubSlug, viewer, canManageFiles }
     return (
       <div className="rounded-[var(--radius-card)] border border-dashed border-line-2 bg-surface px-4 py-6 text-center text-sm text-ink-3">
         <p>No resources shared yet.</p>
+        {viewer && !canManageFiles ? (
+          <p className="mt-1">
+            <Link href={`/files/clubs/${clubSlug}`} className="font-medium text-brand-600 hover:underline">
+              Browse all club files
+            </Link>
+          </p>
+        ) : null}
         {canManageFiles ? (
           <p className="mt-1">
             <Link href={`/clubs/${clubSlug}/manage/files`} className="font-medium text-brand-600 hover:underline">
@@ -102,6 +109,13 @@ export async function ClubResources({ clubId, clubSlug, viewer, canManageFiles }
           </li>
         );
       })}
+      {viewer ? (
+        <li className="px-4 py-2.5 text-sm">
+          <Link href={`/files/clubs/${clubSlug}`} className="font-medium text-brand-600 hover:underline">
+            Browse all club files
+          </Link>
+        </li>
+      ) : null}
     </ul>
   );
 }

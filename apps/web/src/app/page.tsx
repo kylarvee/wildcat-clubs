@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { featuredClubs, upcomingPublicEvents } from "@/lib/clubs/queries";
 import { getConfig } from "@/lib/config";
+import { announcementFeed } from "@/lib/domain/announcements";
+import { AnnouncementsFeed } from "@/components/announcements/AnnouncementsFeed";
 import { platformSummary } from "@/lib/metrics";
 import { ClubCard } from "@/components/clubs/ClubCard";
 import { EventList } from "@/components/clubs/EventList";
@@ -11,7 +13,15 @@ import { Audiences, hasNumbers, LandingHero, LandingSection, Lifecycle, LiveNumb
 
 /** The public front door: what Wildcat Clubs is, live numbers, clubs and events worth a look. */
 export default async function Home() {
-  const [user, summary, clubs, events, cfg] = await Promise.all([getCurrentUser(), platformSummary(), featuredClubs(6), upcomingPublicEvents({ days: 14, limit: 6 }), getConfig()]);
+  const [user, summary, clubs, events, cfg, news] = await Promise.all([
+    getCurrentUser(),
+    platformSummary(),
+    featuredClubs(6),
+    upcomingPublicEvents({ days: 14, limit: 6 }),
+    getConfig(),
+    announcementFeed(null, 1),
+  ]);
+  const hasNews = news.length > 0;
   const startHref = user ? "/clubs/new" : `/login?next=${encodeURIComponent("/clubs/new")}`;
   const canStart = !user || can(user, "club.create");
   const showNumbers = hasNumbers(summary);
@@ -68,6 +78,12 @@ export default async function Home() {
           </div>
         )}
       </LandingSection>
+
+      {hasNews ? (
+        <LandingSection id="news" eyebrow="From WSUSA" title="News for every Wildcat">
+          <AnnouncementsFeed userId={null} limit={3} />
+        </LandingSection>
+      ) : null}
 
       <NetworkPreview />
 

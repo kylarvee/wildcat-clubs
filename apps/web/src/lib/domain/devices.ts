@@ -9,9 +9,7 @@ import { assertSignedIn, parse } from "@/lib/domain/kit";
  * Push devices — the phones that receive this person's notifications
  * (lib/integrations/push sends to every PushToken row of a user).
  *
- * Written in the domain style (sign-in check → zod → write → activity log).
- * It belongs in src/lib/domain/devices.ts; it lives here only because this
- * slice may not add files there (see the integration request).
+ * The write path for PushToken (sign-in check → zod → write → activity log).
  */
 
 const ExpoToken = z

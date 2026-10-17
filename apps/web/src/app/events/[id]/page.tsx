@@ -352,7 +352,7 @@ export default async function EventPage({ params, searchParams }: Props) {
                         <dd className="font-semibold tabular-nums text-ink">{fmtMoney(cost.totalCents)}</dd>
                       </div>
                     </dl>
-                    <ButtonLink variant="secondary" size="sm" className="w-full" href={`/clubs/${event.club.slug}/manage/budget`}>
+                    <ButtonLink variant="secondary" size="sm" className="w-full" href={`/clubs/${event.club.slug}/manage/budget?event=${event.id}`}>
                       <Wallet className="h-4 w-4" /> Request funding
                     </ButtonLink>
                   </>

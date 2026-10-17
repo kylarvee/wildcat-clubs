@@ -131,7 +131,7 @@ function clubEvents(ctx: Ctx, club: ClubM) {
   const def = club.def;
   const lastActive = def.lastActiveTerm ? ctx.term(def.lastActiveTerm).endsOn : null;
   const ideasUsed = new Set<string>();
-  let dow = def.meeting.dow;
+  const dow = def.meeting.dow;
   let lastAy = "";
 
   for (const term of EVENT_TERMS(ctx)) {
@@ -141,8 +141,7 @@ function clubEvents(ctx: Ctx, club: ClubM) {
     if (winEnd.getTime() - winStart.getTime() < 21 * DAY) continue;
     const quiet = Boolean(lastActive && term.startsOn > lastActive);
     if (term.academicYear !== lastAy) {
-      // New officers sometimes move the meeting night.
-      if (lastAy && rng.chance(0.3)) dow = Math.min(5, Math.max(1, dow + rng.pick([-1, 1])));
+      // Meeting nights stay put: club descriptions name the day ("Tuesday build nights").
       lastAy = term.academicYear;
     }
 

@@ -72,7 +72,8 @@ export default async function ClubAttendancePage({ params, searchParams }: { par
     clubRetention(club.id, "year", { count: 4, at: now }),
   ]);
 
-  const termRates = termEvents.map((e) => e.rate).filter((r): r is number => r !== null);
+  // Started events nobody checked in to aren't "held" (lib/metrics): leave them out of the average.
+  const termRates = termEvents.filter((e) => e.held !== false).map((e) => e.rate).filter((r): r is number => r !== null);
   const avgTermRate = termRates.length ? termRates.reduce((a, b) => a + b, 0) / termRates.length : null;
   const query: Record<string, string> = range.key === "custom" ? { range: "custom", from: range.fromInput, to: range.toInput } : { range: range.key };
   const eventPoints: EventPoint[] = data.matrix.columns.map((c) => ({

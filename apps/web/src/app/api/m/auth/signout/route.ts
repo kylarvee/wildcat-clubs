@@ -1,7 +1,7 @@
 import { revokeToken } from "@/lib/auth/session";
 import { DomainError } from "@/lib/domain/kit";
 import { bearerToken, mobile, mobileActor, preflight, readJson } from "../../_lib/http";
-import { removePushToken } from "../../_lib/devices";
+import { removePushToken } from "@/lib/domain/devices";
 import type { MSignOutResponse } from "../../_types";
 
 /**

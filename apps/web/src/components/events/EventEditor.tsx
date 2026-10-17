@@ -338,7 +338,7 @@ export function EventEditor(props: EventEditorProps) {
           <Card id="costs" className="scroll-mt-20">
             <CardHeader title="Costs" description="Expected spending for this event. Leaders see it on calendars; members don't." />
             <CardBody>
-              <CostsEditor rows={costs} onChange={touch(setCosts)} meetings={meetings} defaultSource={defaultFundingSource} budgetHref={club ? `/clubs/${club.slug}/manage/budget` : null} />
+              <CostsEditor rows={costs} onChange={touch(setCosts)} meetings={meetings} defaultSource={defaultFundingSource} budgetHref={club ? `/clubs/${club.slug}/manage/budget${event ? `?event=${event.id}` : ""}` : null} />
             </CardBody>
           </Card>
         ) : null}

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
 import { leaveClub } from "@/lib/domain/memberships";
-import { dismissAppPrompt } from "@/lib/domain/reviews";
+import { dismissAppPrompt } from "@/lib/domain/profiles";
 
 /** Club page actions that aren't shared with the clubs list. */
 

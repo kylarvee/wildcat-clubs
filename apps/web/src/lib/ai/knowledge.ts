@@ -136,7 +136,7 @@ Leaders see the tools their capabilities allow: Overview, Profile, Members (rost
 - Money is shown in dollars and cents.
 
 ## Files, messages and announcements
-- Club Files (/clubs/<slug>/manage/files): a file explorer with folders, right-click actions and visibility per file or folder — Public, Members, Leaders, or inherit from the folder. Files can be picked from anywhere in the app and previewed inline. Mirrors to Google Drive when that integration is on.
+- Club Files (/clubs/<slug>/manage/files): a file explorer with folders, right-click actions and visibility per file or folder — Public, Members, Leaders, or inherit from the folder. Files can be picked from anywhere in the app and previewed inline. Mirrors to Google Drive when that integration is on. Members browse what they may open at /files/clubs/<slug>; everyone's own uploads and "Shared with me" live at /files; admins manage university files (policy PDFs, training handouts) at /files/university.
 - [Messages](/messages): each club has a group chat; members can message members of clubs they share; leaders can message other clubs' leaders and start leader group chats.
 - Announcements (/clubs/<slug>/manage/announcements): posts with the rich text editor, embeds (events, files, videos, maps). They show on the club page, dashboards and the app.
 

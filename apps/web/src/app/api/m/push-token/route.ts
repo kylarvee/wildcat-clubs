@@ -1,6 +1,6 @@
 import { assertSignedIn } from "@/lib/domain/kit";
 import { mobile, mobileActor, preflight, readJson } from "../_lib/http";
-import { registerPushToken, removePushToken } from "../_lib/devices";
+import { registerPushToken, removePushToken } from "@/lib/domain/devices";
 import type { MPushTokenResponse } from "../_types";
 
 /**

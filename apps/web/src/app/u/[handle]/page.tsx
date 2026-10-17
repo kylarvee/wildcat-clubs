@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { canDirectMessage } from "@/lib/domain/messaging";
+import { MessageButton } from "@/components/messages/MessageButton";
 import { Briefcase, CalendarCheck, FolderKanban, GraduationCap, Link2, Lock, Pencil, Sparkles, Users } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { INSTITUTION } from "@/lib/institution";
@@ -50,6 +52,11 @@ export default async function ProfilePage({ params, searchParams }: Props) {
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
           <ProfileHeader data={data} />
+          {!data.isSelf && (await canDirectMessage(viewer, user.id)) ? (
+            <div className="-mt-3 flex justify-end">
+              <MessageButton userId={user.id} name={user.name} />
+            </div>
+          ) : null}
 
           <ProfileSection title="About" icon={<Sparkles />}>
             {user.aboutHtml ? (

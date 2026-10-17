@@ -8,7 +8,7 @@ import { clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
-import { openRequirementTasks } from "@/lib/domain/requirements";
+import { openRequirementTasks, reopenRequirementTasks } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
 import { canViewFile } from "@/lib/domain/files";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
@@ -210,6 +210,8 @@ export async function endRoleAssignment(actor: Actor | null, assignmentId: strin
       href: `/clubs/${a.club.slug}/history`,
     });
   }
+  // Requirements they no longer owe close right away instead of waiting for the job.
+  await reopenRequirementTasks(a.userId);
   return a;
 }
 
@@ -495,6 +497,7 @@ export async function endAllRolesForUser(userId: string, reason: RoleEndReason, 
       email: false,
     });
   }
+  await reopenRequirementTasks(userId);
   return { endedAssignments: assignments.length, alumniMemberships: alumni.count };
 }
 
