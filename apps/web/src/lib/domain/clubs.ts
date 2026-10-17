@@ -679,3 +679,44 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
   });
   return { status };
 }
+
+// ─── College Ambassadors programs (admin) ────────────────────────────────────
+
+/**
+ * Starts a college's ambassador program: one COLLEGE_AMBASSADORS org per
+ * college, created already approved (it's a university program, not a student
+ * petition). Students then request to join; an admin or advisor names its
+ * President in the org chart, and its leaders place Club Representative
+ * Ambassadors into the college's clubs.
+ */
+export async function startAmbassadorProgram(actor: Actor | null, collegeId: string): Promise<{ id: string; slug: string }> {
+  assertCan(actor, "admin.clubs");
+  const college = await db.college.findUnique({ where: { id: String(collegeId) } });
+  if (!college) throw notFound("College");
+  const existing = await db.club.findFirst({ where: { type: "COLLEGE_AMBASSADORS", collegeId: college.id, status: { not: "RETIRED" } }, select: { slug: true } });
+  if (existing) throw conflict(`${college.shortName} already has an ambassador program.`);
+  const name = `${college.shortName} Ambassadors`;
+  const now = new Date();
+  const club = await db.$transaction(async (tx) => {
+    const c = await tx.club.create({
+      data: {
+        slug: await uniqueSlug(name),
+        name,
+        type: "COLLEGE_AMBASSADORS",
+        status: "APPROVED",
+        scope: "COLLEGE",
+        collegeId: college.id,
+        shortDescription: `Student ambassadors for the ${college.name}: marketing, inter-club coordination, college-wide events, and a representative in every club.`,
+        joinPolicy: "APPROVAL",
+        logoColor: LOGO_SEED[Math.floor(Math.random() * LOGO_SEED.length)],
+        createdById: actor.id,
+        approvedAt: now,
+      },
+    });
+    await createDefaultPositions(c.id, "COLLEGE_AMBASSADORS", tx);
+    await tx.clubDecision.create({ data: { clubId: c.id, action: "APPROVED", note: "Ambassador program started by WSUSA.", byId: actor.id } });
+    await logActivity({ actorId: actor.id, action: "club.ambassador_program_started", entityType: "club", entityId: c.id, clubId: c.id, data: { college: college.name }, isPublic: true }, tx);
+    return c;
+  });
+  return { id: club.id, slug: club.slug };
+}

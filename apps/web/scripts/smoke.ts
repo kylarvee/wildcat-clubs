@@ -87,7 +87,9 @@ function fill(route: string, v: Awaited<ReturnType<typeof ids>>): string {
 async function main() {
   const routes = pageRoutes(path.join(process.cwd(), "src/app")).sort();
   const v = await ids();
-  const urls = [...new Set(routes.map((r) => fill(r, v)))];
+  const only = process.env.ROUTES ? new RegExp(process.env.ROUTES) : null;
+  const skip = process.env.SKIP ? new RegExp(process.env.SKIP) : null;
+  const urls = [...new Set(routes.filter((r) => (!only || only.test(r)) && (!skip || !skip.test(r))).map((r) => fill(r, v)))];
   const people: { label: string; cookie: string | null; sessionId?: string }[] = [{ label: "signed-out", cookie: null }];
   for (const p of PERSONAS) {
     const u = await db.user.findUnique({ where: { email: p.email } });

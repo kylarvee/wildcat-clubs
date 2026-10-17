@@ -19,6 +19,7 @@ import { cn } from "@/components/ui/cn";
 import { AddDepartmentForm } from "@/components/founding/admin/AddDepartmentForm";
 import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
+import { StartAmbassadorProgram } from "@/components/founding/admin/StartAmbassadorProgram";
 import { JOIN_LABEL, STATUS_LABEL, STATUS_TONE, SUCCESSION_LABEL, TYPE_LABEL } from "@/components/founding/copy";
 
 export const metadata: Metadata = { title: "Club reviews" };
@@ -27,6 +28,7 @@ const TABS = [
   { key: "submissions", label: "Submissions" },
   { key: "departments", label: "Department requests" },
   { key: "documents", label: "Custom documents" },
+  { key: "ambassadors", label: "Ambassador programs" },
   { key: "all", label: "All clubs" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -64,7 +66,17 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
           </Link>
         ))}
       </nav>
-      {tab === "submissions" ? <Submissions /> : tab === "departments" ? <DepartmentRequests where={deptWhere} /> : tab === "documents" ? <CustomDocuments /> : <AllClubs status={sp.status} q={sp.q} />}
+      {tab === "submissions" ? (
+        <Submissions />
+      ) : tab === "departments" ? (
+        <DepartmentRequests where={deptWhere} />
+      ) : tab === "documents" ? (
+        <CustomDocuments />
+      ) : tab === "ambassadors" ? (
+        <AmbassadorPrograms />
+      ) : (
+        <AllClubs status={sp.status} q={sp.q} />
+      )}
     </div>
   );
 }
@@ -308,6 +320,85 @@ async function AllClubs({ status, q }: { status?: string; q?: string }) {
       ) : (
         <EmptyState title="No clubs match" description={query ? `Nothing matches “${query}”${filter ? ` in ${STATUS_LABEL[filter]}` : ""}.` : "No clubs with this status."} />
       )}
+    </div>
+  );
+}
+
+/** One College Ambassadors org per college (ARCHITECTURE §6): start them here, run them in their workspace. */
+async function AmbassadorPrograms() {
+  const colleges = await db.college.findMany({
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      shortName: true,
+      clubs: {
+        where: { type: "COLLEGE_AMBASSADORS", status: { not: "RETIRED" } },
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          logoUrl: true,
+          logoColor: true,
+          roleAssignments: { where: { endedAt: null, role: "PRESIDENT" }, select: { user: { select: { name: true } } } },
+          ambassadorPlacements: { where: { endedAt: null }, select: { id: true } },
+          _count: { select: { memberships: { where: { status: "ACTIVE" } } } },
+        },
+      },
+    },
+  });
+  return (
+    <div className="space-y-4">
+      <p className="max-w-3xl text-sm text-ink-2">
+        A college ambassador program is an optional, student-led org for one college. It handles marketing and college-wide events, and places a Club
+        Representative Ambassador in each of the college&apos;s clubs to carry news and needs both ways.
+      </p>
+      <Table>
+        <THead>
+          <tr>
+            <TH>College</TH>
+            <TH>Program</TH>
+            <TH>President</TH>
+            <TH>Members</TH>
+            <TH>Clubs with an ambassador</TH>
+            <TH>
+              <span className="sr-only">Actions</span>
+            </TH>
+          </tr>
+        </THead>
+        <TBody>
+          {colleges.map((c) => {
+            const org = c.clubs[0];
+            return (
+              <TR key={c.id}>
+                <TD className="font-medium">{c.name}</TD>
+                <TD>
+                  {org ? (
+                    <div className="flex items-center gap-2">
+                      <ClubLogo name={org.name} src={org.logoUrl} color={org.logoColor} size="sm" />
+                      <span>{org.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-ink-3">No program yet</span>
+                  )}
+                </TD>
+                <TD>{org ? (org.roleAssignments[0]?.user.name ?? <Badge tone="warning">Vacant</Badge>) : "—"}</TD>
+                <TD className="tabular-nums">{org ? org._count.memberships : "—"}</TD>
+                <TD className="tabular-nums">{org ? org.ambassadorPlacements.length : "—"}</TD>
+                <TD className="text-right">
+                  {org ? (
+                    <Link href={`/clubs/${org.slug}/manage`} className={buttonClasses("outline", "sm")}>
+                      Open workspace
+                    </Link>
+                  ) : (
+                    <StartAmbassadorProgram collegeId={c.id} collegeName={c.shortName} />
+                  )}
+                </TD>
+              </TR>
+            );
+          })}
+        </TBody>
+      </Table>
     </div>
   );
 }

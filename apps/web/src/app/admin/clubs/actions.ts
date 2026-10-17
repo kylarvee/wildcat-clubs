@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
-import { addDepartmentForClub, decideClub, reinstateClub } from "@/lib/domain/clubs";
+import { addDepartmentForClub, decideClub, reinstateClub, startAmbassadorProgram } from "@/lib/domain/clubs";
 import { decideCustomDocument } from "@/lib/domain/constitution";
 
 function refresh() {
@@ -10,6 +10,12 @@ function refresh() {
   revalidatePath("/clubs/[slug]/manage", "layout");
   revalidatePath("/clubs/[slug]", "page");
   revalidatePath("/clubs");
+}
+
+export async function startAmbassadorProgramAction(collegeId: string) {
+  const r = await act((actor) => startAmbassadorProgram(actor, collegeId));
+  if (r.ok) refresh();
+  return r;
 }
 
 export async function decideClubAction(input: { clubId: string; decision: "APPROVE" | "CHANGES" | "REJECT"; note?: string }) {
