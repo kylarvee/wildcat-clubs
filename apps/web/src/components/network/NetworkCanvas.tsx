@@ -6,7 +6,7 @@ import { ArrowRight } from "lucide-react";
 import type { NetworkPayload, NetworkViewNode } from "@/lib/analytics/network-model";
 import { cn } from "@/components/ui/cn";
 import { applyForces, buildLinks, createSimulation, FLOAT_ALPHA, floatForce, lineAlpha, lineWidthScale, radiusScale, seedPositions, type SimLink, type SimNode } from "./layout";
-import { colorOf, HIGHLIGHT, INK, LINE } from "./colors";
+import { colorOf, HIGHLIGHT, INK, LINE, MINE_GRAY } from "./colors";
 
 /**
  * The drawing surface of the network: a <canvas> fed by a live d3-force
@@ -189,8 +189,10 @@ export function NetworkCanvas({
         ctx.fill();
       }
       ctx.globalAlpha = faded ? 0.24 : 1;
-      if (lead && !faded) {
-        // Strong highlight for clubs the viewer leads or advises: a soft halo plus a heavy ring.
+      const selected = p.selection?.type === "node" && p.selection.key === n.key;
+      const hovered = hover?.kind === "node" && hover.key === n.key;
+      if (selected) {
+        // The picked club alone gets the glow, so a highlight never reads as a leftover selection.
         ctx.fillStyle = "rgba(91,45,126,0.16)";
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + 10 / t.k, 0, Math.PI * 2);
@@ -204,14 +206,24 @@ export function NetworkCanvas({
       ctx.lineWidth = ring;
       ctx.strokeStyle = "#ffffff";
       ctx.stroke();
-      const selected = p.selection?.type === "node" && p.selection.key === n.key;
-      if (mine || selected || (hover?.kind === "node" && hover.key === n.key)) {
+      // Rings: solid = what you're pointing at or picked; dashed = your clubs (always on, per the spec:
+      // leaders and advisors see their clubs highlighted — purple for clubs you lead, gray for clubs you're in).
+      if (selected || hovered) {
+        const width = (selected ? 3 : 2) / t.k;
         ctx.beginPath();
-        const width = selected || lead ? 3 / t.k : 2 / t.k;
         ctx.arc(n.x, n.y, n.r + ring + width / 2, 0, Math.PI * 2);
         ctx.lineWidth = width;
-        ctx.strokeStyle = lead || selected ? HIGHLIGHT : INK;
+        ctx.strokeStyle = selected ? HIGHLIGHT : INK;
         ctx.stroke();
+      } else if (mine) {
+        const width = (lead ? 2.25 : 1.75) / t.k;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r + ring + width / 2 + 1 / t.k, 0, Math.PI * 2);
+        ctx.lineWidth = width;
+        ctx.strokeStyle = lead ? HIGHLIGHT : MINE_GRAY;
+        ctx.setLineDash([4 / t.k, 3 / t.k]);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
     ctx.globalAlpha = 1;

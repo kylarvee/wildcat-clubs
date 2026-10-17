@@ -18,6 +18,8 @@ export const NO_COLLEGE = "#8d8796";
 /** Wildcat purple for "your clubs" and selection, so highlights never read as a college. */
 export const HIGHLIGHT = "#5b2d7e";
 export const INK = "#17131c";
+/** Dashed ring on clubs you're a member of (purple HIGHLIGHT is for clubs you lead). */
+export const MINE_GRAY = "#5e5866";
 export const LINE = "#4a4453";
 
 export function collegeColors(colleges: NetworkCollege[]): Map<string, string> {

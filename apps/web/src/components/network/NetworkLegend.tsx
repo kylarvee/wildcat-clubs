@@ -2,7 +2,7 @@
 
 import type { NetworkPayload } from "@/lib/analytics/network-model";
 import { cn } from "@/components/ui/cn";
-import { HIGHLIGHT, INK, LINE, NO_COLLEGE, colorOf } from "./colors";
+import { HIGHLIGHT, LINE, MINE_GRAY, NO_COLLEGE, colorOf } from "./colors";
 import { lineWidthScale, radiusScale } from "./layout";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -119,8 +119,7 @@ export function NetworkLegend({
             {data.viewer.leads.length ? (
               <li className="flex items-center gap-2">
                 <svg width={26} height={26} aria-hidden="true">
-                  <circle cx={13} cy={13} r={12.5} fill={HIGHLIGHT} fillOpacity={0.16} />
-                  <circle cx={13} cy={13} r={8.5} fill="none" stroke={HIGHLIGHT} strokeWidth={3} />
+                  <circle cx={13} cy={13} r={9} fill="none" stroke={HIGHLIGHT} strokeWidth={2.25} strokeDasharray="4 3" />
                   <circle cx={13} cy={13} r={6} fill={NO_COLLEGE} stroke="#fff" strokeWidth={1.5} />
                 </svg>
                 Clubs you lead or advise
@@ -129,12 +128,20 @@ export function NetworkLegend({
             {data.viewer.memberOf.some((id) => !data.viewer.leads.includes(id)) ? (
               <li className="flex items-center gap-2">
                 <svg width={26} height={26} aria-hidden="true">
-                  <circle cx={13} cy={13} r={8} fill="none" stroke={INK} strokeWidth={2} />
+                  <circle cx={13} cy={13} r={8.75} fill="none" stroke={MINE_GRAY} strokeWidth={1.75} strokeDasharray="4 3" />
                   <circle cx={13} cy={13} r={6} fill={NO_COLLEGE} stroke="#fff" strokeWidth={1.5} />
                 </svg>
                 Clubs you&rsquo;re a member of
               </li>
             ) : null}
+            <li className="flex items-center gap-2">
+              <svg width={26} height={26} aria-hidden="true">
+                <circle cx={13} cy={13} r={12.5} fill={HIGHLIGHT} fillOpacity={0.16} />
+                <circle cx={13} cy={13} r={8.5} fill="none" stroke={HIGHLIGHT} strokeWidth={3} />
+                <circle cx={13} cy={13} r={6} fill={NO_COLLEGE} stroke="#fff" strokeWidth={1.5} />
+              </svg>
+              The club you picked
+            </li>
           </ul>
         </section>
       ) : null}
