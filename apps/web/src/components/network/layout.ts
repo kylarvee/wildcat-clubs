@@ -124,6 +124,46 @@ export function createSimulation(): Simulation<SimNode, SimLink> {
 }
 
 /**
+ * The layout never fully stops (unless reduced motion is on): it rests at this
+ * low "temperature", so the forces stay live and each minute's new data eases
+ * the map into its new shape instead of snapping or waiting for a restart.
+ */
+export const FLOAT_ALPHA = 0.02;
+
+function hashKey(key: string) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/**
+ * A slow, gentle drift: every club wanders on its own loop (7–13 s, seeded by
+ * its key so it's the same for everyone). The push is zero-mean, so clubs
+ * bob a few pixels around where the forces want them rather than wandering off.
+ */
+export function floatForce(amp = 0.025) {
+  let nodes: SimNode[] = [];
+  const loops = new Map<string, [number, number, number, number]>();
+  const force = () => {
+    const t = performance.now() / 1000;
+    for (const n of nodes) {
+      let p = loops.get(n.key);
+      if (!p) {
+        const h = hashKey(n.key);
+        p = [(2 * Math.PI) / (7 + (h % 600) / 100), (h % 628) / 100, (2 * Math.PI) / (8 + ((h >>> 9) % 500) / 100), ((h >>> 17) % 628) / 100];
+        loops.set(n.key, p);
+      }
+      n.vx = (n.vx ?? 0) + Math.cos(t * p[0] + p[1]) * amp;
+      n.vy = (n.vy ?? 0) + Math.sin(t * p[2] + p[3]) * amp;
+    }
+  };
+  force.initialize = (ns: SimNode[]) => {
+    nodes = ns;
+  };
+  return force;
+}
+
+/**
  * Starting spots for nodes without one: the middle of the clubs they contain
  * (when switching grouping), else beside a node they're linked to, else a
  * sunflower spiral (deterministic, so every visitor starts the same way).

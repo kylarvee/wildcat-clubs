@@ -5,7 +5,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import { ArrowRight } from "lucide-react";
 import type { NetworkPayload, NetworkViewNode } from "@/lib/analytics/network-model";
 import { cn } from "@/components/ui/cn";
-import { applyForces, buildLinks, createSimulation, lineAlpha, lineWidthScale, radiusScale, seedPositions, type SimLink, type SimNode } from "./layout";
+import { applyForces, buildLinks, createSimulation, FLOAT_ALPHA, floatForce, lineAlpha, lineWidthScale, radiusScale, seedPositions, type SimLink, type SimNode } from "./layout";
 import { colorOf, HIGHLIGHT, INK, LINE } from "./colors";
 
 /**
@@ -88,6 +88,8 @@ export function NetworkCanvas({
   const widthsRef = useRef(new Map<string, number>());
   const fontRef = useRef("ui-sans-serif, system-ui, sans-serif");
   const reducedRef = useRef(false);
+  /** False while the canvas is scrolled out of view: the floating layout pauses to save battery. */
+  const visibleRef = useRef(true);
   const lineWidthRef = useRef<(w: number) => number>(() => 1);
   const maxWeightRef = useRef(1);
   const [tip, setTip] = useState<Tip | null>(null);
@@ -340,14 +342,28 @@ export function NetworkCanvas({
 
   // ─── simulation lifecycle ────────────────────────────────────────────────
 
+  /** Where the layout rests: gently floating, or fully still for reduced motion. */
+  const restTarget = () => (reducedRef.current ? 0 : FLOAT_ALPHA);
+
+  /** Heats the layout up to `alpha` and runs it — unless the canvas is out of view, where it resumes when seen. */
+  const kick = (alpha: number) => {
+    const sim = simRef.current;
+    if (!sim) return;
+    sim.alpha(alpha);
+    if (visibleRef.current) sim.restart();
+  };
+
   useEffect(() => {
     reducedRef.current = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const family = canvasRef.current ? getComputedStyle(canvasRef.current).fontFamily : "";
     if (family) fontRef.current = family;
     const sim = createSimulation();
+    if (!reducedRef.current) sim.force("float", floatForce());
+    sim.alphaTarget(restTarget());
     sim.on("tick", () => {
-      if (autoFitRef.current) {
-        // Follow the settling layout until someone takes the controls.
+      // Follow the settling layout until someone takes the controls — but not the
+      // gentle float afterwards, or the whole view would keep breathing.
+      if (autoFitRef.current && sim.alpha() > FLOAT_ALPHA * 3) {
         const target = fitTransform();
         const t = tRef.current;
         tRef.current = { k: t.k + (target.k - t.k) * 0.12, x: t.x + (target.x - t.x) * 0.12, y: t.y + (target.y - t.y) * 0.12 };
@@ -358,10 +374,30 @@ export function NetworkCanvas({
     return () => {
       sim.stop();
       sim.on("tick", null);
+      // Reset the ids too: requestDraw skips while frameRef is non-zero, so a
+      // cancelled-but-remembered frame would silently block every later redraw
+      // (hover, selection, pan, wheel zoom) once the layout stopped ticking.
       cancelAnimationFrame(frameRef.current);
       cancelAnimationFrame(animRef.current);
+      frameRef.current = 0;
+      animRef.current = 0;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pause the floating layout while the canvas is out of view (e.g. scrolled past on the landing page).
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([entry]) => {
+      const sim = simRef.current;
+      visibleRef.current = entry.isIntersecting;
+      if (!sim || reducedRef.current) return;
+      if (entry.isIntersecting) sim.restart();
+      else sim.stop();
+    });
+    io.observe(wrap);
+    return () => io.disconnect();
   }, []);
 
   // Canvas size follows its box (and the screen's pixel density).
@@ -444,16 +480,16 @@ export function NetworkCanvas({
         draw();
         return;
       }
-      sim.alpha(0.25).restart();
+      kick(0.25);
     } else if (viewChanged) {
       // New window or grouping: let the layout travel to its new shape.
-      sim.alpha(0.6).restart();
+      kick(0.6);
     } else if (keysChanged) {
       // A club was approved or retired since the last poll.
-      sim.alpha(0.3).restart();
+      kick(0.3);
     } else {
-      // A poll with the same clubs: sizes and weights drift, positions stay.
-      sim.alpha(0.12).restart();
+      // A poll with the same clubs: sizes and weights drift and the map eases into them.
+      kick(0.12);
     }
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -562,7 +598,7 @@ export function NetworkCanvas({
     if (g?.mode === "drag") {
       g.node.fx = null;
       g.node.fy = null;
-      simRef.current?.alphaTarget(0);
+      simRef.current?.alphaTarget(restTarget());
     }
     gesture.current = { mode: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: t.k, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, tx: t.x, ty: t.y };
     autoFitRef.current = false;
@@ -649,7 +685,7 @@ export function NetworkCanvas({
     if (g.mode === "drag") {
       g.node.fx = null;
       g.node.fy = null;
-      simRef.current?.alphaTarget(0);
+      simRef.current?.alphaTarget(restTarget());
     }
     if (canvasRef.current) canvasRef.current.style.cursor = "grab";
     if (cancelled || g.moved) return;
