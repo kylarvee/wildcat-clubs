@@ -50,7 +50,7 @@ export async function ClubStats({ clubId, clubName, retired }: { clubId: string;
     <Card className="p-4 sm:p-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile icon={<UserCheck />} label="Active members" value={activity.activeMembers.toLocaleString("en-US")} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
-        <Tile icon={<Users />} label="Registered members" value={activity.registeredMembers.toLocaleString("en-US")} hint="Everyone who's joined" />
+        <Tile icon={<Users />} label="Registered members" value={activity.registeredMembers.toLocaleString("en-US")} hint="Students who've joined" />
         <Tile icon={<Repeat />} label="Retention" value={pct(metrics.retentionRate)} hint="Last month's attendees who came back" />
         <Tile icon={<Activity />} label="Club status" value={status.value} hint={status.hint} tone={status.tone} />
       </div>

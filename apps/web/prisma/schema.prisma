@@ -328,38 +328,41 @@ enum SuccessionMethod {
 }
 
 model Club {
-  id                      String           @id @default(cuid())
-  slug                    String           @unique
-  name                    String
-  type                    ClubType
-  status                  ClubStatus       @default(DRAFT)
-  scope                   ClubScope        @default(INDEPENDENT)
-  collegeId               String?
-  college                 College?         @relation(fields: [collegeId], references: [id])
-  departmentId            String?
-  department              Department?      @relation(fields: [departmentId], references: [id])
-  requestedDepartmentName String? // "Other" department typed by the founder; an admin adds it to the list
-  focusMajorId            String?
-  focusMajor              Major?           @relation(fields: [focusMajorId], references: [id])
-  focusOther              String? // discipline not in the majors list
-  shortDescription        String           @default("")
-  descriptionHtml         String?
-  logoUrl                 String?
-  logoColor               String           @default("#4b2e83")
-  contactEmail            String? // the club's Google account; Drive/Calendar/Chat sync runs as this
-  joinPolicy              JoinPolicy       @default(OPEN)
-  successionMethod        SuccessionMethod @default(SENIORITY)
-  autoApproveCohosts      Boolean          @default(false)
-  createdById             String
-  createdBy               User             @relation("ClubCreator", fields: [createdById], references: [id])
-  createdAt               DateTime         @default(now())
-  submittedAt             DateTime?
-  approvedAt              DateTime?
-  retiredAt               DateTime?
-  retiredReason           String?
-  googleDriveFolderId     String?
-  googleCalendarId        String?
-  googleChatSpaceId       String?
+  id                        String           @id @default(cuid())
+  slug                      String           @unique
+  name                      String
+  type                      ClubType
+  status                    ClubStatus       @default(DRAFT)
+  scope                     ClubScope        @default(INDEPENDENT)
+  collegeId                 String?
+  college                   College?         @relation(fields: [collegeId], references: [id])
+  departmentId              String?
+  department                Department?      @relation(fields: [departmentId], references: [id])
+  requestedDepartmentName   String? // "Other" department typed by the founder; an admin adds it to the list
+  focusMajorId              String?
+  focusMajor                Major?           @relation(fields: [focusMajorId], references: [id])
+  focusOther                String? // discipline not in the majors list
+  shortDescription          String           @default("")
+  descriptionHtml           String?
+  logoUrl                   String?
+  logoColor                 String           @default("#4b2e83")
+  contactEmail              String? // the club's Google account; Drive/Calendar/Chat sync runs as this…
+  /// …but only after an admin confirms the address is the club's own IT-provisioned account.
+  googleAccountVerifiedAt   DateTime?
+  googleAccountVerifiedById String?
+  joinPolicy                JoinPolicy       @default(OPEN)
+  successionMethod          SuccessionMethod @default(SENIORITY)
+  autoApproveCohosts        Boolean          @default(false)
+  createdById               String
+  createdBy                 User             @relation("ClubCreator", fields: [createdById], references: [id])
+  createdAt                 DateTime         @default(now())
+  submittedAt               DateTime?
+  approvedAt                DateTime?
+  retiredAt                 DateTime?
+  retiredReason             String?
+  googleDriveFolderId       String?
+  googleCalendarId          String?
+  googleChatSpaceId         String?
 
   documents            ClubDocument[]
   decisions            ClubDecision[]

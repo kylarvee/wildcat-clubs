@@ -53,10 +53,12 @@ export default async function MemberAttendancePage({ params }: { params: Promise
   // Only people connected to this club (members, past members, or guests who came).
   if (!membership && items.length === 0) notFound();
 
-  const [summary, monthly, quarterly, roles] = await Promise.all([
+  const [summary, monthly, quarterly, yearly, annual, roles] = await Promise.all([
     memberClubSummary(person.id, club.id),
     memberRetention(person.id, club.id, "month"),
     memberRetention(person.id, club.id, "quarter"),
+    memberRetention(person.id, club.id, "academicYear"),
+    memberRetention(person.id, club.id, "year"),
     db.roleAssignment.findMany({ where: { clubId: club.id, userId: person.id, endedAt: null }, select: { role: true, position: { select: { name: true } } } }),
   ]);
 
@@ -103,12 +105,17 @@ export default async function MemberAttendancePage({ params }: { params: Promise
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Stat label="Events attended" value={summary.attended} hint={lastAttended ? `last on ${fmtDate(lastAttended, "MMM d")}` : "Hasn't checked in yet"} />
         <Stat label="Attendance rate" value={pct(summary.rate)} hint={summary.heldSinceJoined ? `${summary.attended} of ${summary.heldSinceJoined} since getting involved` : "Counts events since they joined or first came"} />
+        <Stat label="Last attended" value={lastAttended ? fmtDate(lastAttended, "MMM d") : "—"} hint={lastAttended ? fmtLongDate(lastAttended) : "No check-ins"} className="col-span-2 lg:col-span-1" />
+      </div>
+      {/* Retention at the individual level, for every period the club tracker shows. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Monthly retention" value={pct(monthly.rate)} hint={monthly.periods ? `came in ${monthly.attendedPeriods} of ${monthly.periods} months` : "Since joining"} />
         <Stat label="Quarterly retention" value={pct(quarterly.rate)} hint={quarterly.periods ? `came in ${quarterly.attendedPeriods} of ${quarterly.periods} quarters` : "Since joining"} />
-        <Stat label="Last attended" value={lastAttended ? fmtDate(lastAttended, "MMM d") : "—"} hint={lastAttended ? fmtLongDate(lastAttended) : "No check-ins"} className="col-span-2 lg:col-span-1" />
+        <Stat label="Academic-year retention" value={pct(yearly.rate)} hint={yearly.periods ? `came in ${yearly.attendedPeriods} of ${yearly.periods} academic years` : "Since joining"} />
+        <Stat label="Annual retention" value={pct(annual.rate)} hint={annual.periods ? `came in ${annual.attendedPeriods} of ${annual.periods} years` : "Since joining"} />
       </div>
 
       <Card>

@@ -248,7 +248,8 @@ const activeAttendees = cache(async (key: string, atMs: number, membersOnly: boo
 
 async function registeredCounts(clubIds: string[]): Promise<Map<string, number>> {
   if (clubIds.length === 0) return new Map();
-  const rows = await db.membership.groupBy({ by: ["clubId"], where: { clubId: { in: clubIds }, status: "ACTIVE" }, _count: { _all: true } });
+  // "Registered students" (spec): advisors hold memberships too, but don't count toward the bar.
+  const rows = await db.membership.groupBy({ by: ["clubId"], where: { clubId: { in: clubIds }, status: "ACTIVE", user: { kind: "STUDENT" } }, _count: { _all: true } });
   return new Map(rows.map((r) => [r.clubId, r._count._all]));
 }
 
