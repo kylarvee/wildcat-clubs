@@ -11,7 +11,8 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed/index.ts",
     "db:reset": "prisma db push && tsx prisma/seed/index.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
