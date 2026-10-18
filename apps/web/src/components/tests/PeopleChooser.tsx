@@ -16,10 +16,12 @@ export function PeopleChooser({
   clubId,
   selected,
   onChange,
+  isForm = false,
 }: {
   clubId: string | null;
   selected: TestPersonOption[];
   onChange: (people: TestPersonOption[]) => void;
+  isForm?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<TestPersonOption[]>([]);
@@ -122,7 +124,7 @@ export function PeopleChooser({
             ))}
           </ul>
         ) : (
-          <p className="mt-1 text-xs text-ink-3">Search above to add the people who should take this test.</p>
+          <p className="mt-1 text-xs text-ink-3">Search above to add the people who should {isForm ? "fill out this form" : "take this test"}.</p>
         )}
       </div>
     </div>

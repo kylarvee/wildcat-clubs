@@ -1,4 +1,5 @@
 import "server-only";
+import type { TestStatus } from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarClock, Check, ClipboardList, Download, Eye, Hourglass, Repeat, Target, Timer, Users } from "lucide-react";
@@ -9,7 +10,7 @@ import { cycleForTest, editorPayload, testPeopleByIds } from "@/lib/domain/tests
 import { questionStats, reviewAttempt, reviewQueue, testResults, type QuestionStat, type ResultRow } from "@/lib/tests/queries";
 import { durationLabel, minutesLabel } from "@/lib/tests/deadlines";
 import { hasText } from "@/lib/tests/scoring";
-import { audienceLabel, fmtPercent, fmtPoints, isChoice, parseOptions, RECURRENCE_LABEL, RENEWAL_LABEL } from "@/lib/tests/types";
+import { audienceLabel, fmtPercent, fmtPoints, isChoice, parseOptions, RECURRENCE_LABEL, RENEWAL_LABEL, testNoun } from "@/lib/tests/types";
 import { fmtDate, fmtLongDate, fmtTime } from "@/lib/time";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink, buttonClasses } from "@/components/ui/button";
@@ -19,15 +20,18 @@ import { LinkTabs } from "@/components/ui/tabs";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { RichContent, RichContentText } from "@/components/rich/RichContent";
 import { AttemptRunner, type RunnerQuestion } from "@/components/tests/AttemptRunner";
+import { FormAnswers } from "@/components/tests/FormAnswers";
 import { GradingForm, type GradingItem } from "@/components/tests/GradingForm";
-import { ResultBadge, TestStatusBadge } from "@/components/tests/badges";
+import { FormBadge, ResultBadge, TestStatusBadge } from "@/components/tests/badges";
 import { TestBuilder } from "@/components/tests/TestBuilder";
 import type { TestScope } from "@/components/tests/scope";
 
 /**
  * The Test Tool's builder-side pages, shared by WSUSA (/admin/tests/…) and
  * clubs (/clubs/[slug]/manage/tests/…). Route files check permission and pass
- * the scope; these views make sure the test belongs to that scope.
+ * the scope; these views make sure the test belongs to that scope. For a form
+ * the results page is "Responses": who has submitted, who hasn't yet, who
+ * missed it, and each person's answers — no scores, pass rates or grading.
  */
 
 async function loadManagedTest(scope: TestScope, testId: string) {
@@ -48,7 +52,7 @@ function listLabel(scope: TestScope) {
   return scope.kind === "club" ? "Club tests" : "Tests";
 }
 
-function TestNav({ scope, testId }: { scope: TestScope; testId: string }) {
+function TestNav({ scope, testId, isForm }: { scope: TestScope; testId: string; isForm: boolean }) {
   const base = `${scope.basePath}/${testId}`;
   return (
     <LinkTabs
@@ -56,9 +60,18 @@ function TestNav({ scope, testId }: { scope: TestScope; testId: string }) {
       tabs={[
         { href: base, label: "Build", exact: true },
         { href: `${base}/preview`, label: "Preview" },
-        { href: `${base}/results`, label: "Results & grading" },
+        { href: `${base}/results`, label: isForm ? "Responses" : "Results & grading" },
       ]}
     />
+  );
+}
+
+function Badges({ test }: { test: { status: TestStatus; isForm: boolean } }) {
+  return (
+    <>
+      {test.isForm ? <FormBadge /> : null}
+      <TestStatusBadge status={test.status} />
+    </>
   );
 }
 
@@ -74,10 +87,10 @@ export async function TestEditorView({ scope, testId }: { scope: TestScope; test
       <PageHeader
         breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { label: test.title }]}
         title={test.title}
-        actions={<TestStatusBadge status={test.status} />}
+        actions={<Badges test={test} />}
         className="mb-4"
       />
-      <TestNav scope={scope} testId={testId} />
+      <TestNav scope={scope} testId={testId} isForm={test.isForm} />
       <TestBuilder
         key={test.id}
         scope={scope}
@@ -103,25 +116,35 @@ export async function TestPreviewView({ scope, testId }: { scope: TestScope; tes
   const points = questions.reduce((n, q) => n + q.points, 0);
   const runner: RunnerQuestion[] = questions.map((q) => ({ id: q.id, type: q.type, points: q.points, options: parseOptions(q.options), prompt: <RichContent html={q.promptHtml} /> }));
   const key = Object.fromEntries(questions.filter((q) => isChoice(q.type)).map((q) => [q.id, q.correctOptionIds]));
-  const facts = [
-    { icon: <Timer className="h-4 w-4" />, label: "Time", value: test.timeLimitMinutes ? minutesLabel(test.timeLimitMinutes) : "No time limit — the clock still runs" },
-    { icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} · ${points} ${points === 1 ? "point" : "points"}` },
-    { icon: <Target className="h-4 w-4" />, label: "Passing score", value: `${test.passingPercent}%` },
-    { icon: <Repeat className="h-4 w-4" />, label: "Attempts", value: test.maxAttempts === null ? "Unlimited" : `${test.maxAttempts}` },
-    ...(test.recurrence === "ONE_OFF" && test.closesAt ? [{ icon: <CalendarClock className="h-4 w-4" />, label: "Closes", value: `${fmtLongDate(test.closesAt)} at ${fmtTime(test.closesAt)}` }] : []),
-  ];
+  const form = test.isForm;
+  const closes = test.recurrence === "ONE_OFF" && test.closesAt ? [{ icon: <CalendarClock className="h-4 w-4" />, label: "Closes", value: `${fmtLongDate(test.closesAt)} at ${fmtTime(test.closesAt)}` }] : [];
+  const facts = form
+    ? [
+        { icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} · every one needs an answer` },
+        { icon: <Repeat className="h-4 w-4" />, label: "Responses", value: test.recurrence === "ONE_OFF" ? "One per person" : "One per person each round" },
+        ...closes,
+      ]
+    : [
+        { icon: <Timer className="h-4 w-4" />, label: "Time", value: test.timeLimitMinutes ? minutesLabel(test.timeLimitMinutes) : "No time limit — the clock still runs" },
+        { icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} · ${points} ${points === 1 ? "point" : "points"}` },
+        { icon: <Target className="h-4 w-4" />, label: "Passing score", value: `${test.passingPercent}%` },
+        { icon: <Repeat className="h-4 w-4" />, label: "Attempts", value: test.maxAttempts === null ? "Unlimited" : `${test.maxAttempts}` },
+        ...closes,
+      ];
+  // Forms have no clock to preview.
+  const previewDeadline = !form && test.timeLimitMinutes ? new Date(now.getTime() + test.timeLimitMinutes * 60_000) : null;
   return (
     <div>
       <PageHeader breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { href: `${scope.basePath}/${testId}`, label: test.title }, { label: "Preview" }]} title={test.title} className="mb-4" />
-      <TestNav scope={scope} testId={testId} />
-      <Callout tone="brand" icon={<Eye />} title="Preview as a taker" className="mb-6">
-        This is exactly what people see, with the saved version of the test. The clock runs, but nothing you answer is saved.
+      <TestNav scope={scope} testId={testId} isForm={form} />
+      <Callout tone="brand" icon={<Eye />} title={form ? "Preview as someone filling it out" : "Preview as a taker"} className="mb-6">
+        {form ? "This is exactly what people see, with the saved version of the form. Nothing you answer is saved." : "This is exactly what people see, with the saved version of the test. The clock runs, but nothing you answer is saved."}
       </Callout>
       <div className="mx-auto max-w-3xl space-y-6">
         <Card>
           <CardHeader title="Intro page" />
           <CardBody>
-            {test.introHtml.trim() ? <RichContent html={test.introHtml} /> : <p className="text-sm text-ink-3">No intro yet. People will see a short default note about how the test works.</p>}
+            {test.introHtml.trim() ? <RichContent html={test.introHtml} /> : <p className="text-sm text-ink-3">No intro yet. People will see a short default note about how the {testNoun(form)} works.</p>}
           </CardBody>
           <CardBody className="border-t border-line">
             <dl className="grid gap-3 sm:grid-cols-2">
@@ -143,9 +166,10 @@ export async function TestPreviewView({ scope, testId }: { scope: TestScope; tes
           <AttemptRunner
             mode="preview"
             attemptId={null}
+            isForm={form}
             title={test.title}
             startedAt={now.toISOString()}
-            deadlineAt={test.timeLimitMinutes ? new Date(now.getTime() + test.timeLimitMinutes * 60_000).toISOString() : null}
+            deadlineAt={previewDeadline?.toISOString() ?? null}
             serverNow={now.toISOString()}
             questions={runner}
             initialAnswers={{}}
@@ -167,45 +191,86 @@ export async function TestResultsView({ scope, testId, cycleParam }: { scope: Te
   const test = await loadManagedTest(scope, testId);
   const current = await cycleForTest(test);
   const cycleKey = cycleParam === "all" ? null : (cycleParam ?? current.key);
-  const [results, stats, queue] = await Promise.all([testResults(testId, cycleKey), questionStats(testId, cycleKey), reviewQueue(testId)]);
+  const [results, stats, queue] = await Promise.all([testResults(testId, cycleKey), questionStats(testId, cycleKey), test.isForm ? Promise.resolve([]) : reviewQueue(testId)]);
   const base = `${scope.basePath}/${testId}`;
   const s = results.stats;
   const cycleOptions = results.cycles.some((c) => c.key === current.key) ? results.cycles : [{ key: current.key, label: current.label, attempts: 0 }, ...results.cycles];
   const showCycles = !(cycleOptions.length === 1 && cycleOptions[0].key === "once");
   const exportHref = `/api/tests/${testId}/export?cycle=${encodeURIComponent(cycleKey ?? "all")}`;
+  const form = test.isForm;
+
+  const header = (
+    <div>
+      <PageHeader
+        breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { href: base, label: test.title }, { label: form ? "Responses" : "Results" }]}
+        title={test.title}
+        description={`${audienceLabel(test.audience, scope.kind, form)}${test.audience === "ROLE_REQUIREMENT" ? "" : ` · ${RECURRENCE_LABEL[test.recurrence]}`}${form ? "" : ` · pass at ${test.passingPercent}%`}`}
+        actions={<Badges test={test} />}
+        className="mb-4"
+      />
+      <TestNav scope={scope} testId={testId} isForm={form} />
+    </div>
+  );
+  const rounds = showCycles ? (
+    <nav aria-label="Round" className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-ink-3">Round:</span>
+      {cycleOptions.map((c) => (
+        <Link
+          key={c.key}
+          href={`${base}/results?cycle=${encodeURIComponent(c.key)}`}
+          aria-current={cycleKey === c.key ? "page" : undefined}
+          className={buttonClasses(cycleKey === c.key ? "secondary" : "ghost", "sm")}
+        >
+          {c.label}
+          {c.key === current.key ? " (current)" : ""}
+        </Link>
+      ))}
+      <Link href={`${base}/results?cycle=all`} aria-current={cycleKey === null ? "page" : undefined} className={buttonClasses(cycleKey === null ? "secondary" : "ghost", "sm")}>
+        All rounds
+      </Link>
+    </nav>
+  ) : null;
+  const exportLink = (label: string) =>
+    results.rows.length ? (
+      <a href={exportHref} className={buttonClasses("outline", "sm")} download>
+        <Download className="h-4 w-4" aria-hidden /> {label}
+      </a>
+    ) : null;
+
+  if (form) {
+    const count = (st: ResultRow["status"][]) => results.rows.filter((r) => st.includes(r.status)).length;
+    const submitted = count(["passed"]);
+    return (
+      <div className="space-y-8">
+        {header}
+        {rounds}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <Stat label="Submitted" value={submitted.toLocaleString()} hint={results.rows.length ? `of ${results.rows.length.toLocaleString()} ${results.rows.length === 1 ? "person" : "people"}` : "Nobody yet"} />
+          <Stat label="Not yet" value={count(["not-started", "in-progress"]).toLocaleString()} hint={s.inProgress ? `${s.inProgress} filling it out now` : "asked, not submitted"} />
+          <Stat label="Missed deadline" value={count(["missed"]).toLocaleString()} hint="and haven't submitted" className="col-span-2 md:col-span-1" />
+        </div>
+        <Section
+          title="People"
+          description={cycleKey === null ? "Everyone who filled it out or was asked to, in any round." : "Everyone who filled it out or was asked to in this round."}
+          action={exportLink("Export responses")}
+        >
+          {results.rows.length === 0 ? (
+            <EmptyState icon={<Users />} title="No one yet" description={test.status === "PUBLISHED" ? "Responses show up here as people submit the form." : "Publish the form to start collecting responses."} />
+          ) : (
+            <PeopleTable rows={results.rows} base={base} form />
+          )}
+        </Section>
+        <Section title="Question by question" description="How people answered each question in this view. Choices show how many picked each one.">
+          {stats.length === 0 ? <p className="text-sm text-ink-3">This form has no questions.</p> : <QuestionStatsList stats={stats} form />}
+        </Section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
-      <div>
-        <PageHeader
-          breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { href: base, label: test.title }, { label: "Results" }]}
-          title={test.title}
-          description={`${audienceLabel(test.audience, scope.kind)}${test.audience === "ROLE_REQUIREMENT" ? "" : ` · ${RECURRENCE_LABEL[test.recurrence]}`} · pass at ${test.passingPercent}%`}
-          actions={<TestStatusBadge status={test.status} />}
-          className="mb-4"
-        />
-        <TestNav scope={scope} testId={testId} />
-      </div>
-
-      {showCycles ? (
-        <nav aria-label="Round" className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-ink-3">Round:</span>
-          {cycleOptions.map((c) => (
-            <Link
-              key={c.key}
-              href={`${base}/results?cycle=${encodeURIComponent(c.key)}`}
-              aria-current={cycleKey === c.key ? "page" : undefined}
-              className={buttonClasses(cycleKey === c.key ? "secondary" : "ghost", "sm")}
-            >
-              {c.label}
-              {c.key === current.key ? " (current)" : ""}
-            </Link>
-          ))}
-          <Link href={`${base}/results?cycle=all`} aria-current={cycleKey === null ? "page" : undefined} className={buttonClasses(cycleKey === null ? "secondary" : "ghost", "sm")}>
-            All rounds
-          </Link>
-        </nav>
-      ) : null}
+      {header}
+      {rounds}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Attempts" value={s.attempts.toLocaleString()} hint={`${s.takers.toLocaleString()} ${s.takers === 1 ? "person" : "people"}`} />
@@ -252,13 +317,7 @@ export async function TestResultsView({ scope, testId, cycleParam }: { scope: Te
       <Section
         title="People"
         description={cycleKey === null ? "Everyone who took it or was asked to, in any round." : "Everyone who took it or was asked to in this round. A pass anywhere in the round counts."}
-        action={
-          results.rows.length ? (
-            <a href={exportHref} className={buttonClasses("outline", "sm")} download>
-              <Download className="h-4 w-4" aria-hidden /> Export CSV
-            </a>
-          ) : null
-        }
+        action={exportLink("Export CSV")}
       >
         {results.rows.length === 0 ? (
           <EmptyState icon={<Users />} title="No one yet" description={test.status === "PUBLISHED" ? "Results show up here as people take the test." : "Publish the test to start collecting results."} />
@@ -274,7 +333,55 @@ export async function TestResultsView({ scope, testId, cycleParam }: { scope: Te
   );
 }
 
-function PeopleTable({ rows, base }: { rows: ResultRow[]; base: string }) {
+function PeopleTable({ rows, base, form = false }: { rows: ResultRow[]; base: string; form?: boolean }) {
+  if (form) {
+    return (
+      <Table>
+        <THead>
+          <TR>
+            <TH>Person</TH>
+            <TH>Status</TH>
+            <TH className="hidden md:table-cell">Submitted</TH>
+            <TH>
+              <span className="sr-only">Answers</span>
+            </TH>
+          </TR>
+        </THead>
+        <TBody>
+          {rows.map((r) => {
+            const done = r.attempt && r.attempt.status !== "IN_PROGRESS";
+            return (
+              <TR key={r.person.id}>
+                <TD>
+                  <div className="flex items-center gap-2">
+                    <Avatar name={r.person.name} src={r.person.avatarUrl} color={r.person.avatarColor} size="xs" />
+                    <div className="min-w-0">
+                      <p className="max-w-[12rem] truncate font-medium">{r.person.name}</p>
+                      {r.dueAt && !done ? <p className="text-xs text-ink-3">Due {fmtDate(r.dueAt, "MMM d")}</p> : null}
+                    </div>
+                  </div>
+                </TD>
+                <TD>
+                  <ResultBadge status={r.status} form />
+                </TD>
+                <TD className="hidden whitespace-nowrap md:table-cell">
+                  {done && r.attempt?.submittedAt ? `${fmtDate(r.attempt.submittedAt, "MMM d")}, ${fmtTime(r.attempt.submittedAt)}` : "—"}
+                  {done && r.attempt?.autoSubmitted ? <span className="text-xs text-ink-3"> · when it closed</span> : null}
+                </TD>
+                <TD className="text-right">
+                  {done ? (
+                    <Link href={`${base}/review/${r.attempt!.id}`} className="whitespace-nowrap text-sm font-medium text-brand-600 hover:underline">
+                      Answers<span className="sr-only"> from {r.person.name}</span>
+                    </Link>
+                  ) : null}
+                </TD>
+              </TR>
+            );
+          })}
+        </TBody>
+      </Table>
+    );
+  }
   return (
     <Table>
       <THead>
@@ -333,7 +440,7 @@ function PeopleTable({ rows, base }: { rows: ResultRow[]; base: string }) {
  * its count and share as text plus a "Correct" mark, so color is never the
  * only cue.
  */
-function QuestionStatsList({ stats }: { stats: QuestionStat[] }) {
+function QuestionStatsList({ stats, form = false }: { stats: QuestionStat[]; form?: boolean }) {
   return (
     <ol className="space-y-3">
       {stats.map((q, i) => {
@@ -344,25 +451,30 @@ function QuestionStatsList({ stats }: { stats: QuestionStat[] }) {
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium uppercase tracking-wide text-ink-3">
-                    Question {i + 1} · {q.points} {q.points === 1 ? "pt" : "pts"}
+                    Question {i + 1}
+                    {form ? "" : ` · ${q.points} ${q.points === 1 ? "pt" : "pts"}`}
                   </p>
                   <p className="mt-0.5 text-sm text-ink">
                     <RichContentText html={q.promptHtml} max={220} />
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-xl font-semibold text-ink">{headline === null ? "—" : `${Math.round(headline * 100)}%`}</p>
-                  <p className="text-xs text-ink-3">{isChoice(q.type) ? "got it right" : "average points"}</p>
-                </div>
+                {form ? null : (
+                  <div className="text-right">
+                    <p className="text-xl font-semibold text-ink">{headline === null ? "—" : `${Math.round(headline * 100)}%`}</p>
+                    <p className="text-xs text-ink-3">{isChoice(q.type) ? "got it right" : "average points"}</p>
+                  </div>
+                )}
               </div>
               {isChoice(q.type) ? (
                 <ul className="mt-3 space-y-2" aria-label={`Answers to question ${i + 1}`}>
                   {q.options.map((o) => {
                     const share = q.answered ? o.picked / q.answered : 0;
+                    // Forms have no right answer, so every bar gets the same emphasis.
+                    const strong = form || o.correct;
                     return (
                       <li key={o.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
                         <span className="flex min-w-0 items-center gap-1.5 text-sm text-ink-2">
-                          {o.correct ? <Check className="h-4 w-4 shrink-0 text-success" aria-label="Correct answer" /> : <span className="inline-block h-4 w-4 shrink-0" aria-hidden />}
+                          {o.correct && !form ? <Check className="h-4 w-4 shrink-0 text-success" aria-label="Correct answer" /> : form ? null : <span className="inline-block h-4 w-4 shrink-0" aria-hidden />}
                           <span className="truncate" title={o.text}>
                             {o.text}
                           </span>
@@ -370,7 +482,7 @@ function QuestionStatsList({ stats }: { stats: QuestionStat[] }) {
                         <span className="col-span-2 row-start-2 h-2.5 sm:col-span-1 sm:row-start-auto" aria-hidden>
                           <span
                             className="block h-full rounded-r-[4px]"
-                            style={{ width: `${Math.max(share * 100, o.picked ? 1 : 0)}%`, background: o.correct ? "var(--color-brand-600)" : "#a8a1b0" }}
+                            style={{ width: `${Math.max(share * 100, o.picked ? 1 : 0)}%`, background: strong ? "var(--color-brand-600)" : "#a8a1b0" }}
                           />
                         </span>
                         <span className="text-right text-sm tabular-nums text-ink-2">
@@ -380,6 +492,10 @@ function QuestionStatsList({ stats }: { stats: QuestionStat[] }) {
                     );
                   })}
                 </ul>
+              ) : form ? (
+                <p className="mt-2 text-sm text-ink-3">
+                  {q.answered} written {q.answered === 1 ? "answer" : "answers"} · open someone&apos;s answers from the People list
+                </p>
               ) : (
                 <p className="mt-2 text-sm text-ink-3">
                   {q.answered} written {q.answered === 1 ? "answer" : "answers"} · {q.scored} scored
@@ -408,8 +524,34 @@ export async function TestReviewView({ scope, testId, attemptId, actor }: { scop
       <div>
         <PageHeader breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { href: `${scope.basePath}/${testId}/results`, label: test.title }, { label: attempt.user.name }]} title={attempt.user.name} />
         <Callout tone="info" title="Still in progress">
-          {attempt.user.name} hasn&apos;t handed this attempt in yet. You can grade it once they do (or when their time runs out).
+          {test.isForm
+            ? `${attempt.user.name} hasn't submitted this form yet. Their answers show here once they do.`
+            : `${attempt.user.name} hasn't handed this attempt in yet. You can grade it once they do (or when their time runs out).`}
         </Callout>
+      </div>
+    );
+  }
+  if (test.isForm) {
+    const responsesHref = `${scope.basePath}/${testId}/results`;
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          breadcrumbs={[{ href: scope.basePath, label: listLabel(scope) }, { href: responsesHref, label: test.title }, { label: attempt.user.name }]}
+          title={attempt.user.name}
+          description={[
+            attempt.submittedAt ? `Submitted ${fmtDate(attempt.submittedAt, "EEE, MMM d")} at ${fmtTime(attempt.submittedAt)}` : null,
+            attempt.autoSubmitted ? "handed in as-is when the form closed" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          actions={<ResultBadge status="passed" form />}
+        />
+        <FormAnswers items={items.map((it) => ({ questionId: it.questionId, type: it.type, promptHtml: it.promptHtml, options: it.options, text: it.text }))} answerLabel="Their answer" />
+        <p className="text-sm">
+          <Link href={responsesHref} className="font-medium text-brand-600 hover:underline">
+            Back to responses
+          </Link>
+        </p>
       </div>
     );
   }

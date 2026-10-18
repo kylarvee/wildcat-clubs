@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, CheckCircle2, Hourglass, Loader2, MoreHorizontal, Pencil, Trash2, Undo2, UserRound, Users, XCircle } from "lucide-react";
+import { ArrowRight, CalendarClock, CheckCircle2, Hourglass, Loader2, MoreHorizontal, Pencil, ShieldAlert, Trash2, Undo2, UserRound, Users, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClubLogo } from "@/components/ui/avatar";
@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { toast } from "@/components/ui/misc";
 import { PersonalTaskDialog } from "@/components/tasks/PersonalTaskDialog";
-import { KIND_LABEL, KIND_TONE, SELF_CLOSING_NOTE } from "@/components/tasks/labels";
+import { KIND_LABEL, KIND_TONE, REQUIRED_LABEL, SELF_CLOSING_NOTE } from "@/components/tasks/labels";
 import { cancelClubTaskAction, deletePersonalTaskAction, setTaskDoneAction } from "@/app/tasks/actions";
 import type { TaskItem } from "@/components/tasks/items";
 
@@ -120,8 +120,8 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
             <span className="sr-only">Done</span>
           </span>
         ) : (
-          <span className="flex h-5 w-5 items-center justify-center text-ink-3" title={note}>
-            <Hourglass className="h-4 w-4" aria-hidden />
+          <span className={cn("flex h-5 w-5 items-center justify-center", task.required ? "text-danger" : "text-ink-3")} title={note}>
+            {task.required ? <ShieldAlert className="h-4 w-4" aria-hidden /> : <Hourglass className="h-4 w-4" aria-hidden />}
             {/* The full rows spell the note out below; compact rows only have this. */}
             {compact ? <span className="sr-only">{note}</span> : null}
           </span>
@@ -186,7 +186,13 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
         {task.description && !compact ? <p className="mt-1 whitespace-pre-line text-sm text-ink-2 [overflow-wrap:anywhere]">{task.description}</p> : null}
 
         <div className={cn("flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-3", compact ? "mt-1" : "mt-2")}>
-          <Badge tone={KIND_TONE[task.kind]}>{KIND_LABEL[task.kind]}</Badge>
+          {task.required ? (
+            <Badge tone="danger" className="font-semibold">
+              {compact ? "Required" : REQUIRED_LABEL}
+            </Badge>
+          ) : (
+            <Badge tone={KIND_TONE[task.kind]}>{KIND_LABEL[task.kind]}</Badge>
+          )}
           {showClub && task.club ? (
             <Link href={`/clubs/${task.club.slug}`} className="inline-flex min-w-0 items-center gap-1.5 hover:text-brand-600 hover:underline">
               <ClubLogo name={task.club.name} src={task.club.logoUrl} color={task.club.logoColor} size="sm" className="h-4 w-4 rounded text-[8px]" />

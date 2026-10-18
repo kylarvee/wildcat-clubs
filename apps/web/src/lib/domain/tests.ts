@@ -20,19 +20,22 @@ import { fmtDate, fmtLongDate } from "@/lib/time";
 import { renewalCycle, testCycle, type Cycle } from "@/lib/tests/cycles";
 import { acceptsAnswers, assignmentDueAt, attemptDeadline } from "@/lib/tests/deadlines";
 import { LIMITS, isTempId, testProblems, type EditorTest } from "@/lib/tests/editor";
-import { autoPoints, clampPoints, scoreAttempt, type ScoringQuestion } from "@/lib/tests/scoring";
+import { autoPoints, clampPoints, scoreAttempt, unansweredQuestionIds, type ScoringQuestion } from "@/lib/tests/scoring";
 import {
   ASSIGNED_AUDIENCES,
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
-  DEFAULT_AUTOMATIONS,
+  REQUIREMENT_AUDIENCE_LABEL,
   automationAllowed,
+  defaultAutomations,
   fmtPercent,
   isChoice,
   isClubAction,
   isOpen,
   parseAutomations,
   parseOptions,
+  testNoun,
+  testVerb,
   type Automation,
   type AutomationAction,
   type AutomationTrigger,
@@ -54,6 +57,12 @@ import {
  * Scheduled jobs (lib/jobs) start recurring cycles, mark missed deadlines and
  * submit abandoned attempts.
  *
+ * Forms (Test.isForm) are tests with grading switched off: one response per
+ * round, no clock, every question answered (auto-submitted ones are taken
+ * as-is). Submitting grades the attempt at once as passed with no score, so
+ * the same outcomes run: the assignment and its task complete, requirements
+ * that use the form are met, and PASSED ("Submitted") automations run.
+ *
  * Task sources this module opens and closes:
  *   "testAssignment" (sourceId = TestAssignment.id) — a person owes a test
  *   "testAttempt"    (sourceId = TestAttempt.id)    — open answers to grade
@@ -72,6 +81,10 @@ async function loadTest(testId: string): Promise<TestRow> {
   if (!t) throw notFound("Test");
   return t;
 }
+
+// A form is one response per round and never timed, whatever its stored columns say.
+const maxAttemptsOf = (t: Pick<Test, "isForm" | "maxAttempts">) => (t.isForm ? 1 : t.maxAttempts);
+const timeLimitOf = (t: Pick<Test, "isForm" | "timeLimitMinutes">) => (t.isForm ? null : t.timeLimitMinutes);
 
 // ─── Permission ──────────────────────────────────────────────────────────────
 
@@ -156,7 +169,7 @@ function isOpenForTaking(test: TestRow, now: Date) {
 }
 
 /**
- * Closes the "Take: …" tasks of these assignments. MISSED assignments keep
+ * Closes the "Take: …" / "Fill out: …" tasks of these assignments. MISSED assignments keep
  * their task open while the test can still be taken late, so every path that
  * ends someone's chance (released, archived, closed, out of attempts) closes
  * theirs too, without changing the MISSED record.
@@ -222,16 +235,19 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
   const fresh = [...missing, ...returning];
   if (fresh.length) {
     const rows = await db.testAssignment.findMany({ where: { testId, cycleKey: cycle.key, userId: { in: fresh }, status: "ASSIGNED" }, select: { id: true, userId: true, dueAt: true } });
+    const noun = testNoun(test.isForm);
     await db.task.createMany({
       data: rows.map((a) => ({
         kind: "REQUIREMENT" as const,
-        title: `Take: ${test.title}`,
+        title: `${test.isForm ? "Fill out" : "Take"}: ${test.title}`,
         description: test.club ? `Assigned by ${test.club.name}.` : "Assigned by WSUSA.",
         assigneeType: "USER" as const,
         assigneeId: a.userId,
         clubId: test.clubId,
         href: `/tests/${test.id}`,
         dueAt: a.dueAt,
+        // Anything WSUSA assigns is required; a club's own tests and forms aren't.
+        required: test.clubId === null,
         sourceType: "testAssignment",
         sourceId: a.id,
       })),
@@ -239,8 +255,8 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
     await notify({
       userIds: rows.map((r) => r.userId),
       kind: "test.assigned",
-      title: `New test: ${test.title}`,
-      body: `${test.club ? `${test.club.name} asked you` : "WSUSA asked you"} to take this test by ${fmtDate(dueAt, "EEE, MMM d")}.`,
+      title: `New ${noun}: ${test.title}`,
+      body: `${test.club ? `${test.club.name} asked you` : "WSUSA asked you"} to ${testVerb(test.isForm)} this ${noun} by ${fmtDate(dueAt, "EEE, MMM d")}.`,
       href: `/tests/${test.id}`,
       // Campus-wide tests reach hundreds of people: in-app and push only.
       email: rows.length <= 60,
@@ -254,10 +270,11 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
 
 const CreateInput = z.object({
   clubId: z.string().min(1).nullable(),
-  title: z.string().trim().min(3, "Give the test a title (at least 3 characters).").max(LIMITS.title, `Titles can be up to ${LIMITS.title} characters.`),
+  title: z.string().trim().min(3, "Give it a title (at least 3 characters).").max(LIMITS.title, `Titles can be up to ${LIMITS.title} characters.`),
+  isForm: z.boolean().optional().default(false),
 });
 
-/** Start a new draft test. University tests start OPEN; club tests start assigned to the club's members. */
+/** Start a new draft test or form. University ones start OPEN; club ones start assigned to the club's members. */
 export async function createTest(actor: Actor | null, input: unknown): Promise<{ id: string }> {
   const v = parse(CreateInput, input);
   const a = await assertCanManageTest(actor, { clubId: v.clubId });
@@ -265,14 +282,16 @@ export async function createTest(actor: Actor | null, input: unknown): Promise<{
     data: {
       clubId: v.clubId,
       title: v.title,
+      isForm: v.isForm,
       audience: v.clubId ? "CLUB_MEMBERS" : "OPEN",
-      timeLimitMinutes: 30,
+      timeLimitMinutes: v.isForm ? null : 30,
       passingPercent: 80,
-      automations: DEFAULT_AUTOMATIONS as unknown as Prisma.InputJsonValue,
+      maxAttempts: v.isForm ? 1 : null,
+      automations: defaultAutomations(v.isForm) as unknown as Prisma.InputJsonValue,
       createdById: a.id,
     },
   });
-  await logActivity({ actorId: a.id, action: "test.created", entityType: "test", entityId: test.id, clubId: v.clubId, data: { title: test.title } });
+  await logActivity({ actorId: a.id, action: "test.created", entityType: "test", entityId: test.id, clubId: v.clubId, data: { title: test.title, isForm: v.isForm } });
   return { id: test.id };
 }
 
@@ -290,6 +309,7 @@ const QuestionInput = z.object({
 });
 
 const SaveInput = z.object({
+  isForm: z.boolean(),
   title: z.string().trim().max(LIMITS.title, `Titles can be up to ${LIMITS.title} characters.`),
   introHtml: z.string().max(200_000, "The intro page is too long."),
   timeLimitMinutes: z.number().int().min(1).max(LIMITS.timeLimit).nullable(),
@@ -304,12 +324,18 @@ const SaveInput = z.object({
   questions: z.array(QuestionInput).max(LIMITS.questions, `Tests can have up to ${LIMITS.questions} questions.`),
 });
 
-/** Normalizes editor input into what we store (sanitized HTML, trimmed options, valid correct ids). */
+/**
+ * Normalizes editor input into what we store (sanitized HTML, trimmed options, valid correct ids).
+ * Forms keep nothing about grading: no time limit, one response, no correct or model answers, 1 point each.
+ */
 function normalize(v: z.infer<typeof SaveInput>): EditorTest {
+  const form = v.isForm;
   return {
     ...v,
     title: v.title.trim(),
     introHtml: sanitizeRichHtml(v.introHtml),
+    timeLimitMinutes: form ? null : v.timeLimitMinutes,
+    maxAttempts: form ? 1 : v.maxAttempts,
     closesAt: v.recurrence === "ONE_OFF" ? v.closesAt : null,
     automations: parseAutomations(v.automations),
     selectedUserIds: [...new Set(v.selectedUserIds)],
@@ -318,7 +344,7 @@ function normalize(v: z.infer<typeof SaveInput>): EditorTest {
       const options = choice ? q.options.map((o) => ({ id: o.id, text: o.text.trim() })) : [];
       const ids = new Set(options.map((o) => o.id));
       if (ids.size !== options.length) throw invalid("Two answer choices share an id. Reload the page and try again.");
-      let correct = choice ? [...new Set(q.correctOptionIds)].filter((id) => ids.has(id)) : [];
+      let correct = choice && !form ? [...new Set(q.correctOptionIds)].filter((id) => ids.has(id)) : [];
       if (q.type === "SINGLE_CHOICE") correct = correct.slice(0, 1);
       return {
         id: q.id,
@@ -326,8 +352,8 @@ function normalize(v: z.infer<typeof SaveInput>): EditorTest {
         promptHtml: sanitizeRichHtml(q.promptHtml),
         options,
         correctOptionIds: correct,
-        modelAnswer: isOpen(q.type) ? q.modelAnswer.trim() : "",
-        points: q.points,
+        modelAnswer: isOpen(q.type) && !form ? q.modelAnswer.trim() : "",
+        points: form ? 1 : q.points,
         answerCount: 0,
       };
     }),
@@ -344,24 +370,30 @@ function firstProblems(problems: { message: string }[], max = 3) {
  * Saves the whole editor (settings, automations, questions in order). Drafts
  * may be incomplete; a published test must stay publishable. Questions that
  * already have answers can't be removed or switched between choice and open
- * types, so past results keep making sense.
+ * types, so past results keep making sense. Switching between a test and a
+ * form is only possible while it's a draft nobody has started.
  */
 export async function saveTest(actor: Actor | null, testId: string, input: unknown): Promise<{ questionIds: Record<string, string> }> {
   const test = await loadTest(testId);
   const a = await assertCanManageTest(actor, test);
   const v = normalize(parse(SaveInput, input));
   const scope = test.clubId ? "club" : "university";
+  const noun = testNoun(v.isForm);
+  if (v.isForm !== test.isForm) {
+    const started = test.status !== "DRAFT" || (await db.testAttempt.count({ where: { testId } })) > 0;
+    if (started) throw invalid("Only a draft nobody has started can switch between a test and a form. Make a copy and switch the copy instead.");
+  }
   if (test.status === "PUBLISHED") {
     const problems = testProblems(v, scope);
-    if (problems.length) throw invalid(`This test is live, so it has to stay complete. ${firstProblems(problems)}`);
+    if (problems.length) throw invalid(`This ${noun} is live, so it has to stay complete. ${firstProblems(problems)}`);
   } else if (v.title.length < 3) {
-    throw invalid("Give the test a title (at least 3 characters).");
+    throw invalid(`Give the ${noun} a title (at least 3 characters).`);
   }
   const closesAt = v.closesAt ? new Date(v.closesAt) : null;
   if (closesAt && test.closesAt?.getTime() !== closesAt.getTime() && closesAt <= new Date()) throw invalid("Choose a closing time in the future.");
   const allowed = scope === "club" ? ["CLUB_MEMBERS", "SELECTED_USERS", "OPEN"] : ["ROLE_REQUIREMENT", "ALL_STUDENTS", "SELECTED_USERS", "OPEN"];
-  if (!allowed.includes(v.audience)) throw invalid("That audience isn't available for this test.");
-  if (v.automations.some((x) => !automationAllowed(x, scope))) throw invalid("One of the automations can't run after that result. Pick a different step for it.");
+  if (!allowed.includes(v.audience)) throw invalid(`That audience isn't available for this ${noun}.`);
+  if (v.automations.some((x) => !automationAllowed(x, scope, v.isForm))) throw invalid("One of the automations can't run after that result. Pick a different step for it.");
   if (test.clubId) {
     // Club steps run in the creator's name, so adding one takes the permission to take that step by hand
     // (otherwise anyone with the Tests permission could approve members or pause officers through a test).
@@ -369,15 +401,15 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
     const added = new Set(v.automations.filter((x) => isClubAction(x.action) && !had.has(`${x.trigger}:${x.action}`)).map((x) => x.action));
     if (added.size) {
       const access = await getClubAccess(a, test.clubId);
-      if (added.has("APPROVE_JOIN_REQUEST") && !access?.capabilities.has("roster")) throw forbidden("Only people who approve join requests can make a test approve them.");
+      if (added.has("APPROVE_JOIN_REQUEST") && !access?.capabilities.has("roster")) throw forbidden(`Only people who approve join requests can make a ${noun} approve them.`);
       if ((added.has("PAUSE_PERMISSIONS") || added.has("RESUME_PERMISSIONS")) && !access?.assignableRoles.includes("OFFICER")) {
-        throw forbidden("Only the President, a Vice President or an advisor can make a test change officer permissions.");
+        throw forbidden(`Only the President, a Vice President or an advisor can make a ${noun} change officer permissions.`);
       }
     }
   }
   if (test.audience === "ROLE_REQUIREMENT" && v.audience !== "ROLE_REQUIREMENT") {
     const req = await db.roleRequirement.findFirst({ where: { testId, active: true }, select: { name: true } });
-    if (req) throw invalid(`“${req.name}” uses this test, so its audience has to stay “Student leaders”. Turn that requirement off first.`);
+    if (req) throw invalid(`“${req.name}” uses this ${noun}, so its audience has to stay “${REQUIREMENT_AUDIENCE_LABEL}”. Turn that requirement off first.`);
   }
 
   // Validate the selection: real, active people (club members for club tests).
@@ -396,7 +428,7 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
   const keep = new Set(v.questions.filter((q) => !isTempId(q.id) && existingById.has(q.id)).map((q) => q.id));
   const removed = existing.filter((q) => !keep.has(q.id));
   const answered = removed.filter((q) => q._count.answers > 0);
-  if (answered.length) throw invalid(`${answered.length === 1 ? "A question you removed has" : `${answered.length} questions you removed have`} answers from people who took this test, so ${answered.length === 1 ? "it" : "they"} can't be deleted. Edit the wording instead, or make a copy of the test.`);
+  if (answered.length) throw invalid(`${answered.length === 1 ? "A question you removed has" : `${answered.length} questions you removed have`} answers from people who ${v.isForm ? "filled out this form" : "took this test"}, so ${answered.length === 1 ? "it" : "they"} can't be deleted. Edit the wording instead, or make a copy of the ${noun}.`);
   for (const q of v.questions) {
     const prev = existingById.get(q.id);
     if (prev && prev._count.answers > 0 && isChoice(prev.type) !== isChoice(q.type)) {
@@ -429,6 +461,7 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
     await tx.test.update({
       where: { id: testId },
       data: {
+        isForm: v.isForm,
         title: v.title,
         introHtml: v.introHtml,
         timeLimitMinutes: v.timeLimitMinutes,
@@ -441,7 +474,7 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
         automations: v.automations as unknown as Prisma.InputJsonValue,
       },
     });
-    await logActivity({ actorId: a.id, action: "test.updated", entityType: "test", entityId: testId, clubId: test.clubId, data: { questions: v.questions.length, audience: v.audience } }, tx);
+    await logActivity({ actorId: a.id, action: "test.updated", entityType: "test", entityId: testId, clubId: test.clubId, data: { questions: v.questions.length, audience: v.audience, isForm: v.isForm } }, tx);
   });
 
   if (selection) {
@@ -479,6 +512,7 @@ export async function editorPayload(testId: string): Promise<EditorTest> {
   });
   if (!test) throw notFound("Test");
   return {
+    isForm: test.isForm,
     title: test.title,
     introHtml: test.introHtml,
     timeLimitMinutes: test.timeLimitMinutes,
@@ -508,7 +542,7 @@ export async function publishTest(actor: Actor | null, testId: string): Promise<
   const test = await loadTest(testId);
   const a = await assertCanManageTest(actor, test);
   if (test.status === "PUBLISHED") return { assigned: 0 };
-  if (test.club && test.club.status !== "APPROVED") throw invalid("Club tests can be published once WSUSA approves the club.");
+  if (test.club && test.club.status !== "APPROVED") throw invalid(`Club ${testNoun(test.isForm)}s can be published once WSUSA approves the club.`);
   const payload = await editorPayload(testId);
   const problems = testProblems(payload, test.clubId ? "club" : "university");
   if (problems.length) throw invalid(`Almost there. ${firstProblems(problems)}`);
@@ -525,10 +559,10 @@ export async function archiveTest(actor: Actor | null, testId: string): Promise<
   const a = await assertCanManageTest(actor, test);
   if (test.status === "ARCHIVED") return;
   const req = await db.roleRequirement.findFirst({ where: { testId, active: true }, select: { name: true } });
-  if (req) throw invalid(`“${req.name}” requires this test. Turn that requirement off in Officer requirements first.`);
+  if (req) throw invalid(`“${req.name}” requires this ${testNoun(test.isForm)}. Turn that requirement off in Admin → Requirements first.`);
   const now = new Date();
   await db.test.update({ where: { id: testId }, data: { status: "ARCHIVED" } });
-  // Open assignments are excused; missed ones stay missed. Both lose their "Take: …" task.
+  // Open assignments are excused; missed ones stay missed. Both lose their "Take: …" / "Fill out: …" task.
   const owing = await db.testAssignment.findMany({ where: { testId, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true, status: true } });
   const open = owing.filter((o) => o.status === "ASSIGNED");
   if (open.length) await db.testAssignment.updateMany({ where: { id: { in: open.map((o) => o.id) } }, data: { status: "EXCUSED", resolvedAt: now } });
@@ -546,6 +580,7 @@ export async function duplicateTest(actor: Actor | null, testId: string): Promis
     data: {
       clubId: test.clubId,
       title: `Copy of ${test.title}`.slice(0, LIMITS.title),
+      isForm: test.isForm,
       introHtml: test.introHtml,
       timeLimitMinutes: test.timeLimitMinutes,
       passingPercent: test.passingPercent,
@@ -578,10 +613,11 @@ export async function duplicateTest(actor: Actor | null, testId: string): Promis
 export async function deleteTest(actor: Actor | null, testId: string): Promise<void> {
   const test = await loadTest(testId);
   const a = await assertCanManageTest(actor, test);
-  if (test.status !== "DRAFT") throw invalid("Only drafts can be deleted. Archive a published test instead — its results stay.");
+  const noun = testNoun(test.isForm);
+  if (test.status !== "DRAFT") throw invalid(`Only drafts can be deleted. Archive a published ${noun} instead — its ${test.isForm ? "responses" : "results"} stay.`);
   const attempts = await db.testAttempt.count({ where: { testId } });
-  if (attempts) throw invalid("Someone has already taken this test, so it can't be deleted. Archive it instead.");
-  if (await db.roleRequirement.count({ where: { testId } })) throw invalid("An officer requirement points at this test. Change the requirement first.");
+  if (attempts) throw invalid(`Someone has already ${test.isForm ? "filled out this form" : "taken this test"}, so it can't be deleted. Archive it instead.`);
+  if (await db.roleRequirement.count({ where: { testId } })) throw invalid(`A WSUSA requirement points at this ${noun}. Change the requirement first.`);
   await db.test.delete({ where: { id: testId } });
   await logActivity({ actorId: a.id, action: "test.deleted", entityType: "test", entityId: testId, clubId: test.clubId, data: { title: test.title } });
 }
@@ -632,6 +668,8 @@ async function inAudience(actor: Actor, test: TestRow, hasAssignment: boolean): 
       const reqs = await db.roleRequirement.findMany({ where: { testId: test.id, active: true }, select: { appliesTo: true } });
       const roles = [...new Set(reqs.flatMap((r) => r.appliesTo))];
       if (!roles.length) return false;
+      // Requirements can apply to members as well as officers.
+      if (roles.includes("MEMBER") && (await db.membership.count({ where: { userId: actor.id, status: "ACTIVE", club: { status: "APPROVED" } } })) > 0) return true;
       return (await db.roleAssignment.count({ where: { userId: actor.id, endedAt: null, role: { in: roles }, club: { status: "APPROVED" } } })) > 0;
     }
   }
@@ -641,8 +679,11 @@ async function inAudience(actor: Actor, test: TestRow, hasAssignment: boolean): 
 export async function takerState(actor: Actor | null, testId: string, now: Date = new Date()): Promise<TakerState> {
   const test = await loadTest(testId);
   const cycle = await cycleForTest(test, now);
-  const base = { test, cycle, attemptsUsed: 0, attemptsLeft: test.maxAttempts, inProgress: null, latest: null, passed: null, assignment: null, deadlineIfStarted: attemptDeadline(now, test.timeLimitMinutes, test.recurrence === "ONE_OFF" ? test.closesAt : null) };
-  if (!actor) return { ...base, canTake: false, block: { reason: "signin", message: "Sign in with your Weber State account to take this test." } };
+  const maxAttempts = maxAttemptsOf(test);
+  const noun = testNoun(test.isForm);
+  const doIt = `${testVerb(test.isForm)} this ${noun}`;
+  const base = { test, cycle, attemptsUsed: 0, attemptsLeft: maxAttempts, inProgress: null, latest: null, passed: null, assignment: null, deadlineIfStarted: attemptDeadline(now, timeLimitOf(test), test.recurrence === "ONE_OFF" ? test.closesAt : null) };
+  if (!actor) return { ...base, canTake: false, block: { reason: "signin", message: `Sign in with your Weber State account to ${doIt}.` } };
 
   const [attempts, assignment] = await Promise.all([
     db.testAttempt.findMany({ where: { testId, userId: actor.id, cycleKey: cycle.key }, orderBy: { startedAt: "desc" }, select: { id: true, status: true, scorePercent: true, passed: true, submittedAt: true, startedAt: true, deadlineAt: true } }),
@@ -651,16 +692,17 @@ export async function takerState(actor: Actor | null, testId: string, now: Date 
   const inProgress = attempts.find((x) => x.status === "IN_PROGRESS") ?? null;
   const latest = attempts.find((x) => x.status !== "IN_PROGRESS") ?? null;
   const passed = attempts.find((x) => x.passed) ?? null;
-  const attemptsLeft = test.maxAttempts === null ? null : Math.max(0, test.maxAttempts - attempts.length);
+  const attemptsLeft = maxAttempts === null ? null : Math.max(0, maxAttempts - attempts.length);
   const state = { ...base, attemptsUsed: attempts.length, attemptsLeft, inProgress, latest, passed, assignment: assignment && assignment.status !== "EXCUSED" ? assignment : null };
+  const round = cycle.key === "once" ? "" : ` for ${cycle.label}`;
 
   const block = (reason: TakeBlock, message: string) => ({ ...state, canTake: false, block: { reason, message } });
   if (inProgress) return { ...state, canTake: true, block: null }; // they can always go back to an attempt in progress
-  if (actor.status !== "ACTIVE") return block("inactive", "Only active Weber State accounts can take tests.");
-  if (test.status === "DRAFT") return block("unpublished", "This test isn't published yet.");
-  if (test.status === "ARCHIVED") return block("closed", "This test has been retired and can't be taken anymore.");
-  if (test.club && test.club.status !== "APPROVED") return block("closed", "This club's tests aren't available right now.");
-  if (test.recurrence === "ONE_OFF" && test.closesAt && test.closesAt <= now) return block("closed", `This test closed on ${fmtLongDate(test.closesAt)}.`);
+  if (actor.status !== "ACTIVE") return block("inactive", `Only active Weber State accounts can ${testVerb(test.isForm)} ${noun}s.`);
+  if (test.status === "DRAFT") return block("unpublished", `This ${noun} isn't published yet.`);
+  if (test.status === "ARCHIVED") return block("closed", `This ${noun} has been retired and can't be ${test.isForm ? "filled out" : "taken"} anymore.`);
+  if (test.club && test.club.status !== "APPROVED") return block("closed", `This club's ${noun}s aren't available right now.`);
+  if (test.recurrence === "ONE_OFF" && test.closesAt && test.closesAt <= now) return block("closed", `This ${noun} closed on ${fmtLongDate(test.closesAt)}.`);
   if (!(await inAudience(actor, test, Boolean(assignment)))) {
     const who =
       test.audience === "CLUB_MEMBERS"
@@ -668,13 +710,15 @@ export async function takerState(actor: Actor | null, testId: string, now: Date 
         : test.audience === "ALL_STUDENTS"
           ? "Weber State students"
           : test.audience === "ROLE_REQUIREMENT"
-            ? "club officers, VPs and presidents"
+            ? "the people a WSUSA requirement applies to"
             : "the people it was assigned to";
-    return block("audience", `This test is for ${who}.`);
+    return block("audience", `This ${noun} is for ${who}.`);
   }
-  if (passed) return block("passed", `You passed this test${cycle.key === "once" ? "" : ` for ${cycle.label}`}. Nothing more to do.`);
+  if (passed && test.isForm) return block("passed", `You submitted this form${round}${passed.submittedAt ? ` on ${fmtLongDate(passed.submittedAt)}` : ""}. Nothing more to do.`);
+  if (passed) return block("passed", `You passed this test${round}. Nothing more to do.`);
   if (latest?.status === "NEEDS_REVIEW") return block("review", "Your last attempt is waiting for a reviewer. You'll get a notification when it's graded.");
-  if (attemptsLeft === 0) return block("attempts", `You've used all ${test.maxAttempts} attempt${test.maxAttempts === 1 ? "" : "s"}${cycle.key === "once" ? "" : ` for ${cycle.label}`}.`);
+  if (attemptsLeft === 0 && test.isForm) return block("attempts", `You already submitted this form${round}.`);
+  if (attemptsLeft === 0) return block("attempts", `You've used all ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}${round}.`);
   return { ...state, canTake: true, block: null };
 }
 
@@ -686,7 +730,7 @@ export async function startAttempt(actor: Actor | null, testId: string): Promise
   if (s.inProgress) return { attemptId: s.inProgress.id, resumed: true };
   if (!s.canTake) throw forbidden(s.block?.message);
   const questionCount = await db.testQuestion.count({ where: { testId } });
-  if (!questionCount) throw invalid("This test has no questions yet.");
+  if (!questionCount) throw invalid(`This ${testNoun(s.test.isForm)} has no questions yet.`);
   const attempt = await db.testAttempt.create({
     data: { testId, userId: actor.id, cycleKey: s.cycle.key, startedAt: now, deadlineAt: s.deadlineIfStarted },
   });
@@ -726,7 +770,8 @@ export async function saveAnswer(actor: Actor | null, attemptId: string, input: 
   const now = new Date();
   if (!acceptsAnswers(now, attempt.deadlineAt)) {
     await finishAttempt(attempt.id, { auto: true, actorId: attempt.userId, now });
-    throw conflict("Time's up. Your test was submitted with the answers saved before the clock ran out.");
+    const form = (await db.test.findUnique({ where: { id: attempt.testId }, select: { isForm: true } }))?.isForm;
+    throw conflict(form ? "This form has closed. It was submitted with the answers saved before it closed." : "Time's up. Your test was submitted with the answers saved before the clock ran out.");
   }
   const q = await db.testQuestion.findUnique({ where: { id: v.questionId } });
   if (!q || q.testId !== attempt.testId) throw notFound("Question");
@@ -749,34 +794,63 @@ export async function saveAnswer(actor: Actor | null, attemptId: string, input: 
   return { savedAt: now };
 }
 
-/** Submit an attempt (by the taker, or automatically when the clock runs out). Idempotent. */
+/**
+ * Submit an attempt (by the taker, or automatically when the clock runs out). Idempotent.
+ * A form needs every question answered, unless it's handed in automatically (then it's taken as-is).
+ */
 export async function submitAttempt(actor: Actor | null, attemptId: string, opts: { auto?: boolean } = {}): Promise<{ status: TestAttempt["status"]; needsReview: boolean }> {
   const { attempt } = await ownAttempt(actor, attemptId);
   if (attempt.status !== "IN_PROGRESS") return { status: attempt.status, needsReview: attempt.status === "NEEDS_REVIEW" };
   const now = new Date();
   const late = !acceptsAnswers(now, attempt.deadlineAt);
-  const r = await finishAttempt(attempt.id, { auto: Boolean(opts.auto) || late, actorId: attempt.userId, now });
+  const auto = Boolean(opts.auto) || late;
+  const test = await db.test.findUnique({ where: { id: attempt.testId }, select: { isForm: true } });
+  // Once a form's closing time comes it's taken as-is; before that, the browser saying "auto" doesn't skip the check.
+  const closing = attempt.deadlineAt !== null && now.getTime() >= attempt.deadlineAt.getTime() - 5_000;
+  if (test?.isForm && !closing) {
+    const [questions, answers] = await Promise.all([
+      db.testQuestion.findMany({ where: { testId: attempt.testId }, orderBy: { order: "asc" }, select: { id: true, type: true } }),
+      db.testAnswer.findMany({ where: { attemptId }, select: { questionId: true, selectedOptionIds: true, text: true } }),
+    ]);
+    const missing = unansweredQuestionIds(questions, answers);
+    if (missing.length) {
+      const n = questions.findIndex((q) => q.id === missing[0]) + 1;
+      throw invalid(`Answer every question before you submit. Question ${n}${missing.length > 1 ? ` and ${missing.length - 1} more still need` : " still needs"} an answer.`);
+    }
+  }
+  const r = await finishAttempt(attempt.id, { auto, actorId: attempt.userId, now });
   return { status: r.status, needsReview: r.needsReview };
 }
 
 /**
  * Closes an attempt: scores choice questions (all-or-nothing), then either
- * grades it or sends it to review. Used by submit, autosave-after-deadline and
- * the abandoned-attempt job. Only the first caller wins (status guard).
+ * grades it or sends it to review. A form is graded on the spot as passed,
+ * with no score. Used by submit, autosave-after-deadline and the
+ * abandoned-attempt job. Only the first caller wins (status guard).
  */
 export async function finishAttempt(attemptId: string, opts: { auto: boolean; actorId: string | null; now?: Date }): Promise<{ status: TestAttempt["status"]; needsReview: boolean; claimed: boolean }> {
   const now = opts.now ?? new Date();
   const attempt = await db.testAttempt.findUnique({ where: { id: attemptId } });
   if (!attempt) throw notFound("Attempt");
+  const test = await loadTest(attempt.testId);
   // An abandoned attempt counts as handed in when its time ran out, not when the job noticed.
   const submittedAt = attempt.deadlineAt && now > attempt.deadlineAt ? attempt.deadlineAt : now;
-  const claimed = await db.testAttempt.updateMany({ where: { id: attemptId, status: "IN_PROGRESS" }, data: { status: "NEEDS_REVIEW", submittedAt, autoSubmitted: opts.auto } });
+  const claimed = await db.testAttempt.updateMany({
+    where: { id: attemptId, status: "IN_PROGRESS" },
+    data: test.isForm ? { status: "GRADED", submittedAt, autoSubmitted: opts.auto, scorePercent: null, passed: true, gradedAt: now } : { status: "NEEDS_REVIEW", submittedAt, autoSubmitted: opts.auto },
+  });
   if (!claimed.count) {
     const cur = await db.testAttempt.findUnique({ where: { id: attemptId }, select: { status: true } });
     return { status: cur?.status ?? "GRADED", needsReview: cur?.status === "NEEDS_REVIEW", claimed: false };
   }
 
-  const test = await loadTest(attempt.testId);
+  if (test.isForm) {
+    const answered = await db.testAnswer.count({ where: { attemptId } });
+    await logActivity({ actorId: opts.actorId, action: "test.attempt_submitted", entityType: "testAttempt", entityId: attemptId, clubId: test.clubId, data: { testId: test.id, auto: opts.auto, answered, needsReview: false, isForm: true } });
+    await applyOutcome({ ...attempt, scorePercent: null, passed: true }, test, { reviewed: false, actorId: opts.actorId });
+    return { status: "GRADED", needsReview: false, claimed: true };
+  }
+
   const [questions, answers] = await Promise.all([
     db.testQuestion.findMany({ where: { testId: attempt.testId }, orderBy: { order: "asc" } }),
     db.testAnswer.findMany({ where: { attemptId } }),
@@ -849,6 +923,7 @@ export async function finalizeGrading(actor: Actor | null, attemptId: string, in
   if (!attempt) throw notFound("Attempt");
   const test = await loadTest(attempt.testId);
   const a = await assertCanManageTest(actor, test);
+  if (test.isForm) throw invalid("Forms aren't graded.");
   if (attempt.userId === a.id) throw forbidden("You can't grade your own attempt. Ask another leader or an administrator.");
   if (attempt.status === "GRADED") throw conflict(`${attempt.gradedBy?.name ?? "Someone"} already graded this attempt.`);
   if (attempt.status !== "NEEDS_REVIEW") throw conflict("This attempt hasn't been submitted yet.");
@@ -897,6 +972,7 @@ export async function requestGradingSuggestion(actor: Actor | null, answerId: st
   if (!ans) throw notFound("Answer");
   const test = await loadTest(ans.attempt.testId);
   const a = await assertCanManageTest(actor, test);
+  if (test.isForm) throw invalid("Forms aren't graded.");
   if (!(await aiLive("grading"))) throw forbidden("Grading suggestions are turned off.");
   if (!isOpen(ans.question.type)) throw invalid("Claude only suggests points for written answers.");
   const r = await suggestGrade({
@@ -941,12 +1017,12 @@ export async function prefillGradingSuggestions(attemptId: string): Promise<numb
 type OutcomeAttempt = Pick<TestAttempt, "id" | "testId" | "userId" | "cycleKey"> & { scorePercent: number | null; passed: boolean | null };
 
 /**
- * What happens once an attempt has a final grade. Passing completes the
- * person's open assignment(s), meets any officer requirement that uses the
- * test (its REQUIREMENT task closes; the permission gate reads attempts
- * directly), closes earlier follow-ups, and runs PASSED automations.
- * Not passing runs FAILED automations. When a reviewer graded it, the taker
- * always hears the result.
+ * What happens once an attempt has a final grade. Passing (or submitting a
+ * form) completes the person's open assignment(s), meets any WSUSA
+ * requirement that uses the test or form (its REQUIREMENT task closes; the
+ * permission gate reads attempts directly), closes earlier follow-ups, and
+ * runs PASSED automations. Not passing runs FAILED automations. When a
+ * reviewer graded it, the taker always hears the result.
  */
 async function applyOutcome(attempt: OutcomeAttempt, test: TestRow, opts: { reviewed: boolean; actorId: string | null }) {
   const now = new Date();
@@ -954,6 +1030,7 @@ async function applyOutcome(attempt: OutcomeAttempt, test: TestRow, opts: { revi
   const taker = await db.user.findUnique({ where: { id: attempt.userId }, select: { id: true, name: true, handle: true } });
   if (!taker) return;
   const ctx: AutomationContext = { test, taker, cycleKey: attempt.cycleKey, scorePercent: attempt.scorePercent, attemptId: attempt.id };
+  const maxAttempts = maxAttemptsOf(test);
 
   if (attempt.passed) {
     const open = await db.testAssignment.findMany({
@@ -967,13 +1044,21 @@ async function applyOutcome(attempt: OutcomeAttempt, test: TestRow, opts: { revi
     const reqs = await db.roleRequirement.findMany({ where: { testId: test.id, kind: "TEST" }, select: { id: true } });
     for (const r of reqs) await resolveTasks("requirement", requirementSourceId(r.id, taker.id), taker.id);
     for (const trig of ["FAILED", "MISSED_DEADLINE"] as const) await resolveTasks("testFollowUp", followUpId(test.id, taker.id, attempt.cycleKey, trig), opts.actorId);
-    await logActivity({ actorId: taker.id, action: "test.passed", entityType: "test", entityId: test.id, clubId: test.clubId, data: { attemptId: attempt.id, scorePercent: attempt.scorePercent }, isPublic: false });
-  } else if (test.maxAttempts !== null) {
+    await logActivity({
+      actorId: taker.id,
+      action: test.isForm ? "test.form_submitted" : "test.passed",
+      entityType: "test",
+      entityId: test.id,
+      clubId: test.clubId,
+      data: { attemptId: attempt.id, scorePercent: attempt.scorePercent },
+      isPublic: false,
+    });
+  } else if (maxAttempts !== null) {
     // Out of attempts for this round: they finished taking it (without passing), so it's no longer
     // on their to-do list and the deadline job won't call it "missed". A late taker's assignment
     // stays MISSED, but its task closes too. Follow-ups are the automations' job.
     const used = await db.testAttempt.count({ where: { testId: test.id, userId: taker.id, cycleKey: attempt.cycleKey } });
-    if (used >= test.maxAttempts) {
+    if (used >= maxAttempts) {
       const open = await db.testAssignment.findMany({ where: { testId: test.id, userId: taker.id, cycleKey: attempt.cycleKey, status: { in: ["ASSIGNED", "MISSED"] } }, select: { id: true, status: true } });
       const assigned = open.filter((o) => o.status === "ASSIGNED");
       if (assigned.length) await db.testAssignment.updateMany({ where: { id: { in: assigned.map((o) => o.id) } }, data: { status: "COMPLETED", resolvedAt: now } });
@@ -999,6 +1084,9 @@ function followUpId(testId: string, userId: string, cycleKey: string, trigger: A
 async function takerMessage(trigger: AutomationTrigger, ctx: AutomationContext): Promise<{ kind: string; title: string; body: string; href: string }> {
   const { test } = ctx;
   const href = ctx.attemptId ? `/tests/${test.id}/results/${ctx.attemptId}` : `/tests/${test.id}`;
+  if (trigger === "PASSED" && test.isForm) {
+    return { kind: "test.completed", title: `We got your form: ${test.title}`, body: "Thanks for filling it out. You can look back at your answers anytime.", href };
+  }
   if (trigger === "PASSED") {
     return { kind: "test.completed", title: `You passed ${test.title}`, body: `Score: ${fmtPercent(ctx.scorePercent)} (${test.passingPercent}% needed).`, href };
   }
@@ -1007,13 +1095,14 @@ async function takerMessage(trigger: AutomationTrigger, ctx: AutomationContext):
     return {
       kind: "test.missed",
       title: `You missed the deadline for ${test.title}`,
-      body: open ? "It's still open — take it as soon as you can." : `It's closed now. Contact ${test.club ? `${test.club.name}'s leaders` : "WSUSA"} if you need another chance.`,
+      body: open ? `It's still open — ${test.isForm ? "fill it out" : "take it"} as soon as you can.` : `It's closed now. Contact ${test.club ? `${test.club.name}'s leaders` : "WSUSA"} if you need another chance.`,
       href: `/tests/${test.id}`,
     };
   }
   // Didn't pass: say exactly what's next.
   const used = await db.testAttempt.count({ where: { testId: test.id, userId: ctx.taker.id, cycleKey: ctx.cycleKey } });
-  const left = test.maxAttempts === null ? null : Math.max(0, test.maxAttempts - used);
+  const max = maxAttemptsOf(test);
+  const left = max === null ? null : Math.max(0, max - used);
   const canRetake = isOpenForTaking(test, new Date()) && left !== 0;
   const retake = !canRetake
     ? `You don't have any attempts left. Contact ${test.club ? `${test.club.name}'s leaders` : "WSUSA"} about next steps.`
@@ -1034,13 +1123,13 @@ async function advisorIdsFor(ctx: AutomationContext): Promise<string[]> {
 /**
  * Runs a test's automations for one trigger. "Admins" means whoever manages
  * the test: WSUSA admins for university tests, club leaders with the tests
- * permission for club tests.
+ * permission for club tests. For forms, PASSED means "submitted".
  */
 export async function runAutomations(trigger: AutomationTrigger, automations: Automation[], ctx: AutomationContext, opts: { forceTaker?: boolean } = {}) {
   const scope = ctx.test.clubId ? "club" : "university";
-  const actions = new Set(automations.filter((a) => a.trigger === trigger && automationAllowed(a, scope)).map((a) => a.action));
+  const actions = new Set(automations.filter((a) => a.trigger === trigger && automationAllowed(a, scope, ctx.test.isForm)).map((a) => a.action));
   const { test, taker } = ctx;
-  const verb = trigger === "PASSED" ? "passed" : trigger === "FAILED" ? "didn't pass" : "missed the deadline for";
+  const verb = trigger === "PASSED" ? (test.isForm ? "submitted" : "passed") : trigger === "FAILED" ? "didn't pass" : "missed the deadline for";
   const scoreNote = ctx.scorePercent !== null && ctx.scorePercent !== undefined ? ` (${fmtPercent(ctx.scorePercent)})` : "";
   const resultsHref = manageHref(test, "results");
 
@@ -1082,7 +1171,7 @@ export async function runAutomations(trigger: AutomationTrigger, automations: Au
     if (!(await db.task.count({ where: { sourceType: "testFollowUp", sourceId } }))) {
       await createTask({
         kind: "CLUB",
-        title: `${taker.name} passed ${test.title}${scoreNote}`,
+        title: `${taker.name} ${verb} ${test.title}${scoreNote}`,
         description: "Take whatever step comes next for them (for example, approving a role or access).",
         assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS" },
         href: resultsHref,
@@ -1147,8 +1236,8 @@ async function runClubActions(actions: Set<AutomationAction>, automations: Autom
       kind: pause ? "test.permissions_paused" : "test.permissions_resumed",
       title: pause ? `Your officer permissions in ${test.club.name} are paused` : `Your officer permissions in ${test.club.name} are back`,
       body: pause
-        ? `You ${verb} ${test.title}. ${comesBack ? "They come back when you pass it." : "Ask the President or a Vice President about getting them back."}`
-        : `You passed ${test.title}.`,
+        ? `You ${verb} ${test.title}. ${comesBack ? `They come back when you ${test.isForm ? "submit" : "pass"} it.` : "Ask the President or a Vice President about getting them back."}`
+        : `You ${test.isForm ? "submitted" : "passed"} ${test.title}.`,
       href: pause ? `/tests/${test.id}` : `/clubs/${test.club.slug}/manage`,
     });
   } catch (e) {

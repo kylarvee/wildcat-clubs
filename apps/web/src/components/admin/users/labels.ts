@@ -82,6 +82,7 @@ const ACTION_LABEL: Record<string, string> = {
   "club.profile_updated": "Updated a club profile",
   "funding.submitted": "Submitted a funding request",
   "test.submitted": "Took a test",
+  "test.form_submitted": "Filled out a form",
   "user.graduated": "Marked someone graduated",
   "user.deactivated": "Deactivated an account",
   "user.reactivated": "Reactivated an account",

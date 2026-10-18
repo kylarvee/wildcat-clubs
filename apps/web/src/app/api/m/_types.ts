@@ -211,6 +211,18 @@ export type MHome = {
   /** Your calendar for the next 14 days (cancelled meetings left out). */
   upcoming: MEvent[];
   announcements: MAnnouncement[];
+  /** What WSUSA requires of you that's still open, soonest due first (done on the web). */
+  required: MRequiredTask[];
+};
+
+export type MRequiredTask = {
+  id: string;
+  title: string;
+  /** "Due Friday", "Overdue · was due Oct 14"; null when undated. */
+  dueLabel: string | null;
+  overdue: boolean;
+  /** Web path to open in the in-app browser. */
+  path: string;
 };
 
 // ─── Clubs ───────────────────────────────────────────────────────────────────

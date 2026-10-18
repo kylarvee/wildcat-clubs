@@ -10,9 +10,22 @@ import { minutesLabel } from "@/lib/tests/deadlines";
 
 /**
  * "Take the test" → "Are you sure?" with exactly how much time there is and
- * how to hand in. The server starts the clock when they confirm.
+ * how to hand in. The server starts the clock when they confirm. A form has
+ * no clock to warn about, so "Fill out the form" opens it straight away.
  */
-export function StartTestButton({ testId, timeLimitMinutes, closesSoonAt, label = "Take the test" }: { testId: string; timeLimitMinutes: number | null; closesSoonAt: string | null; label?: string }) {
+export function StartTestButton({
+  testId,
+  timeLimitMinutes,
+  closesSoonAt,
+  label = "Take the test",
+  isForm = false,
+}: {
+  testId: string;
+  timeLimitMinutes: number | null;
+  closesSoonAt: string | null;
+  label?: string;
+  isForm?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +40,7 @@ export function StartTestButton({ testId, timeLimitMinutes, closesSoonAt, label 
     setError(null);
     start(async () => {
       const r = await startAttemptAction(testId).catch(() => null);
-      if (!r) return setError("We couldn't reach the server, so the test didn't start. Check your connection and try again.");
+      if (!r) return setError(`We couldn't reach the server, so the ${isForm ? "form" : "test"} didn't open. Check your connection and try again.`);
       if (!r.ok) return setError(r.error);
       router.push(`/tests/${testId}/attempt/${r.data.attemptId}`);
     });
@@ -35,8 +48,8 @@ export function StartTestButton({ testId, timeLimitMinutes, closesSoonAt, label 
 
   return (
     <div className="space-y-2">
-      <Button size="lg" onClick={() => setOpen(true)} disabled={pending}>
-        {pending ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <PlayCircle className="h-5 w-5" aria-hidden />} {pending ? "Starting…" : label}
+      <Button size="lg" onClick={() => (isForm ? begin() : setOpen(true))} disabled={pending}>
+        {pending ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <PlayCircle className="h-5 w-5" aria-hidden />} {pending ? (isForm ? "Opening…" : "Starting…") : label}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-danger">

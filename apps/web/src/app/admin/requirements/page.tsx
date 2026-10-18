@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, Download, GraduationCap, Plus, ShieldCheck } from "lucide-react";
-import { listRequirementsForAdmin, requirementCompliance, type ComplianceCell, type ComplianceRow } from "@/lib/domain/requirements";
+import { listRequirementsForAdmin, openRequirementCounts, requirementCompliance, type ComplianceCell, type ComplianceRow } from "@/lib/domain/requirements";
 import { ROLE_LABEL } from "@/lib/authz";
 import { RENEWAL_LABEL } from "@/lib/tests/types";
 import { fmtDate } from "@/lib/time";
@@ -16,22 +16,25 @@ import { ActiveToggle } from "./ActiveToggle";
 import { applyFilter, filterQuery, parseFilter } from "./filters";
 import { requireRequirementAdmin } from "./guard";
 
-export const metadata: Metadata = { title: "Officer requirements" };
+export const metadata: Metadata = { title: "Requirements" };
 
 const SOON_DAYS = 14;
 
 /**
- * Officer requirements: the tests and trainings attached to leadership roles,
- * and where every current student leader stands. Status comes from
- * requirementStatus (passed attempts and training check-ins), never stored.
+ * Requirements: the tests, forms and trainings WSUSA requires of club
+ * members and student leaders, and where every current student leader stands.
+ * Leader status comes from requirementStatus (passed attempts, submitted
+ * forms and training check-ins), never stored; member-wide requirements show
+ * how many people still owe them (their open required tasks).
  */
 export default async function RequirementsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireRequirementAdmin("/admin/requirements");
   const sp = await searchParams;
   const f = parseFilter(sp);
   const now = new Date();
-  const [reqs, rows] = await Promise.all([listRequirementsForAdmin(), requirementCompliance(now)]);
-  const active = reqs.filter((r) => r.active);
+  const [reqs, rows, open] = await Promise.all([listRequirementsForAdmin(), requirementCompliance(now), openRequirementCounts(now)]);
+  // The leader table covers requirements that reach a leader role; member-wide ones are counted on their cards.
+  const active = reqs.filter((r) => r.active && r.appliesTo.some((role) => role !== "MEMBER"));
   const shown = applyFilter(rows, f);
   const columns = f.req ? active.filter((r) => r.id === f.req) : active;
 
@@ -53,8 +56,8 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Officer requirements"
-        description="Tests and trainings student leaders must complete to keep their permissions. Each one has a grace period; past it, the leader keeps their title but their permissions pause until it's done."
+        title="Requirements"
+        description="Tests, forms and trainings WSUSA requires of club members and student leaders. They show as Required by WSUSA in everyone's tasks. Each has a grace period; past it, a leader keeps their title but their permissions pause until it's done."
         actions={
           <ButtonLink href="/admin/requirements/new">
             <Plus className="h-4 w-4" aria-hidden /> New requirement
@@ -67,13 +70,15 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
           <EmptyState
             icon={<ShieldCheck />}
             title="No requirements yet"
-            description="Attach a published test (audience: Student leaders) or a university training to officer roles."
+            description="Require a published test or form (audience: WSUSA requirement) or a university training of every club member, chosen leader roles, or both."
             action={<ButtonLink href="/admin/requirements/new">New requirement</ButtonLink>}
           />
         ) : (
           <ul className="grid gap-3 lg:grid-cols-2">
             {reqs.map((r) => {
               const c = counts(r.id);
+              const members = r.appliesTo.includes("MEMBER");
+              const o = open.get(r.id) ?? { open: 0, overdue: 0 };
               return (
                 <li key={r.id}>
                   <Card className="h-full p-4">
@@ -86,7 +91,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
                           {r.name}
                         </Link>
                         <p className="text-sm text-ink-3">
-                          {r.kind === "TEST" ? "Pass " : "Attend "}
+                          {r.kind === "TRAINING" ? "Attend " : r.test?.isForm ? "Fill out " : "Pass "}
                           {r.test ? (
                             <Link href={`/admin/tests/${r.test.id}`} className="text-brand-600 hover:underline">
                               {r.test.title}
@@ -104,12 +109,19 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
                     </div>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {r.appliesTo.map((role) => (
-                        <Badge key={role}>{ROLE_LABEL[role]}</Badge>
+                        <Badge key={role} tone={role === "MEMBER" ? "brand" : "neutral"}>
+                          {role === "MEMBER" ? "Every club member" : ROLE_LABEL[role]}
+                        </Badge>
                       ))}
                       <Badge tone="info">{RENEWAL_LABEL[r.renewal]}</Badge>
                       <Badge tone={r.graceDays === 0 ? "warning" : "neutral"}>{r.graceDays === 0 ? "Must be done first" : `${r.graceDays}-day grace period`}</Badge>
                     </div>
-                    {r.active ? (
+                    {r.active && members ? (
+                      <p className="mt-3 text-sm text-ink-2">
+                        {o.open ? `${o.open} ${o.open === 1 ? "person still owes" : "people still owe"} it` : "Everyone it applies to is done"} ·{" "}
+                        <span className={o.overdue ? "font-medium text-danger" : ""}>{o.overdue} overdue</span>
+                      </p>
+                    ) : r.active ? (
                       <p className="mt-3 text-sm text-ink-2">
                         <span className="text-success">{c.met} met</span> · {c.due} due · <span className={c.overdue ? "font-medium text-danger" : ""}>{c.overdue} overdue</span>
                       </p>

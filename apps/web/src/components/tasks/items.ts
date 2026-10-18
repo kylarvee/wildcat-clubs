@@ -33,6 +33,8 @@ export type TaskItem = {
   personal: boolean;
   /** PERSONAL and CLUB tasks are checked off by hand; the rest close themselves. */
   checkable: boolean;
+  /** WSUSA requires it: listed first and marked "Required by WSUSA". */
+  required: boolean;
 };
 
 export function dueInfo(dueAt: Date | null, now: Date): TaskItem["due"] {
@@ -69,5 +71,30 @@ export function toTaskItem(t: TaskRow, viewerId: string, now: Date): TaskItem {
     completedLabel: done ? `Done ${fmtLongDate(t.completedAt!)}${t.completedBy && t.completedById !== viewerId ? ` by ${t.completedBy.name}` : ""}` : null,
     personal: t.kind === "PERSONAL" && t.assigneeId === viewerId,
     checkable: !SELF_CLOSING.includes(t.kind),
+    required: t.required,
   };
+}
+
+/**
+ * For short lists (the dashboard): join requests waiting in the same club
+ * collapse into one row ("5 people asked to join Wildcat Robotics") that
+ * opens the club's roster. Everything else, and the order, stays as is.
+ */
+export function groupJoinRequests(rows: TaskRow[], viewerId: string, now: Date): TaskItem[] {
+  const isJoin = (t: TaskRow) => t.kind === "APPROVAL" && t.sourceType === "membership" && t.clubId && t.club;
+  const perClub = new Map<string, number>();
+  for (const t of rows) if (isJoin(t)) perClub.set(t.clubId!, (perClub.get(t.clubId!) ?? 0) + 1);
+  const out: TaskItem[] = [];
+  const done = new Set<string>();
+  for (const t of rows) {
+    const n = isJoin(t) ? perClub.get(t.clubId!)! : 0;
+    if (n < 2) {
+      out.push(toTaskItem(t, viewerId, now));
+      continue;
+    }
+    if (done.has(t.clubId!)) continue;
+    done.add(t.clubId!);
+    out.push({ ...toTaskItem(t, viewerId, now), id: `join-requests:${t.clubId}`, title: `${n} people asked to join ${t.club!.name}`, description: null, href: `/clubs/${t.club!.slug}/manage/members` });
+  }
+  return out;
 }

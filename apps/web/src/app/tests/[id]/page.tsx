@@ -7,13 +7,13 @@ import { getCurrentUser, requireUser } from "@/lib/auth/session";
 import { canManageTest, manageHref, takerState } from "@/lib/domain/tests";
 import { fmtDate, fmtLongDate, fmtTime } from "@/lib/time";
 import { minutesLabel } from "@/lib/tests/deadlines";
-import { attemptLabel, fmtPercent } from "@/lib/tests/types";
+import { attemptLabel, fmtPercent, testNoun } from "@/lib/tests/types";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Callout, Container, PageHeader } from "@/components/ui/layout";
 import { RichContent } from "@/components/rich/RichContent";
 import { StartTestButton } from "@/components/tests/StartTestButton";
-import { ResultBadge } from "@/components/tests/badges";
+import { FormBadge, ResultBadge } from "@/components/tests/badges";
 import { PolicyNotices } from "@/components/policies/PolicyNotices";
 
 type Params = Promise<{ id: string }>;
@@ -34,7 +34,9 @@ function when(d: Date) {
  * A test's intro page: what it covers (the builder's intro: text, documents,
  * video), the facts (time, questions, passing score, attempts, due date), and
  * "Take the test". People in the audience — or anyone, for open tests — can
- * take it; builders see a shortcut to edit and results.
+ * take it; builders see a shortcut to edit and results. A form shows only its
+ * questions and due date, "Fill out the form", and once it's in, "Submitted"
+ * with a link to the answers.
  */
 export default async function TestIntroPage({ params }: { params: Params }) {
   const { id } = await params;
@@ -63,18 +65,24 @@ export default async function TestIntroPage({ params }: { params: Params }) {
   const closesSoon =
     t.recurrence === "ONE_OFF" && t.closesAt && (!t.timeLimitMinutes || t.closesAt.getTime() < now.getTime() + t.timeLimitMinutes * 60_000) ? when(t.closesAt) : null;
   const owner = t.club ? t.club.name : "WSUSA";
+  const form = t.isForm;
+  const noun = testNoun(form);
+  const dueFact = due ? [{ icon: <CalendarClock className="h-4 w-4" />, label: overdue ? "Was due" : "Due", value: when(due) }] : [];
 
-  const facts = [
-    { icon: <Timer className="h-4 w-4" />, label: "Time", value: t.timeLimitMinutes ? minutesLabel(t.timeLimitMinutes) : "No time limit — the clock still runs" },
-    { icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} ${questions.length === 1 ? "question" : "questions"} · ${points} ${points === 1 ? "point" : "points"}` },
-    { icon: <Target className="h-4 w-4" />, label: "Passing score", value: `${t.passingPercent}%` },
-    {
-      icon: <Repeat className="h-4 w-4" />,
-      label: s.cycle.key === "once" ? "Attempts" : `Attempts (${s.cycle.label})`,
-      value: s.attemptsLeft === null ? (s.attemptsUsed ? `Unlimited · ${s.attemptsUsed} used` : "Unlimited") : `${s.attemptsLeft} of ${t.maxAttempts} left`,
-    },
-    ...(due ? [{ icon: <CalendarClock className="h-4 w-4" />, label: overdue ? "Was due" : "Due", value: when(due) }] : []),
-  ];
+  const facts = form
+    ? [{ icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} ${questions.length === 1 ? "question" : "questions"} · all required` }, ...dueFact]
+    : [
+        { icon: <Timer className="h-4 w-4" />, label: "Time", value: t.timeLimitMinutes ? minutesLabel(t.timeLimitMinutes) : "No time limit — the clock still runs" },
+        { icon: <ClipboardList className="h-4 w-4" />, label: "Questions", value: `${questions.length} ${questions.length === 1 ? "question" : "questions"} · ${points} ${points === 1 ? "point" : "points"}` },
+        { icon: <Target className="h-4 w-4" />, label: "Passing score", value: `${t.passingPercent}%` },
+        {
+          icon: <Repeat className="h-4 w-4" />,
+          label: s.cycle.key === "once" ? "Attempts" : `Attempts (${s.cycle.label})`,
+          value: s.attemptsLeft === null ? (s.attemptsUsed ? `Unlimited · ${s.attemptsUsed} used` : "Unlimited") : `${s.attemptsLeft} of ${t.maxAttempts} left`,
+        },
+        ...dueFact,
+      ];
+  const submitted = form ? attempts.find((a) => a.passed) : undefined;
 
   return (
     <Container size="md">
@@ -83,22 +91,25 @@ export default async function TestIntroPage({ params }: { params: Params }) {
         title={t.title}
         description={`From ${owner}${s.cycle.key === "once" ? "" : ` · ${s.cycle.label} round`}`}
         actions={
-          manager ? (
-            <>
-              <ButtonLink href={manageHref(t)} variant="outline" size="sm">
-                <Pencil className="h-4 w-4" aria-hidden /> Edit
-              </ButtonLink>
-              <ButtonLink href={manageHref(t, "results")} variant="ghost" size="sm">
-                <BarChart3 className="h-4 w-4" aria-hidden /> Results
-              </ButtonLink>
-            </>
-          ) : null
+          <>
+            {form ? <FormBadge /> : null}
+            {manager ? (
+              <>
+                <ButtonLink href={manageHref(t)} variant="outline" size="sm">
+                  <Pencil className="h-4 w-4" aria-hidden /> Edit
+                </ButtonLink>
+                <ButtonLink href={manageHref(t, "results")} variant="ghost" size="sm">
+                  <BarChart3 className="h-4 w-4" aria-hidden /> {form ? "Responses" : "Results"}
+                </ButtonLink>
+              </>
+            ) : null}
+          </>
         }
       />
 
       {t.status === "DRAFT" ? (
-        <Callout tone="warning" className="mb-6" title="This test is a draft">
-          Only people who manage it can see this page. Publish it from the builder to let people take it.
+        <Callout tone="warning" className="mb-6" title={`This ${noun} is a draft`}>
+          Only people who manage it can see this page. Publish it from the builder to let people {form ? "fill it out" : "take it"}.
         </Callout>
       ) : null}
 
@@ -108,6 +119,8 @@ export default async function TestIntroPage({ params }: { params: Params }) {
             <CardBody>
               {t.introHtml.trim() ? (
                 <RichContent html={t.introHtml} />
+              ) : form ? (
+                <p className="text-ink-2">Answer every question, then press Submit form at the bottom.</p>
               ) : (
                 <p className="text-ink-2">Answer each question, then press Submit test at the bottom. Multiple choice is scored right away; written answers are reviewed by a person.</p>
               )}
@@ -116,7 +129,19 @@ export default async function TestIntroPage({ params }: { params: Params }) {
 
           <Card>
             <CardBody className="space-y-4">
-              {s.inProgress ? (
+              {s.inProgress && form ? (
+                <>
+                  <p className="font-medium text-ink">You started this form{s.inProgress.deadlineAt ? "" : " — your answers are saved"}.</p>
+                  <p className="text-sm text-ink-2">
+                    {s.inProgress.deadlineAt && s.inProgress.deadlineAt <= now
+                      ? "It has closed. Open it to hand in what you saved."
+                      : `Pick up where you left off${s.inProgress.deadlineAt ? ` before it closes at ${fmtTime(s.inProgress.deadlineAt)}` : ""}, then press Submit form.`}
+                  </p>
+                  <ButtonLink href={`/tests/${t.id}/attempt/${s.inProgress.id}`} size="lg">
+                    <PlayCircle className="h-5 w-5" aria-hidden /> Go back to your form
+                  </ButtonLink>
+                </>
+              ) : s.inProgress ? (
                 <>
                   <p className="font-medium text-ink">You have an attempt in progress.</p>
                   <p className="text-sm text-ink-2">
@@ -129,6 +154,19 @@ export default async function TestIntroPage({ params }: { params: Params }) {
                   <ButtonLink href={`/tests/${t.id}/attempt/${s.inProgress.id}`} size="lg">
                     <PlayCircle className="h-5 w-5" aria-hidden /> Go back to your test
                   </ButtonLink>
+                </>
+              ) : submitted ? (
+                <Callout tone="success" icon={<CheckCircle2 />} title={submitted.submittedAt ? `Submitted ${when(submitted.submittedAt)}` : "Submitted"}>
+                  Thanks — nothing more to do{s.cycle.key === "once" ? "" : ` for ${s.cycle.label}`}.{" "}
+                  <Link href={`/tests/${t.id}/results/${submitted.id}`} className="font-medium underline-offset-2 hover:underline">
+                    See your answers
+                  </Link>
+                </Callout>
+              ) : s.canTake && form ? (
+                <>
+                  <p className="text-sm text-ink-2">Every question needs an answer. Your answers save as you go, so you can come back to finish.</p>
+                  {overdue ? <p className="text-sm text-warning">This was due {fmtLongDate(due!)}. It&apos;s still open, so fill it out as soon as you can.</p> : null}
+                  <StartTestButton testId={t.id} timeLimitMinutes={null} closesSoonAt={null} label="Fill out the form" isForm />
                 </>
               ) : s.canTake ? (
                 <>
@@ -147,7 +185,7 @@ export default async function TestIntroPage({ params }: { params: Params }) {
                   {s.block.message}
                 </Callout>
               ) : (
-                <Callout tone="warning" title="You can't take this test right now">
+                <Callout tone="warning" title={form ? "You can't fill out this form right now" : "You can't take this test right now"}>
                   {s.block?.message}
                 </Callout>
               )}
@@ -156,7 +194,7 @@ export default async function TestIntroPage({ params }: { params: Params }) {
 
           {t.audience === "ROLE_REQUIREMENT" ? <PolicyNotices placement="OFFICER_ROLES" title="Policies for officers and leaders" /> : null}
 
-          {attempts.some((a) => a.status !== "IN_PROGRESS") ? (
+          {!form && attempts.some((a) => a.status !== "IN_PROGRESS") ? (
             <Card>
               <CardHeader title={s.cycle.key === "once" ? "Your attempts" : `Your attempts this round`} />
               <ul className="divide-y divide-line">
@@ -181,7 +219,7 @@ export default async function TestIntroPage({ params }: { params: Params }) {
           ) : null}
         </div>
 
-        <aside aria-label="About this test" className="lg:sticky lg:top-24 lg:self-start">
+        <aside aria-label={`About this ${noun}`} className="lg:sticky lg:top-24 lg:self-start">
           <Card>
             <CardBody>
               <dl className="space-y-3">

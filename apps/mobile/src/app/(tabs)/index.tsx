@@ -13,7 +13,9 @@ import { EventRow } from '@/components/EventRow';
 import { LiveBanner } from '@/components/LiveBanner';
 import { ScrollScreen } from '@/components/Screen';
 import { EmptyView, ErrorView, InlineNotice, LoadingView } from '@/components/States';
+import { Icon } from '@/components/Icon';
 import { Text } from '@/components/Text';
+import { openWeb } from '@/lib/links';
 import { dismissLive, useLiveDismissals } from '@/lib/live-dismissals';
 import { useApi } from '@/lib/use-api';
 import { radius, space, useColors } from '@/theme';
@@ -62,6 +64,7 @@ function SignedOutHome() {
 function SignedInHome({ userId }: { userId: string }) {
   const { data, error, loading, refreshing, refresh, reload } = useApi(`home:${userId}`, Api.home, { staleMs: 20_000 });
   const dismissed = useLiveDismissals();
+  const c = useColors();
 
   if (loading && !data) return <LoadingView label="Loading your clubs" />;
   if (!data) return <ErrorView error={error} onRetry={reload} />;
@@ -82,6 +85,34 @@ function SignedInHome({ userId }: { userId: string }) {
       {live.map((o) => (
         <LiveBanner key={o.id} occurrence={o} onCheckIn={() => checkIn(o)} onDismiss={() => dismissLive(o.id)} />
       ))}
+
+      {data.required.length ? (
+        // What WSUSA requires sits above everything else; each opens on the web, where it's done.
+        <Card style={[styles.flush, styles.required, { borderColor: c.danger }]}>
+          <View style={[styles.requiredHead, { backgroundColor: c.dangerTint }]}>
+            <Icon name="warning" size={18} color={c.danger} />
+            <Text variant="label" style={{ color: c.danger }} accessibilityRole="header">
+              Required by WSUSA
+            </Text>
+          </View>
+          {data.required.map((t, i) => (
+            <Fragment key={t.id}>
+              {i ? <Divider /> : null}
+              <Row onPress={() => void openWeb(t.path)} accessibilityLabel={`${t.title}. ${t.dueLabel ?? ''}. Opens on the web.`}>
+                <View style={styles.flex}>
+                  <Text variant="label">{t.title}</Text>
+                  {t.dueLabel ? (
+                    <Text variant="small" tone={t.overdue ? 'danger' : 'ink2'}>
+                      {t.dueLabel}
+                    </Text>
+                  ) : null}
+                </View>
+                <Icon name="external" size={16} color={c.ink3} />
+              </Row>
+            </Fragment>
+          ))}
+        </Card>
+      ) : null}
 
       <SectionHeader title="Your clubs" action="Browse all" onAction={() => router.push('/clubs')} />
       {data.clubs.length ? (
@@ -140,6 +171,8 @@ const styles = StyleSheet.create({
   cta: { marginTop: space.sm },
   lede: { marginTop: 2, marginBottom: space.lg },
   flush: { padding: 0, overflow: 'hidden' },
+  required: { borderWidth: 1, marginBottom: space.lg },
+  requiredHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
   flex: { flex: 1, gap: 2 },
   quiet: { paddingVertical: space.md },
 });

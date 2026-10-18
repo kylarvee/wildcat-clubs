@@ -23,19 +23,19 @@ async function club(slug: string) {
   return db.club.findUniqueOrThrow({ where: { slug } });
 }
 
-/** Same rule as lib/authz/requirements (period = academic year containing now). */
+/** Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat. */
 async function requirementState(userId: string, assignmentStartedAt: Date, clubApprovedAt: Date | null) {
   const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
   const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
   const periodStart = terms.find((x) => x.academicYear === t.academicYear)!.startsOn;
-  const reqs = await db.roleRequirement.findMany({ where: { active: true } });
+  const reqs = await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" } } });
   const out: { name: string; met: boolean; dueAt: Date; overdue: boolean }[] = [];
   for (const r of reqs) {
     const met =
       r.kind === "TEST"
         ? (await db.testAttempt.count({ where: { testId: r.testId!, userId, passed: true, submittedAt: { gte: periodStart } } })) > 0
         : (await db.attendance.count({ where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId! } } })) > 0;
-    const clock = Math.max(assignmentStartedAt.getTime(), clubApprovedAt?.getTime() ?? 0, periodStart.getTime());
+    const clock = Math.max(assignmentStartedAt.getTime(), clubApprovedAt?.getTime() ?? 0, periodStart.getTime(), r.createdAt.getTime());
     const dueAt = new Date(clock + r.graceDays * DAY);
     out.push({ name: r.name, met, dueAt, overdue: !met && NOW > dueAt });
   }
@@ -96,6 +96,11 @@ async function main() {
   check((await db.eventCohost.count({ where: { clubId: swe.id, status: "PENDING" } })) >= 1, "SWE has a pending incoming co-host request");
   check((await db.task.count({ where: { clubId: swe.id, sourceType: "cohost", status: "OPEN", capability: "events" } })) >= 1, "…with an APPROVAL task for SWE's events holders");
   check((await db.election.count({ where: { clubId: swe.id, status: "CLOSED", method: "LEADERSHIP_VOTE" } })) === 1, "SWE has a CLOSED leadership-vote election awaiting apply");
+  check(
+    (await db.task.count({ where: { assigneeId: vanessa.id, required: true, status: "OPEN", title: "Fill out: Club Member Code of Conduct" } })) === 1,
+    "Vanessa owes WSUSA's member code-of-conduct form (a required task)",
+  );
+  check((await db.task.count({ where: { sourceType: "requirement", required: false } })) === 0, "Every requirement task is marked required");
 
   const priya = await user("priya");
   const robotics = await club("wildcat-robotics");

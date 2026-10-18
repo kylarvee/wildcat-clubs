@@ -6,6 +6,7 @@ import { cycleForTest } from "@/lib/domain/tests";
 import { cycleKeyLabel, type Cycle } from "@/lib/tests/cycles";
 import { isChoice, parseOptions, type QuestionOption } from "@/lib/tests/types";
 import { scoreAttempt } from "@/lib/tests/scoring";
+import { richToText } from "@/lib/rich/sanitize";
 
 /**
  * Read models for the Test Tool (builders' lists, results, grading, and the
@@ -21,10 +22,12 @@ export type TestStats = {
   attempts: number;
   takers: number;
   graded: number;
+  /** Graded attempts with a score (form responses have none). */
+  scored: number;
   passed: number;
   /** passed ÷ graded, 0–1. */
   passRate: number | null;
-  /** Mean final score of graded attempts, 0–100. */
+  /** Mean final score of scored attempts, 0–100. */
   avgScore: number | null;
   /** Mean time from start to hand-in. */
   avgTimeMs: number | null;
@@ -35,13 +38,14 @@ export type TestStats = {
   timeSumMs: number;
 };
 
-const EMPTY_STATS: TestStats = { attempts: 0, takers: 0, graded: 0, passed: 0, passRate: null, avgScore: null, avgTimeMs: null, needsReview: 0, inProgress: 0, scoreSum: 0, timeSumMs: 0 };
+const EMPTY_STATS: TestStats = { attempts: 0, takers: 0, graded: 0, scored: 0, passed: 0, passRate: null, avgScore: null, avgTimeMs: null, needsReview: 0, inProgress: 0, scoreSum: 0, timeSumMs: 0 };
 
 type StatsRow = {
   testId: string;
   submitted: number;
   takers: number;
   graded: number;
+  scored: number;
   passed: number;
   score_sum: number | null;
   seconds_sum: number | null;
@@ -59,6 +63,7 @@ export async function testStatsFor(testIds: string[], opts: { cycleKey?: string 
       count(*) FILTER (WHERE "submittedAt" IS NOT NULL)::int AS submitted,
       count(DISTINCT "userId") FILTER (WHERE "submittedAt" IS NOT NULL)::int AS takers,
       count(*) FILTER (WHERE status = 'GRADED')::int AS graded,
+      count(*) FILTER (WHERE status = 'GRADED' AND "scorePercent" IS NOT NULL)::int AS scored,
       count(*) FILTER (WHERE status = 'GRADED' AND passed)::int AS passed,
       sum("scorePercent") FILTER (WHERE status = 'GRADED')::float8 AS score_sum,
       sum(extract(epoch FROM ("submittedAt" - "startedAt"))) FILTER (WHERE "submittedAt" IS NOT NULL)::float8 AS seconds_sum,
@@ -79,9 +84,10 @@ function statsFrom(r: StatsRow): TestStats {
     attempts: r.submitted,
     takers: r.takers,
     graded: r.graded,
+    scored: r.scored,
     passed: r.passed,
     passRate: r.graded ? r.passed / r.graded : null,
-    avgScore: r.graded ? scoreSum / r.graded : null,
+    avgScore: r.scored ? scoreSum / r.scored : null,
     avgTimeMs: r.submitted ? timeSumMs / r.submitted : null,
     needsReview: r.needs_review,
     inProgress: r.in_progress,
@@ -97,20 +103,27 @@ export function combineStats(list: TestStats[]): TestStats & { takers: number } 
       attempts: a.attempts + s.attempts,
       takers: a.takers + s.takers,
       graded: a.graded + s.graded,
+      scored: a.scored + s.scored,
       passed: a.passed + s.passed,
       needsReview: a.needsReview + s.needsReview,
       inProgress: a.inProgress + s.inProgress,
       scoreSum: a.scoreSum + s.scoreSum,
       timeSumMs: a.timeSumMs + s.timeSumMs,
     }),
-    { attempts: 0, takers: 0, graded: 0, passed: 0, needsReview: 0, inProgress: 0, scoreSum: 0, timeSumMs: 0 },
+    { attempts: 0, takers: 0, graded: 0, scored: 0, passed: 0, needsReview: 0, inProgress: 0, scoreSum: 0, timeSumMs: 0 },
   );
   return {
     ...t,
     passRate: t.graded ? t.passed / t.graded : null,
-    avgScore: t.graded ? t.scoreSum / t.graded : null,
+    avgScore: t.scored ? t.scoreSum / t.scored : null,
     avgTimeMs: t.attempts ? t.timeSumMs / t.attempts : null,
   };
+}
+
+/** A page title in the right words: `testOrFormTitle(id, "Test results", "Responses")`. Unknown ids get the test wording. */
+export async function testOrFormTitle(testId: string, test: string, form: string): Promise<string> {
+  const t = await db.test.findUnique({ where: { id: testId }, select: { isForm: true } });
+  return t?.isForm ? form : test;
 }
 
 // ─── Builder lists ───────────────────────────────────────────────────────────
@@ -118,6 +131,7 @@ export function combineStats(list: TestStats[]): TestStats & { takers: number } 
 export type ManagedTestRow = {
   id: string;
   title: string;
+  isForm: boolean;
   status: TestStatus;
   audience: TestAudience;
   recurrence: TestRecurrence;
@@ -159,6 +173,7 @@ export async function listManagedTests(clubId: string | null): Promise<ManagedTe
     rows.push({
       id: t.id,
       title: t.title,
+      isForm: t.isForm,
       status: t.status,
       audience: t.audience,
       recurrence: t.recurrence,
@@ -258,6 +273,56 @@ function attemptStatus(a: { status: AttemptStatus; passed: boolean | null }): Re
   if (a.status === "IN_PROGRESS") return "in-progress";
   if (a.status === "NEEDS_REVIEW") return "needs-review";
   return a.passed ? "passed" : "failed";
+}
+
+// ─── Form responses (CSV) ────────────────────────────────────────────────────
+
+/**
+ * A form's responses as CSV rows (header first): one row per person in the
+ * round (or every round), with each question's answer in its own column.
+ * Choices are joined with "; ", written answers become plain text. People who
+ * owe it but haven't submitted are listed with empty answers.
+ */
+export async function formResponseRows(testId: string, cycleKey: string | null): Promise<(string | number)[][]> {
+  const [questions, { rows }] = await Promise.all([db.testQuestion.findMany({ where: { testId }, orderBy: { order: "asc" } }), testResults(testId, cycleKey)]);
+  const attemptIds = rows.map((r) => r.attempt?.id).filter((id): id is string => Boolean(id));
+  const answers = attemptIds.length ? await db.testAnswer.findMany({ where: { attemptId: { in: attemptIds } }, select: { attemptId: true, questionId: true, selectedOptionIds: true, text: true } }) : [];
+  const byAttempt = new Map<string, Map<string, (typeof answers)[number]>>();
+  for (const a of answers) {
+    const m = byAttempt.get(a.attemptId) ?? new Map();
+    m.set(a.questionId, a);
+    byAttempt.set(a.attemptId, m);
+  }
+  const options = new Map(questions.map((q) => [q.id, new Map(parseOptions(q.options).map((o) => [o.id, o.text]))]));
+  const STATUS: Record<ResultRowStatus, string> = {
+    passed: "Submitted",
+    "in-progress": "Started",
+    "not-started": "Not yet",
+    missed: "Missed deadline",
+    excused: "Excused",
+    "needs-review": "Submitted",
+    failed: "Submitted",
+  };
+  const iso = (d: Date | null | undefined) => (d ? d.toISOString() : "");
+  const header = ["Name", "Email", "Status", "Submitted", "Due", ...questions.map((q, i) => `Q${i + 1}: ${richToText(q.promptHtml, 120).replace(/\s+/g, " ")}`)];
+  const body = rows.map((r) => {
+    // Only handed-in answers are responses; a form someone is still filling out shows blank.
+    const mine = r.attempt && r.attempt.status !== "IN_PROGRESS" ? byAttempt.get(r.attempt.id) : undefined;
+    return [
+      r.person.name,
+      r.person.email,
+      STATUS[r.status],
+      r.attempt?.status === "IN_PROGRESS" ? "" : iso(r.attempt?.submittedAt),
+      iso(r.dueAt),
+      ...questions.map((q) => {
+        const a = mine?.get(q.id);
+        if (!a) return "";
+        if (isChoice(q.type)) return a.selectedOptionIds.map((id) => options.get(q.id)?.get(id) ?? "").filter(Boolean).join("; ");
+        return richToText(a.text, 100_000);
+      }),
+    ];
+  });
+  return [header, ...body];
 }
 
 // ─── Per-question statistics ─────────────────────────────────────────────────
@@ -399,6 +464,7 @@ export async function attemptForTaker(actor: Actor, attemptId: string) {
         select: {
           id: true,
           title: true,
+          isForm: true,
           clubId: true,
           timeLimitMinutes: true,
           passingPercent: true,
@@ -470,6 +536,9 @@ export async function resultForTaker(actor: Actor, attemptId: string) {
 export type MyTestItem = {
   testId: string;
   title: string;
+  isForm: boolean;
+  /** WSUSA assigned it (a club's own tests and forms aren't required). */
+  required: boolean;
   clubName: string | null;
   cycleKey: string;
   dueAt: Date | null;
@@ -484,13 +553,13 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
     db.testAssignment.findMany({
       where: { userId: actor.id, status: { in: ["ASSIGNED", "MISSED"] }, test: { status: "PUBLISHED" } },
       orderBy: { dueAt: "asc" },
-      select: { testId: true, cycleKey: true, dueAt: true, status: true, test: { select: { title: true, audience: true, recurrence: true, club: { select: { name: true, status: true } } } } },
+      select: { testId: true, cycleKey: true, dueAt: true, status: true, test: { select: { title: true, isForm: true, clubId: true, audience: true, recurrence: true, club: { select: { name: true, status: true } } } } },
     }),
     db.testAttempt.findMany({
       where: { userId: actor.id },
       orderBy: { startedAt: "desc" },
       take: 60,
-      select: { id: true, testId: true, cycleKey: true, status: true, passed: true, scorePercent: true, submittedAt: true, test: { select: { title: true, club: { select: { name: true } } } } },
+      select: { id: true, testId: true, cycleKey: true, status: true, passed: true, scorePercent: true, submittedAt: true, test: { select: { title: true, isForm: true, clubId: true, club: { select: { name: true } } } } },
     }),
   ]);
   const todo: MyTestItem[] = [];
@@ -504,6 +573,8 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
     todo.push({
       testId: a.testId,
       title: a.test.title,
+      isForm: a.test.isForm,
+      required: a.test.clubId === null,
       clubName: a.test.club?.name ?? null,
       cycleKey: a.cycleKey,
       dueAt: a.dueAt,
@@ -517,6 +588,8 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
     .map((a) => ({
       testId: a.testId,
       title: a.test.title,
+      isForm: a.test.isForm,
+      required: a.test.clubId === null,
       clubName: a.test.club?.name ?? null,
       cycleKey: a.cycleKey,
       dueAt: a.submittedAt,

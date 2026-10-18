@@ -8,7 +8,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyClubCapability } from "@/lib/domain/notify";
-import { reopenRequirementTasks } from "@/lib/domain/requirements";
+import { reopenRequirementTasks, syncUserRequirements } from "@/lib/domain/requirements";
 
 /**
  * Membership and calendar subscriptions. Register buttons (web + mobile),
@@ -50,6 +50,8 @@ export async function joinClub(actor: Actor | null, clubId: string, source: Memb
     await notifyClubCapability(clubId, "roster", { kind: "membership.requested", title: `New join request for ${club.name}`, body: `${actor.name} asked to join.`, href: `/clubs/${club.slug}/manage/members`, exceptUserId: actor.id, email: false });
   } else {
     await subscribeInternal(actor.id, clubId);
+    // New members owe whatever WSUSA requires of every club member.
+    await syncUserRequirements(actor.id, { notify: "due" });
   }
   await logActivity({ actorId: actor.id, action: gated ? "membership.requested" : "membership.joined", entityType: "membership", entityId: membership.id, clubId, data: { source }, isPublic: !gated });
   return { status: gated ? "PENDING" : "ACTIVE", membershipId: membership.id };
@@ -66,7 +68,10 @@ export async function decideMembership(actor: Actor | null, membershipId: string
   });
   if (claimed.count === 0) throw conflict("This request was already decided.");
   const updated = await db.membership.findUniqueOrThrow({ where: { id: m.id } });
-  if (approve) await subscribeInternal(m.userId, m.clubId);
+  if (approve) {
+    await subscribeInternal(m.userId, m.clubId);
+    await syncUserRequirements(m.userId, { notify: "due" });
+  }
   await resolveTasks("membership", m.id, actor!.id);
   await logActivity({ actorId: actor!.id, action: approve ? "membership.approved" : "membership.declined", entityType: "membership", entityId: m.id, clubId: m.clubId, isPublic: approve });
   await notify({
@@ -95,8 +100,8 @@ export async function leaveClub(actor: Actor | null, clubId: string) {
     db.calendarSubscription.deleteMany({ where: { userId: actor.id, clubId } }),
   ]);
   await resolveTasks("membership", m.id, actor.id, db, "CANCELLED");
-  // Ended roles: requirements they no longer owe close now, not on the next job tick.
-  if (roles.length) await reopenRequirementTasks(actor.id);
+  // Ended roles and membership: requirements they no longer owe close now, not on the next job tick.
+  await reopenRequirementTasks(actor.id);
   await logActivity({ actorId: actor.id, action: "membership.left", entityType: "membership", entityId: m.id, clubId });
 }
 
@@ -116,7 +121,7 @@ export async function removeMember(actor: Actor | null, membershipId: string) {
     db.membership.update({ where: { id: m.id }, data: { status: "REMOVED", endedAt: now } }),
     db.calendarSubscription.deleteMany({ where: { userId: m.userId, clubId: m.clubId } }),
   ]);
-  if (theirRoles.length) await reopenRequirementTasks(m.userId);
+  await reopenRequirementTasks(m.userId);
   await logActivity({ actorId: actor!.id, action: "membership.removed", entityType: "membership", entityId: m.id, clubId: m.clubId });
 }
 

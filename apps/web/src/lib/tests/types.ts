@@ -2,10 +2,27 @@
  * Test Tool vocabulary — pure and client-safe. The schema stores choice
  * options and automations as JSON; these helpers are the one place that
  * reads them, so a malformed row can't break a page.
+ *
+ * A form is a test with grading switched off (Test.isForm): no correct
+ * answers, points or passing score; every question needs an answer, and
+ * submitting it counts as a pass (passed: true, scorePercent: null). Copy
+ * says "form" and "fill out" wherever one is shown.
  */
 import type { QuestionType, RenewalPeriod, TestAudience, TestRecurrence, TestStatus } from "@prisma/client";
 
 export type QuestionOption = { id: string; text: string };
+
+/** "test" or "form", for copy. */
+export const testNoun = (isForm: boolean) => (isForm ? "form" : "test");
+
+/** What people do with it: "take" a test, "fill out" a form. */
+export const testVerb = (isForm: boolean) => (isForm ? "fill out" : "take");
+
+/** The same with "it": "take it", "fill it out". */
+const doIt = (isForm: boolean) => (isForm ? "fill it out" : "take it");
+
+/** The one label for the requirement audience; lib/domain/requirements quotes it in its errors. */
+export const REQUIREMENT_AUDIENCE_LABEL = "WSUSA requirement (set in Admin → Requirements)";
 
 export const AUTOMATION_TRIGGERS = ["PASSED", "FAILED", "MISSED_DEADLINE"] as const;
 export type AutomationTrigger = (typeof AUTOMATION_TRIGGERS)[number];
@@ -44,10 +61,19 @@ export function actionsFor(trigger: AutomationTrigger, scope: "club" | "universi
   });
 }
 
-export const automationAllowed = (a: Automation, scope: "club" | "university") => actionsFor(a.trigger, scope).includes(a.action);
+/** Results an automation can follow. Forms can't be failed, so "doesn't pass" isn't one. */
+export function triggersFor(isForm: boolean): AutomationTrigger[] {
+  return isForm ? AUTOMATION_TRIGGERS.filter((t) => t !== "FAILED") : [...AUTOMATION_TRIGGERS];
+}
+
+export const automationAllowed = (a: Automation, scope: "club" | "university", isForm = false) =>
+  triggersFor(isForm).includes(a.trigger) && actionsFor(a.trigger, scope).includes(a.action);
 
 /** New tests start with the one automation nearly everyone wants: tell people who didn't pass how to retake. */
 export const DEFAULT_AUTOMATIONS: Automation[] = [{ trigger: "FAILED", action: "NOTIFY_TAKER" }];
+
+/** Forms start with none: submitting already closes the person's task. */
+export const defaultAutomations = (isForm: boolean): Automation[] => (isForm ? [] : DEFAULT_AUTOMATIONS);
 
 export function parseOptions(json: unknown): QuestionOption[] {
   if (!Array.isArray(json)) return [];
@@ -105,7 +131,7 @@ export const RECURRENCE_LABEL: Record<TestRecurrence, string> = {
   ANNUAL: "Every calendar year",
 };
 
-/** How an officer requirement renews (and so how often its test comes back). */
+/** How a WSUSA requirement renews (and so how often its test or form comes back). */
 export const RENEWAL_LABEL: Record<RenewalPeriod, string> = {
   NONE: "Once — never renews",
   SEMESTER: "Every semester",
@@ -117,10 +143,10 @@ export const RENEWAL_LABEL: Record<RenewalPeriod, string> = {
 export const UNIVERSITY_AUDIENCES: TestAudience[] = ["ROLE_REQUIREMENT", "ALL_STUDENTS", "SELECTED_USERS", "OPEN"];
 export const CLUB_AUDIENCES: TestAudience[] = ["CLUB_MEMBERS", "SELECTED_USERS", "OPEN"];
 
-export function audienceLabel(a: TestAudience, scope: "club" | "university"): string {
+export function audienceLabel(a: TestAudience, scope: "club" | "university", isForm = false): string {
   switch (a) {
     case "ROLE_REQUIREMENT":
-      return "Student leaders (officer requirement)";
+      return REQUIREMENT_AUDIENCE_LABEL;
     case "CLUB_MEMBERS":
       return "Everyone in the club";
     case "ALL_STUDENTS":
@@ -128,14 +154,14 @@ export function audienceLabel(a: TestAudience, scope: "club" | "university"): st
     case "SELECTED_USERS":
       return scope === "club" ? "Members I choose" : "People I choose";
     case "OPEN":
-      return "Anyone who wants to take it";
+      return `Anyone who wants to ${doIt(isForm)}`;
   }
 }
 
-export function audienceDescription(a: TestAudience, scope: "club" | "university"): string {
+export function audienceDescription(a: TestAudience, scope: "club" | "university", isForm = false): string {
   switch (a) {
     case "ROLE_REQUIREMENT":
-      return "Officers, VPs and presidents take it when an officer requirement uses this test. Passing meets the requirement; missing the deadline pauses their leadership permissions.";
+      return `Members or officers it applies to are set on the requirement. ${isForm ? "Submitting the form" : "Passing"} meets it.`;
     case "CLUB_MEMBERS":
       return "Every active member gets it as a task, including people who join later.";
     case "ALL_STUDENTS":
@@ -143,7 +169,7 @@ export function audienceDescription(a: TestAudience, scope: "club" | "university
     case "SELECTED_USERS":
       return scope === "club" ? "Only the members you pick get it as a task." : "Only the people you pick get it as a task.";
     case "OPEN":
-      return "Nobody is assigned. Anyone signed in with a Weber State account can take it from the link.";
+      return `Nobody is assigned. Anyone signed in with a Weber State account can ${doIt(isForm)} from the link.`;
   }
 }
 
@@ -156,14 +182,17 @@ export const TRIGGER_LABEL: Record<AutomationTrigger, string> = {
   MISSED_DEADLINE: "When someone misses the deadline",
 };
 
-export function actionLabel(a: AutomationAction, scope: "club" | "university"): string {
+/** For forms, PASSED reads as submitting it. */
+export const triggerLabel = (t: AutomationTrigger, isForm: boolean) => (isForm && t === "PASSED" ? "When someone submits it" : TRIGGER_LABEL[t]);
+
+export function actionLabel(a: AutomationAction, scope: "club" | "university", isForm = false): string {
   switch (a) {
     case "NOTIFY_TAKER":
-      return "Tell the person who took it";
+      return isForm ? "Tell the person who filled it out" : "Tell the person who took it";
     case "NOTIFY_ADVISOR":
       return scope === "club" ? "Tell the club's advisors" : "Tell the advisors of their clubs";
     case "NOTIFY_ADMINS":
-      return scope === "club" ? "Tell leaders who manage club tests" : "Tell WSUSA administrators";
+      return scope === "club" ? `Tell leaders who manage club ${isForm ? "forms" : "tests"}` : "Tell WSUSA administrators";
     case "CREATE_ADMIN_TASK":
       return scope === "club" ? "Add a follow-up task for club leaders" : "Add a follow-up task for WSUSA administrators";
     case "APPROVE_JOIN_REQUEST":
@@ -171,15 +200,16 @@ export function actionLabel(a: AutomationAction, scope: "club" | "university"): 
     case "PAUSE_PERMISSIONS":
       return "Pause their officer permissions";
     case "RESUME_PERMISSIONS":
-      return "Give back officer permissions a test paused";
+      return `Give back officer permissions a ${isForm ? "form" : "test"} paused`;
   }
 }
 
-export type AttemptStatusLabel = "In progress" | "Waiting for review" | "Passed" | "Not passed";
+export type AttemptStatusLabel = "In progress" | "Waiting for review" | "Passed" | "Not passed" | "Submitted";
 
-export function attemptLabel(a: { status: "IN_PROGRESS" | "NEEDS_REVIEW" | "GRADED"; passed: boolean | null }): AttemptStatusLabel {
+export function attemptLabel(a: { status: "IN_PROGRESS" | "NEEDS_REVIEW" | "GRADED"; passed: boolean | null }, isForm = false): AttemptStatusLabel {
   if (a.status === "IN_PROGRESS") return "In progress";
   if (a.status === "NEEDS_REVIEW") return "Waiting for review";
+  if (isForm) return "Submitted";
   return a.passed ? "Passed" : "Not passed";
 }
 

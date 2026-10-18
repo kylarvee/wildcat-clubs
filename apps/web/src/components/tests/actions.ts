@@ -27,8 +27,8 @@ function refresh() {
   revalidatePath("/tasks");
 }
 
-export async function createTestAction(clubId: string | null, title: string) {
-  const r = await act((actor) => createTest(actor, { clubId, title }));
+export async function createTestAction(clubId: string | null, title: string, isForm = false) {
+  const r = await act((actor) => createTest(actor, { clubId, title, isForm }));
   if (r.ok) refresh();
   return r;
 }

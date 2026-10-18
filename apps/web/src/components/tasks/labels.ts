@@ -36,11 +36,14 @@ export const KIND_TONE: Record<TaskKind, Tone> = {
 /** Why there's no checkbox: these close when the underlying thing is done. */
 export const SELF_CLOSING_NOTE: Partial<Record<TaskKind, string>> = {
   APPROVAL: "Closes on its own once a decision is made — open it to approve or decline.",
-  REQUIREMENT: "Closes on its own when you pass the test or check in at the training.",
+  REQUIREMENT: "Closes on its own when you pass the test, fill out the form or check in at the training.",
   INVOICE: "Closes on its own when the invoice is marked processed.",
 };
 
 export const SELF_CLOSING: TaskKind[] = ["APPROVAL", "REQUIREMENT", "INVOICE"];
+
+/** The badge on tasks WSUSA requires (it replaces the kind badge). */
+export const REQUIRED_LABEL = "Required by WSUSA";
 
 export function isKind(v: string | undefined | null): v is TaskKind {
   return KIND_ORDER.includes(v as TaskKind);

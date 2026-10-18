@@ -26,10 +26,11 @@ export type RequirementFormValues = {
   active: boolean;
 };
 
-type TestOption = { id: string; title: string; status: string; audience: string };
+type TestOption = { id: string; title: string; status: string; audience: string; isForm: boolean };
 type EventOption = { id: string; title: string; kind: string };
 
 const ROLE_CHOICES: { value: ClubRole; label: string }[] = [
+  { value: "MEMBER", label: "Every club member" },
   { value: "PRESIDENT", label: "Presidents" },
   { value: "VP", label: "Vice presidents" },
   { value: "OFFICER", label: "Officers" },
@@ -38,7 +39,7 @@ const ROLE_CHOICES: { value: ClubRole; label: string }[] = [
 
 const RENEWALS: RenewalPeriod[] = ["ACADEMIC_YEAR", "SEMESTER", "ANNUAL", "NONE"];
 
-/** Create or edit an officer requirement: a test to pass or a training to attend, for chosen roles, with a grace period. */
+/** Create or edit a requirement: a test to pass, a form to fill out or a training to attend, for members and/or leader roles, with a grace period. */
 export function RequirementForm({ id, initial, tests, events }: { id: string | null; initial: RequirementFormValues; tests: TestOption[]; events: EventOption[] }) {
   const router = useRouter();
   const [v, setV] = useState(initial);
@@ -61,7 +62,7 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
       }).catch(() => null);
       if (!r) return setError("We couldn't reach the server. Try again.");
       if (!r.ok) return setError(r.error);
-      toast.success(id ? "Saved. Student leaders' tasks are being updated." : "Requirement added. Student leaders who need it are getting a task.");
+      toast.success(id ? "Saved. Everyone's tasks are being updated." : "Requirement added. Everyone it applies to is getting a required task.");
       router.push("/admin/requirements");
     });
   };
@@ -71,7 +72,7 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
       <Card>
         <CardHeader title="What's required" />
         <CardBody className="space-y-4">
-          <Field label="Name" required hint="Shown to student leaders in their tasks.">
+          <Field label="Name" required hint="Shown in people's tasks, marked Required by WSUSA.">
             {(fid) => <Input id={fid} value={v.name} maxLength={120} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Club Officer Policy Test" />}
           </Field>
           <Field label="Description" hint="Optional. What it covers and why it matters.">
@@ -82,7 +83,7 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
             <div className="grid gap-2 sm:grid-cols-2">
               {(
                 [
-                  ["TEST", "Pass a test", "Met by a passing attempt on a university test."],
+                  ["TEST", "Pass a test or fill out a form", "Met by passing a university test, or by submitting a university form."],
                   ["TRAINING", "Attend a training", "Met by a check-in at any session of a university training."],
                 ] as const
               ).map(([value, label, detail]) => (
@@ -98,11 +99,11 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
           </fieldset>
           {v.kind === "TEST" ? (
             <Field
-              label="Test"
+              label="Test or form"
               required
               hint={
                 <>
-                  Published university tests whose audience is “Student leaders”. Build or change one in{" "}
+                  Published university tests and forms whose audience is “WSUSA requirement”. Build or change one in{" "}
                   <Link href="/admin/tests" className="font-medium text-brand-600 hover:underline">
                     Tests
                   </Link>
@@ -112,17 +113,19 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
             >
               {(fid) => (
                 <Select id={fid} value={v.testId} onChange={(e) => set("testId", e.target.value)}>
-                  <option value="">Choose a test…</option>
+                  <option value="">Choose a test or form…</option>
                   {usableTests.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.title}
+                      {t.isForm ? " (form)" : ""}
                     </option>
                   ))}
                   {otherTests.length ? (
                     <optgroup label="Not ready yet">
                       {otherTests.map((t) => (
                         <option key={t.id} value={t.id} disabled>
-                          {t.title} — {t.status !== "PUBLISHED" ? "not published" : "audience isn't Student leaders"}
+                          {t.title}
+                          {t.isForm ? " (form)" : ""} — {t.status !== "PUBLISHED" ? "not published" : "audience isn't WSUSA requirement"}
                         </option>
                       ))}
                     </optgroup>
@@ -175,7 +178,9 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
                 />
               ))}
             </div>
-            <p className="mt-2 text-xs text-ink-3">Student leaders of approved clubs only. Advisors are never asked.</p>
+            <p className="mt-2 text-xs text-ink-3">
+              Students in approved clubs only; advisors are never asked. When it&apos;s overdue, leaders&apos; permissions pause. Members have nothing to pause, so it stays on their task list marked overdue.
+            </p>
           </fieldset>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Renews" hint="When everyone has to do it again.">
@@ -198,13 +203,13 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
           <p className="text-sm text-ink-2">
             {v.graceDays === 0
               ? "Leaders' permissions stay paused until this is done (their title stays)."
-              : `Leaders have ${v.graceDays} ${v.graceDays === 1 ? "day" : "days"} from the later of taking the role, their club's approval, or the start of each renewal period. After that, their permissions pause until it's done.`}
+              : `People have ${v.graceDays} ${v.graceDays === 1 ? "day" : "days"} from the latest of joining the club or taking the role, the club's approval, and the start of each renewal period. After that, leaders' permissions pause until it's done.`}
           </p>
           <label className="flex items-center gap-3">
             <Switch checked={v.active} onCheckedChange={(c) => set("active", c)} aria-label="Requirement is on" />
             <span className="text-sm">
               <span className="font-medium text-ink">{v.active ? "On" : "Off"}</span>
-              <span className="block text-xs text-ink-3">{v.active ? "Leaders are asked to complete it." : "Nobody is asked; open tasks for it close."}</span>
+              <span className="block text-xs text-ink-3">{v.active ? "Everyone it applies to is asked to complete it." : "Nobody is asked; open tasks for it close."}</span>
             </span>
           </label>
         </CardBody>

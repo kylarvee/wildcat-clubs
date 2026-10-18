@@ -199,3 +199,12 @@ export const REVIEWER_COMMENTS = [
   "Thorough plan. Nice work on the emergency plan.",
   "Missing the funding and advisor steps.",
 ];
+
+/** A WSUSA form (nothing graded): every club member confirms it once a year. */
+export const CONDUCT_FORM_INTRO = `<p>WSUSA asks every club member to read and confirm this once each academic year. It takes about a minute.</p><ul><li><strong>No hazing.</strong> Not as a "tradition," not as a joke, and not even if someone agrees to it. See the Hazing Prohibition policy.</li><li><strong>Respect everyone.</strong> Clubs are open to every eligible Weber State student, and members and guests are treated with respect.</li><li><strong>Speak up.</strong> Report harassment, discrimination or safety problems through <em>Report a concern</em>. You can stay anonymous.</li></ul>`;
+
+export const CONDUCT_QUESTIONS: QuestionDef[] = [
+  { type: "SINGLE_CHOICE", prompt: "<p>I've read WSUSA's Hazing Prohibition. I won't take part in hazing in any club, for any reason.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p>I'll treat every member and guest with respect, and I'll report harassment or discrimination when I see it.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SHORT_ANSWER", prompt: "<p>Type your full name to sign.</p>" },
+];

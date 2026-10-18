@@ -15,13 +15,17 @@ export type BuilderQuestion = EditorQuestion & { key: string };
 
 const TYPES: QuestionType[] = ["SINGLE_CHOICE", "MULTI_CHOICE", "SHORT_ANSWER", "LONG_ANSWER"];
 
-/** One question in the builder: type, prompt, answer choices (with the correct ones marked) or a model answer, and points. */
+/**
+ * One question in the builder: type, prompt, answer choices (with the correct ones marked) or a model answer, and points.
+ * For a form it's only the type, the prompt and the choices: nothing is graded, and one choice ("I agree") is enough.
+ */
 export function QuestionCard({
   question: q,
   index,
   total,
   clubId,
   aiOn,
+  isForm,
   problems,
   onChange,
   onMove,
@@ -33,6 +37,7 @@ export function QuestionCard({
   total: number;
   clubId: string | null;
   aiOn: boolean;
+  isForm: boolean;
   problems: Problem[];
   onChange: (q: BuilderQuestion) => void;
   onMove: (dir: -1 | 1) => void;
@@ -46,6 +51,8 @@ export function QuestionCard({
   const modelId = useId();
   const answered = q.answerCount > 0;
   const choice = isChoice(q.type);
+  const graded = !isForm;
+  const fewestChoices = isForm ? 1 : 2;
   const set = (patch: Partial<BuilderQuestion>) => onChange({ ...q, ...patch });
 
   const toggleCorrect = (optId: string) => {
@@ -74,7 +81,7 @@ export function QuestionCard({
           variant="ghost"
           size="icon"
           aria-label={answered ? `Question ${n} has answers and can't be deleted` : `Delete question ${n}`}
-          title={answered ? "People have answered this question, so it can't be deleted. Reword it, or copy the test." : undefined}
+          title={answered ? `People have answered this question, so it can't be deleted. Reword it, or copy the ${isForm ? "form" : "test"}.` : undefined}
           onClick={onDelete}
           disabled={answered}
           className="text-danger hover:text-danger"
@@ -84,7 +91,7 @@ export function QuestionCard({
       </header>
 
       <div className="space-y-4 px-4 py-4">
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+        <div className={cn("grid gap-3", graded && "sm:grid-cols-[minmax(0,1fr)_8rem]")}>
           <div className="space-y-1.5">
             <label htmlFor={typeId} className="block text-sm font-medium text-ink">
               Type
@@ -97,14 +104,16 @@ export function QuestionCard({
               ))}
             </Select>
           </div>
-          <div className="space-y-1.5">
-            <label htmlFor={pointsId} className="block text-sm font-medium text-ink">
-              Points
-            </label>
-            <NumberInput id={pointsId} value={q.points} onValue={(v) => set({ points: v })} min={1} max={LIMITS.points} />
-          </div>
+          {graded ? (
+            <div className="space-y-1.5">
+              <label htmlFor={pointsId} className="block text-sm font-medium text-ink">
+                Points
+              </label>
+              <NumberInput id={pointsId} value={q.points} onValue={(v) => set({ points: v })} min={1} max={LIMITS.points} />
+            </div>
+          ) : null}
         </div>
-        <Messages problems={fieldProblem("points")} />
+        {graded ? <Messages problems={fieldProblem("points")} /> : null}
 
         <div className="space-y-1.5">
           <p className="text-sm font-medium text-ink">Question</p>
@@ -124,7 +133,13 @@ export function QuestionCard({
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-ink">Answer choices</legend>
             <p className="text-xs text-ink-3">
-              {q.type === "SINGLE_CHOICE" ? "Mark the one correct answer." : "Mark every correct answer. People get the points only when they pick exactly these."}
+              {isForm
+                ? q.type === "SINGLE_CHOICE"
+                  ? "People pick one. A single choice like “I agree” makes an acknowledgement."
+                  : "People pick at least one."
+                : q.type === "SINGLE_CHOICE"
+                  ? "Mark the one correct answer."
+                  : "Mark every correct answer. People get the points only when they pick exactly these."}
             </p>
             <ul className="space-y-2">
               {q.options.map((o, i) => {
@@ -132,20 +147,22 @@ export function QuestionCard({
                 const letter = String.fromCharCode(65 + (i % 26));
                 return (
                   <li key={o.id} className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      role={q.type === "SINGLE_CHOICE" ? "radio" : "checkbox"}
-                      aria-checked={correct}
-                      aria-label={`Choice ${letter} is ${correct ? "" : "not "}a correct answer`}
-                      onClick={() => toggleCorrect(o.id)}
-                      className={cn(
-                        "inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-brand",
-                        correct ? "border-success bg-success-50 text-success" : "border-line-2 text-ink-3 hover:bg-muted",
-                      )}
-                    >
-                      {correct ? <Check className="h-4 w-4" aria-hidden /> : <span className="inline-block h-4 w-4 rounded-full border border-current" aria-hidden />}
-                      <span className="hidden sm:inline">{correct ? "Correct" : "Mark correct"}</span>
-                    </button>
+                    {graded ? (
+                      <button
+                        type="button"
+                        role={q.type === "SINGLE_CHOICE" ? "radio" : "checkbox"}
+                        aria-checked={correct}
+                        aria-label={`Choice ${letter} is ${correct ? "" : "not "}a correct answer`}
+                        onClick={() => toggleCorrect(o.id)}
+                        className={cn(
+                          "inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+                          correct ? "border-success bg-success-50 text-success" : "border-line-2 text-ink-3 hover:bg-muted",
+                        )}
+                      >
+                        {correct ? <Check className="h-4 w-4" aria-hidden /> : <span className="inline-block h-4 w-4 rounded-full border border-current" aria-hidden />}
+                        <span className="hidden sm:inline">{correct ? "Correct" : "Mark correct"}</span>
+                      </button>
+                    ) : null}
                     <Input
                       value={o.text}
                       maxLength={LIMITS.optionText}
@@ -157,7 +174,7 @@ export function QuestionCard({
                       variant="ghost"
                       size="icon"
                       aria-label={`Remove choice ${letter}`}
-                      disabled={q.options.length <= 2}
+                      disabled={q.options.length <= fewestChoices}
                       onClick={() => set({ options: q.options.filter((x) => x.id !== o.id), correctOptionIds: q.correctOptionIds.filter((x) => x !== o.id) })}
                     >
                       <X className="h-4 w-4" />
@@ -174,8 +191,10 @@ export function QuestionCard({
             >
               <Plus className="h-4 w-4" aria-hidden /> Add a choice
             </Button>
-            <Messages problems={[...fieldProblem("options"), ...fieldProblem("correct")]} />
+            <Messages problems={[...fieldProblem("options"), ...(graded ? fieldProblem("correct") : [])]} />
           </fieldset>
+        ) : isForm ? (
+          <p className="text-xs text-ink-3">People write their answer{q.type === "LONG_ANSWER" ? " — as long as they need" : " in a sentence or two"}. It&apos;s required, like every question on a form.</p>
         ) : (
           <div className="space-y-1.5">
             <label htmlFor={modelId} className="block text-sm font-medium text-ink">

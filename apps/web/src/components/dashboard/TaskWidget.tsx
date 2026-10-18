@@ -4,39 +4,43 @@ import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/dashboard/Panel";
 import { AddTaskForm } from "@/components/tasks/AddTaskForm";
 import { TaskList } from "@/components/tasks/TaskList";
-import { toTaskItem } from "@/components/tasks/items";
+import { groupJoinRequests } from "@/components/tasks/items";
 
 const SHOW = 6;
 
 /**
- * The Task Manager, small: your soonest open tasks with their kind and due
- * date, a quick add for personal to-dos, and a link to the full list.
+ * The Task Manager, small: what WSUSA requires first (listTasks sorts it
+ * there), then your soonest open tasks, with join requests grouped per club,
+ * a quick add for personal to-dos, and a link to the full list.
  */
-export function TaskWidget({ tasks, viewerId, now }: { tasks: TaskRow[]; viewerId: string; now: Date }) {
-  const items = tasks.map((t) => toTaskItem(t, viewerId, now));
+export function TaskWidget({ tasks, viewerId, now, title = "Tasks", note }: { tasks: TaskRow[]; viewerId: string; now: Date; title?: string; note?: string }) {
+  const items = groupJoinRequests(tasks, viewerId, now);
   const shown = items.slice(0, SHOW);
-  const overdue = items.filter((t) => t.due?.overdue).length;
+  const overdue = tasks.filter((t) => t.dueAt && t.dueAt < now).length;
+  const required = tasks.filter((t) => t.required).length;
   return (
     <Panel
       id="dash-tasks"
       title={
         <>
-          Tasks
-          {items.length ? <Badge tone="brand">{items.length} open</Badge> : null}
+          {title}
+          {tasks.length ? <Badge tone="brand">{tasks.length} open</Badge> : null}
+          {required ? <Badge tone="danger">{required} required</Badge> : null}
           {overdue ? <Badge tone="danger">{overdue} overdue</Badge> : null}
         </>
       }
       icon={<ListChecks />}
-      link={{ href: "/tasks", label: items.length > SHOW ? `See all ${items.length}` : "See all" }}
+      link={{ href: "/tasks", label: items.length > SHOW ? `See all ${tasks.length}` : "See all" }}
     >
       <AddTaskForm compact className="mb-4" />
       {shown.length ? (
         <TaskList items={shown} compact />
       ) : (
         <p className="flex items-center gap-2 text-sm text-ink-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden /> You&apos;re all caught up. Approvals, officer requirements and tasks from your clubs land here.
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden /> You&apos;re all caught up. Approvals, WSUSA requirements and tasks from your clubs land here.
         </p>
       )}
+      {note ? <p className="mt-3 border-t border-line pt-3 text-xs text-ink-3">{note}</p> : null}
     </Panel>
   );
 }

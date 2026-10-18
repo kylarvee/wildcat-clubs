@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/authz", () => ({ CAPABILITIES: { budget: { label: "Budget & funding", description: "" } } }));
 
 import { campusDate } from "@/lib/time";
-import { dueInfo } from "./items";
+import { dueInfo, groupJoinRequests } from "./items";
 
 describe("task due dates (campus time)", () => {
   const now = campusDate(2026, 10, 16, 9, 0); // Friday 9:00 AM in Ogden
@@ -34,5 +34,26 @@ describe("task due dates (campus time)", () => {
 
   it("returns null without a due date", () => {
     expect(dueInfo(null, now)).toBeNull();
+  });
+});
+
+describe("groupJoinRequests", () => {
+  const now = campusDate(2026, 10, 16, 9, 0);
+  const club = { name: "Wildcat Robotics", slug: "wildcat-robotics", logoColor: "#1d4ed8", logoUrl: null };
+  const row = (id: string, over: Record<string, unknown> = {}) =>
+    ({
+      id, kind: "APPROVAL", title: `Person ${id} asked to join Wildcat Robotics`, description: null, assigneeType: "CLUB", assigneeId: null, clubId: "c1", club,
+      capability: "roster", href: "/clubs/wildcat-robotics/manage/members", dueAt: null, required: false, status: "OPEN", sourceType: "membership", sourceId: id,
+      createdById: null, createdBy: null, createdAt: now, completedAt: null, completedById: null, completedBy: null, assignee: null, ...over,
+    }) as unknown as Parameters<typeof groupJoinRequests>[0][number];
+
+  it("collapses a club's join requests into one row where the first one was", () => {
+    const items = groupJoinRequests([row("personal", { kind: "PERSONAL", sourceType: null, clubId: null, club: null }), row("a"), row("b"), row("c")], "me", now);
+    expect(items.map((i) => i.title)).toEqual(["Person personal asked to join Wildcat Robotics", "3 people asked to join Wildcat Robotics"]);
+    expect(items[1].href).toBe("/clubs/wildcat-robotics/manage/members");
+  });
+
+  it("leaves a single request alone", () => {
+    expect(groupJoinRequests([row("a")], "me", now)[0].title).toBe("Person a asked to join Wildcat Robotics");
   });
 });

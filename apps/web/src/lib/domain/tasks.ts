@@ -21,6 +21,10 @@ import { campusDate } from "@/lib/time";
  *
  * People close only the kinds they own (PERSONAL, CLUB). APPROVAL,
  * REQUIREMENT and INVOICE tasks close themselves when the thing is done.
+ *
+ * Required tasks are the ones WSUSA requires (officer and member
+ * requirements, WSUSA-assigned tests and forms). The creating domain function
+ * sets `required`; every list puts them first and marks them Required.
  */
 
 export type TaskAssignee =
@@ -38,6 +42,8 @@ export type NewTask = {
   clubId?: string | null;
   source?: { type: string; id: string };
   createdById?: string | null;
+  /** WSUSA requires it (see the module comment). */
+  required?: boolean;
 };
 
 /** Kinds that close on their own once the underlying thing is decided or done. */
@@ -56,6 +62,7 @@ export async function createTask(t: NewTask, tx: Tx = db) {
       capability: t.assignee.type === "CLUB" ? t.assignee.capability : null,
       href: t.href,
       dueAt: t.dueAt ?? null,
+      required: t.required ?? false,
       sourceType: t.source?.type,
       sourceId: t.source?.id,
       createdById: t.createdById ?? null,
@@ -104,8 +111,8 @@ export type ListTasksOpts = {
 };
 
 /**
- * Your inbox. Open tasks come soonest-due first (undated last); done tasks
- * come most recently finished first.
+ * Your inbox. Open tasks come required first, then soonest-due (undated
+ * last); done tasks come most recently finished first.
  */
 export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): Promise<TaskRow[]> {
   assertSignedIn(actor);
@@ -116,7 +123,10 @@ export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): 
   if (opts.clubId) filters.push({ clubId: opts.clubId });
   return db.task.findMany({
     where: { AND: filters },
-    orderBy: status === "OPEN" ? [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }] : [{ completedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    orderBy:
+      status === "OPEN"
+        ? [{ required: "desc" }, { dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }]
+        : [{ completedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
     take: opts.take ?? 100,
     include: taskInclude,
   });

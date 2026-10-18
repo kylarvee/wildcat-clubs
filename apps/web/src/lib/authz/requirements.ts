@@ -7,14 +7,17 @@ import { TZ } from "@/lib/time";
 import { TZDate } from "@date-fns/tz";
 
 /**
- * Officer requirements (tests and trainings set by admins).
- * Fulfillment is computed from the Test Tool (passed attempts) and the
- * Attendance Tool (training check-ins) — never stored separately, so the gate
- * can't disagree with the records it's based on.
+ * Requirements (tests, forms and trainings WSUSA sets for members and
+ * student leaders). Fulfillment is computed from the Test Tool (passed
+ * attempts; a submitted form counts as passed) and the Attendance Tool
+ * (training check-ins) — never stored separately, so the gate can't disagree
+ * with the records it's based on.
  *
- * Each requirement must be met within `graceDays` of the later of: taking the
- * role, the club's approval, or the start of the renewal period. Past that the
- * role's capabilities pause until it's done (graceDays = 0 makes it a hard gate).
+ * Each requirement must be met within `graceDays` of the latest of: taking
+ * the role (or joining, for MEMBER), the club's approval, the start of the
+ * renewal period, and the day the requirement was added (so a new one never
+ * starts out overdue). Past that a leader role's capabilities pause until
+ * it's done (graceDays = 0 makes it a hard gate); members have nothing to pause.
  */
 
 export type RequirementItem = {
@@ -54,7 +57,7 @@ export async function requirementStatus(
           where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId } },
         })) > 0;
     }
-    const clock = Math.max(ctx.assignmentStartedAt.getTime(), ctx.clubApprovedAt?.getTime() ?? 0, periodStart.getTime());
+    const clock = Math.max(ctx.assignmentStartedAt.getTime(), ctx.clubApprovedAt?.getTime() ?? 0, periodStart.getTime(), r.createdAt.getTime());
     const dueAt = new Date(clock + r.graceDays * 86_400_000);
     items.push({ requirement: r, met, periodStart, dueAt, overdue: !met && at > dueAt });
   }

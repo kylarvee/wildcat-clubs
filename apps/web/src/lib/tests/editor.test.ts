@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { blankQuestion, changeQuestionType, nextOptionId, testProblems, totalPoints, type EditorTest } from "@/lib/tests/editor";
 
 const base = (over: Partial<EditorTest> = {}): EditorTest => ({
+  isForm: false,
   title: "Event Safety Quiz",
   introHtml: "",
   timeLimitMinutes: 15,
@@ -75,6 +76,37 @@ describe("publish checks", () => {
 
   it("totals points", () => {
     expect(totalPoints(base({ questions: [{ ...base().questions[0], points: 3 }, { ...base().questions[0], id: "q2", points: 2 }] }))).toBe(5);
+  });
+});
+
+describe("form checks", () => {
+  const form = (over: Partial<EditorTest> = {}) => base({ isForm: true, title: "Officer contact form", audience: "ALL_STUDENTS", ...over });
+
+  it("doesn't ask for correct answers, model answers or points", () => {
+    const q = base().questions[0];
+    const open = { ...blankQuestion("LONG_ANSWER", "q2"), promptHtml: "<p>How can we reach you over the summer?</p>" };
+    const problems = testProblems(form({ questions: [{ ...q, correctOptionIds: [], points: 0 }, { ...open, modelAnswer: "" }] }), "university");
+    expect(problems).toEqual([]);
+  });
+
+  it("ignores grading settings", () => {
+    expect(testProblems(form({ timeLimitMinutes: 0, passingPercent: 0, maxAttempts: 0 }), "university")).toEqual([]);
+  });
+
+  it("allows a one-choice acknowledgement, but not an empty choice", () => {
+    const agree = { ...blankQuestion("SINGLE_CHOICE", "q1"), promptHtml: "<p>I've read the code of conduct.</p>", options: [{ id: "a", text: "I agree" }] };
+    expect(testProblems(form({ questions: [agree] }), "university")).toEqual([]);
+    expect(testProblems(form({ questions: [{ ...agree, options: [{ id: "a", text: " " }] }] }), "university").map((p) => p.field)).toContain("options");
+    // A graded test still needs two choices.
+    expect(testProblems(base({ questions: [{ ...agree, correctOptionIds: ["a"] }] }), "club").map((p) => p.field)).toContain("options");
+  });
+
+  it("still needs a title, an audience, questions and prompts, and says form", () => {
+    const problems = testProblems(form({ title: "x", audience: "SELECTED_USERS", questions: [] }), "university");
+    expect(problems.map((p) => p.field)).toEqual(expect.arrayContaining(["title", "audience", "questions"]));
+    expect(problems.find((p) => p.field === "title")?.message).toMatch(/form/);
+    const blank = { ...base().questions[0], promptHtml: "<p></p>" };
+    expect(testProblems(form({ questions: [blank] }), "university").map((p) => p.field)).toContain("prompt");
   });
 });
 

@@ -11,7 +11,7 @@ export default async function NewRequirementPage() {
   const { tests, events } = await requirementTargets();
   return (
     <div>
-      <PageHeader breadcrumbs={[{ href: "/admin/requirements", label: "Officer requirements" }, { label: "New" }]} title="New officer requirement" />
+      <PageHeader breadcrumbs={[{ href: "/admin/requirements", label: "Requirements" }, { label: "New" }]} title="New requirement" />
       <RequirementForm
         id={null}
         tests={tests}

@@ -14,6 +14,7 @@ import { METHOD_LABEL } from "@/lib/attendance/rules";
 import { richToText } from "@/lib/rich/sanitize";
 import { campusDate, DAY_MS, fmtDate, inCampusTime } from "@/lib/time";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/components/clubs/labels";
+import { dueInfo } from "@/components/tasks/items";
 import {
   currentSeats,
   feedToMEvent,
@@ -68,12 +69,19 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
   assertSignedIn(actor);
   const now = new Date();
   const ctx = await viewerContext(actor);
-  const [live, states, seats, feed, announcements] = await Promise.all([
+  const [live, states, seats, feed, announcements, required] = await Promise.all([
     liveOccurrencesForUser(actor),
     viewerClubStates(actor.id),
     currentSeats(actor.id),
     feedOccurrences(ctx, { scope: "me" }, { start: now, end: new Date(now.getTime() + UPCOMING_DAYS * DAY_MS) }, { take: 60 }),
     announcementFeed(actor.id, 5),
+    // Required tasks are always assigned to a person (requirements, WSUSA tests and forms).
+    db.task.findMany({
+      where: { assigneeType: "USER", assigneeId: actor.id, status: "OPEN", required: true },
+      orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
+      take: 10,
+      select: { id: true, title: true, dueAt: true, href: true },
+    }),
   ]);
 
   // "My clubs": active member, pending request, or a current role — in approved clubs.
@@ -102,6 +110,10 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
       .filter((e) => !e.cancelled)
       .slice(0, UPCOMING_LIMIT),
     announcements: announcements.map(toMAnnouncement),
+    required: required.map((t) => {
+      const due = dueInfo(t.dueAt, now);
+      return { id: t.id, title: t.title, dueLabel: due?.label ?? null, overdue: Boolean(due?.overdue), path: t.href ?? "/tasks" };
+    }),
   };
 }
 

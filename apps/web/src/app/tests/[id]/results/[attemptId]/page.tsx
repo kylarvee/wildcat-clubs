@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { testOrFormTitle } from "@/lib/tests/queries";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { CheckCircle2, CircleDashed, Hourglass, MinusCircle, XCircle } from "lucide-react";
@@ -13,15 +14,19 @@ import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
 import { Callout, Container, PageHeader } from "@/components/ui/layout";
 import { RichContent } from "@/components/rich/RichContent";
+import { FormAnswers } from "@/components/tests/FormAnswers";
 import { StartTestButton } from "@/components/tests/StartTestButton";
 
-export const metadata: Metadata = { title: "Test results" };
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  return { title: await testOrFormTitle((await params).id, "Test results", "Your answers") };
+}
 
 /**
  * A taker's results. Multiple choice is scored the moment they hand in;
  * written answers show "awaiting review" until a person grades them, then the
  * final pass/fail. Which choices were correct isn't revealed, so a retake
- * still tests what people know.
+ * still tests what people know. A form shows "Submitted" and their answers,
+ * read-only.
  */
 export default async function ResultsPage({ params }: { params: Promise<{ id: string; attemptId: string }> }) {
   const { id, attemptId } = await params;
@@ -37,6 +42,33 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   const graded = attempt.status === "GRADED";
   const pendingCount = items.filter((i) => i.earned === null).length;
   const owner = test.club?.name ?? "WSUSA";
+
+  if (test.isForm) {
+    return (
+      <Container size="md">
+        <PageHeader breadcrumbs={[{ href: "/tests", label: "Your tests" }, { href: `/tests/${id}`, label: test.title }, { label: "Your answers" }]} title={test.title} description={`From ${owner}`} />
+        <Card className="mb-6">
+          <CardBody className="flex flex-wrap items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-success" aria-hidden />
+            <div>
+              <p className="text-lg font-semibold text-ink">{attempt.submittedAt ? `Submitted ${fmtDate(attempt.submittedAt, "EEE, MMM d")} at ${fmtTime(attempt.submittedAt)}` : "Submitted"}</p>
+              <p className="text-sm text-ink-2">
+                {attempt.autoSubmitted ? "It was handed in with the answers you'd saved when the form closed. " : "Thanks for filling it out. "}
+                {test.requirements.length ? "This meets your WSUSA requirement for this round." : "Nothing more to do."}
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+        <h2 className="mb-3 text-lg font-semibold text-ink">Your answers</h2>
+        <FormAnswers items={items.map((it) => ({ questionId: it.questionId, type: it.type, promptHtml: it.promptHtml, options: it.options, text: it.text }))} />
+        <p className="mt-8 text-sm text-ink-3">
+          <Link href="/tests" className="font-medium text-brand-600 hover:underline">
+            Back to your tests
+          </Link>
+        </p>
+      </Container>
+    );
+  }
 
   return (
     <Container size="md">
@@ -68,7 +100,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
                 <p className="text-sm text-ink-2">
                   Score {fmtPercent(attempt.scorePercent)} · {fmtPoints(score.earned)} of {score.possible} points · {test.passingPercent}% needed
                 </p>
-                {attempt.passed && test.requirements.length ? <p className="mt-1 text-sm text-success">This meets your officer requirement for this round.</p> : null}
+                {attempt.passed && test.requirements.length ? <p className="mt-1 text-sm text-success">This meets your WSUSA requirement for this round.</p> : null}
               </div>
             </div>
           ) : (

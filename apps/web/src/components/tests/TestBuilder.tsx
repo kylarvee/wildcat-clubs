@@ -13,6 +13,7 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { toast } from "@/components/ui/misc";
 import { RichTextEditor } from "@/components/rich/RichTextEditor";
+import { KindChoice } from "@/components/tests/KindChoice";
 import { NumberInput } from "@/components/tests/NumberInput";
 import { PeopleChooser } from "@/components/tests/PeopleChooser";
 import { QuestionCard, type BuilderQuestion } from "@/components/tests/QuestionCard";
@@ -25,11 +26,14 @@ import {
   actionsFor,
   audienceDescription,
   audienceLabel,
-  AUTOMATION_TRIGGERS,
+  automationAllowed,
   CLUB_AUDIENCES,
   isClubAction,
   RECURRENCE_LABEL,
-  TRIGGER_LABEL,
+  REQUIREMENT_AUDIENCE_LABEL,
+  testNoun,
+  triggerLabel,
+  triggersFor,
   UNIVERSITY_AUDIENCES,
   type Automation,
 } from "@/lib/tests/types";
@@ -63,8 +67,10 @@ function tempId() {
 
 /**
  * The Test Tool builder: one editor for WSUSA's university tests and clubs'
- * own tests. Everything saves together; the problems list mirrors the checks
- * the server runs before publishing (lib/tests/editor.testProblems).
+ * own tests, and for forms (a test with grading switched off: no scoring
+ * settings, correct answers, points or model answers). Everything saves
+ * together; the problems list mirrors the checks the server runs before
+ * publishing (lib/tests/editor.testProblems).
  */
 export function TestBuilder({
   scope,
@@ -82,9 +88,9 @@ export function TestBuilder({
   status: TestStatus;
   initial: EditorTest;
   initialPeople: TestPersonOption[];
-  /** Active officer requirements that use this test. */
+  /** Active WSUSA requirements that use this test or form. */
   requirementNames: string[];
-  /** For officer-requirement tests: how the requirement renews, in words. */
+  /** For requirement tests and forms: how the requirement renews, in words. */
   renewalLabel: string | null;
   attemptCount: number;
   aiOn: boolean;
@@ -112,11 +118,21 @@ export function TestBuilder({
   const audiences = kind === "club" ? CLUB_AUDIENCES : UNIVERSITY_AUDIENCES;
   const requirementLocked = requirementNames.length > 0;
   const live = status === "PUBLISHED";
+  const isForm = settings.isForm;
+  const noun = testNoun(isForm);
+  // Test ↔ form only while nobody could have started it.
+  const canSwitchKind = status === "DRAFT" && attemptCount === 0;
 
   const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((s) => ({ ...s, [key]: value }));
     setDirty(true);
   }, []);
+
+  // A form can't be failed, so automations that follow "doesn't pass" go when switching to one.
+  const setKind = (form: boolean) => {
+    setSettings((s) => ({ ...s, isForm: form, automations: s.automations.filter((a) => automationAllowed(a, kind, form)) }));
+    setDirty(true);
+  };
 
   const changeQuestions = useCallback((fn: (qs: BuilderQuestion[]) => BuilderQuestion[]) => {
     setQuestions(fn);
@@ -163,7 +179,7 @@ export function TestBuilder({
 
   const onSave = () =>
     run("save", async () => {
-      if (await save()) toast.success(live ? "Saved. Changes are live for anyone who starts the test from now on." : "Draft saved.");
+      if (await save()) toast.success(live ? `Saved. Changes are live for anyone who starts the ${noun} from now on.` : "Draft saved.");
     });
 
   // Ctrl/Cmd+S saves.
@@ -197,8 +213,8 @@ export function TestBuilder({
         r.data.assigned
           ? `Published. ${r.data.assigned} ${r.data.assigned === 1 ? "person was" : "people were"} assigned and notified.`
           : status === "ARCHIVED"
-            ? "Reopened. People can take it again."
-            : "Published. People can take it now.",
+            ? `Reopened. People can ${isForm ? "fill it out" : "take it"} again.`
+            : `Published. People can ${isForm ? "fill it out" : "take it"} now.`,
       );
       router.refresh();
     });
@@ -215,7 +231,7 @@ export function TestBuilder({
       if (dirty && !(await save())) return;
       const r = await archiveTestAction(testId);
       if (!r.ok) return setServerError(r.error);
-      toast.success("Archived. Open assignments were excused; results stay available.");
+      toast.success(`Archived. Open assignments were excused; ${isForm ? "responses" : "results"} stay available.`);
       router.refresh();
     });
 
@@ -253,22 +269,30 @@ export function TestBuilder({
   return (
     <div className="space-y-6 pb-4">
       {live && attemptCount > 0 ? (
-        <Callout tone="info" title="This test is live">
-          {attemptCount} {attemptCount === 1 ? "attempt has" : "attempts have"} been taken. Edits apply to anyone who starts it from now on. Questions people have answered can be reworded but not deleted — make a copy for bigger changes.
+        <Callout tone="info" title={`This ${noun} is live`}>
+          {isForm ? `${attemptCount} ${attemptCount === 1 ? "person has" : "people have"} started it.` : `${attemptCount} ${attemptCount === 1 ? "attempt has" : "attempts have"} been taken.`} Edits apply to anyone who starts it from now on. Questions people have answered can be reworded but not deleted — make a copy for bigger changes.
         </Callout>
       ) : null}
 
       <Card>
-        <CardHeader title="Basics" description="The title people see in their tasks and on the test page." />
-        <CardBody>
+        <CardHeader title="Basics" description={`The title people see in their tasks and on the ${noun} page.`} />
+        <CardBody className="space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-ink">Test or form</p>
+            <KindChoice isForm={isForm} onChange={setKind} disabled={!canSwitchKind} />
+            {!canSwitchKind ? <p className="text-xs text-ink-3">This can only change while it&apos;s a draft. Make a copy to switch the copy.</p> : null}
+          </div>
           <Field label="Title" required error={generalProblems.find((p) => p.field === "title")?.message}>
-            {(id) => <Input id={id} value={settings.title} maxLength={LIMITS.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Event Safety Quiz" />}
+            {(id) => <Input id={id} value={settings.title} maxLength={LIMITS.title} onChange={(e) => update("title", e.target.value)} placeholder={isForm ? "e.g. Officer contact form" : "e.g. Event Safety Quiz"} />}
           </Field>
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="Intro page" description="What people read before they start: instructions, the policy they're tested on, a video. Paste a YouTube or Google Drive link to embed it." />
+        <CardHeader
+          title="Intro page"
+          description={`What people read before they start: instructions, the policy they're ${isForm ? "acknowledging" : "tested on"}, a video. Paste a YouTube or Google Drive link to embed it.`}
+        />
         <CardBody>
           <RichTextEditor
             defaultValue={initial.introHtml}
@@ -278,74 +302,84 @@ export function TestBuilder({
             variant="full"
             minHeight={200}
             ariaLabel="Intro page"
-            placeholder="Explain what this test covers and anything people should read or watch first…"
+            placeholder={isForm ? "Explain what this form is for and anything people should read first…" : "Explain what this test covers and anything people should read or watch first…"}
           />
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="Timing & scoring" />
-        <CardBody className="grid gap-6 md:grid-cols-3">
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-ink">Time limit</legend>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="time-limit" className="accent-[var(--color-brand)]" checked={!timeLimited} onChange={() => update("timeLimitMinutes", null)} />
-              No time limit
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="time-limit" className="accent-[var(--color-brand)]" checked={timeLimited} onChange={() => update("timeLimitMinutes", settings.timeLimitMinutes ?? 30)} />
-              Limit to
-            </label>
-            {timeLimited ? (
-              <div className="flex items-center gap-2 pl-6">
-                <NumberInput value={settings.timeLimitMinutes ?? 30} onValue={(n) => update("timeLimitMinutes", n)} min={1} max={LIMITS.timeLimit} className="w-24" aria-label="Time limit in minutes" />
-                <span className="text-sm text-ink-2">minutes</span>
-              </div>
-            ) : (
-              <p className="pl-6 text-xs text-ink-3">The clock still runs, so you'll see how long people took.</p>
-            )}
-            <ProblemText problems={generalProblems} field="timeLimit" />
-          </fieldset>
-
-          <div className="space-y-2">
-            <Field label="Passing score" hint="Out of all points on the test.">
-              {(id) => (
-                <div className="flex items-center gap-2">
-                  <NumberInput id={id} value={settings.passingPercent} onValue={(n) => update("passingPercent", n)} min={1} max={100} className="w-24" />
-                  <span className="text-sm text-ink-2">%</span>
+      {isForm ? null : (
+        <Card>
+          <CardHeader title="Timing & scoring" />
+          <CardBody className="grid gap-6 md:grid-cols-3">
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-ink">Time limit</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" name="time-limit" className="accent-[var(--color-brand)]" checked={!timeLimited} onChange={() => update("timeLimitMinutes", null)} />
+                No time limit
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" name="time-limit" className="accent-[var(--color-brand)]" checked={timeLimited} onChange={() => update("timeLimitMinutes", settings.timeLimitMinutes ?? 30)} />
+                Limit to
+              </label>
+              {timeLimited ? (
+                <div className="flex items-center gap-2 pl-6">
+                  <NumberInput value={settings.timeLimitMinutes ?? 30} onValue={(n) => update("timeLimitMinutes", n)} min={1} max={LIMITS.timeLimit} className="w-24" aria-label="Time limit in minutes" />
+                  <span className="text-sm text-ink-2">minutes</span>
                 </div>
+              ) : (
+                <p className="pl-6 text-xs text-ink-3">The clock still runs, so you'll see how long people took.</p>
               )}
-            </Field>
-            <ProblemText problems={generalProblems} field="passing" />
-          </div>
+              <ProblemText problems={generalProblems} field="timeLimit" />
+            </fieldset>
 
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-ink">Attempts{oneOff ? "" : " per round"}</legend>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="attempts" className="accent-[var(--color-brand)]" checked={settings.maxAttempts === null} onChange={() => update("maxAttempts", null)} />
-              Unlimited
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="attempts" className="accent-[var(--color-brand)]" checked={settings.maxAttempts !== null} onChange={() => update("maxAttempts", settings.maxAttempts ?? 3)} />
-              Up to
-            </label>
-            {settings.maxAttempts !== null ? (
-              <div className="flex items-center gap-2 pl-6">
-                <NumberInput value={settings.maxAttempts} onValue={(n) => update("maxAttempts", n)} min={1} max={LIMITS.attempts} className="w-24" aria-label="Maximum attempts" />
-                <span className="text-sm text-ink-2">{settings.maxAttempts === 1 ? "attempt" : "attempts"}</span>
-              </div>
-            ) : null}
-            <ProblemText problems={generalProblems} field="attempts" />
-          </fieldset>
-        </CardBody>
-      </Card>
+            <div className="space-y-2">
+              <Field label="Passing score" hint="Out of all points on the test.">
+                {(id) => (
+                  <div className="flex items-center gap-2">
+                    <NumberInput id={id} value={settings.passingPercent} onValue={(n) => update("passingPercent", n)} min={1} max={100} className="w-24" />
+                    <span className="text-sm text-ink-2">%</span>
+                  </div>
+                )}
+              </Field>
+              <ProblemText problems={generalProblems} field="passing" />
+            </div>
+
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-ink">Attempts{oneOff ? "" : " per round"}</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" name="attempts" className="accent-[var(--color-brand)]" checked={settings.maxAttempts === null} onChange={() => update("maxAttempts", null)} />
+                Unlimited
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" name="attempts" className="accent-[var(--color-brand)]" checked={settings.maxAttempts !== null} onChange={() => update("maxAttempts", settings.maxAttempts ?? 3)} />
+                Up to
+              </label>
+              {settings.maxAttempts !== null ? (
+                <div className="flex items-center gap-2 pl-6">
+                  <NumberInput value={settings.maxAttempts} onValue={(n) => update("maxAttempts", n)} min={1} max={LIMITS.attempts} className="w-24" aria-label="Maximum attempts" />
+                  <span className="text-sm text-ink-2">{settings.maxAttempts === 1 ? "attempt" : "attempts"}</span>
+                </div>
+              ) : null}
+              <ProblemText problems={generalProblems} field="attempts" />
+            </fieldset>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
-        <CardHeader title="Who takes it" description={kind === "club" ? "Club tests are for your members, or anyone with the link." : "University tests can be officer requirements, campus-wide, or for people you pick."} />
+        <CardHeader
+          title={isForm ? "Who fills it out" : "Who takes it"}
+          description={
+            kind === "club"
+              ? `Club ${noun}s are for your members, or anyone with the link.`
+              : `University ${noun}s can be WSUSA requirements, campus-wide, or for people you pick.`
+          }
+        />
         <CardBody className="space-y-4">
+          {isForm ? <p className="text-sm text-ink-2">Each person submits it once{oneOff ? "" : " per round"}, and every question needs an answer.</p> : null}
           {requirementLocked ? (
-            <Callout tone="brand" title="Used by an officer requirement">
-              {requirementNames.join(", ")} {requirementNames.length === 1 ? "uses" : "use"} this test, so its audience stays “Student leaders”. Turn the requirement off in Officer requirements to change it.
+            <Callout tone="brand" title="Used by a WSUSA requirement">
+              {requirementNames.join(", ")} {requirementNames.length === 1 ? "uses" : "use"} this {noun}, so its audience stays “{REQUIREMENT_AUDIENCE_LABEL}”. Turn the requirement off in Admin → Requirements to change it.
             </Callout>
           ) : null}
           <fieldset>
@@ -365,8 +399,8 @@ export function TestBuilder({
                   >
                     <input type="radio" name="audience" className="mt-1 accent-[var(--color-brand)]" checked={checked} disabled={disabled} onChange={() => update("audience", a as TestAudience)} />
                     <span>
-                      <span className="block text-sm font-medium text-ink">{audienceLabel(a, kind)}</span>
-                      <span className="block text-xs leading-relaxed text-ink-3">{audienceDescription(a, kind)}</span>
+                      <span className="block text-sm font-medium text-ink">{audienceLabel(a, kind, isForm)}</span>
+                      <span className="block text-xs leading-relaxed text-ink-3">{audienceDescription(a, kind, isForm)}</span>
                     </span>
                   </label>
                 );
@@ -378,6 +412,7 @@ export function TestBuilder({
             <div className="rounded-xl border border-line p-4">
               <PeopleChooser
                 clubId={scope.clubId}
+                isForm={isForm}
                 selected={people}
                 onChange={(p) => {
                   setPeople(p);
@@ -388,22 +423,22 @@ export function TestBuilder({
           ) : null}
           {isRequirement && !requirementLocked ? (
             <p className="text-sm text-ink-3">
-              Next, attach this test to a role in{" "}
+              Next, attach this {noun} to a requirement in{" "}
               <Link href="/admin/requirements" className="font-medium text-brand-600 underline-offset-2 hover:underline">
-                Officer requirements
+                Admin → Requirements
               </Link>{" "}
-              once it&apos;s published. Until then nobody is asked to take it.
+              once it&apos;s published. Until then nobody is asked to {isForm ? "fill it out" : "take it"}.
             </p>
           ) : null}
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="Schedule" description={isRequirement ? undefined : "One time, or a fresh round on a schedule. Each round, people take it again."} />
+        <CardHeader title="Schedule" description={isRequirement ? undefined : `One time, or a fresh round on a schedule. Each round, people ${isForm ? "fill it out" : "take it"} again.`} />
         <CardBody className="space-y-4">
           {isRequirement ? (
             <p className="text-sm text-ink-2">
-              Renews with the officer requirement{renewalLabel ? <> ({renewalLabel.toLowerCase()})</> : null}. Deadlines come from the requirement&apos;s grace period, counted from when someone takes their role.
+              Renews with the WSUSA requirement{renewalLabel ? <> ({renewalLabel.toLowerCase()})</> : null}. Deadlines come from the requirement&apos;s grace period, counted from when it starts to apply to someone.
             </p>
           ) : (
             <>
@@ -460,14 +495,14 @@ export function TestBuilder({
                           if (d) update("closesAt", d.toISOString());
                         }}
                       />
-                      <p className="mt-1 text-xs text-ink-3">Campus time (Ogden). After this, nobody can start the test.</p>
+                      <p className="mt-1 text-xs text-ink-3">Campus time (Ogden). After this, nobody can start the {noun}.</p>
                     </div>
                   ) : null}
                 </fieldset>
               ) : (
                 <p className="text-sm text-ink-3">
                   A new round starts {ROUND_WORD[settings.recurrence]}.{" "}
-                  {assigned ? "Everyone in the audience is assigned again, and anyone who doesn't finish in time is marked as missed." : "Anyone can take it once more each round."}
+                  {assigned ? "Everyone in the audience is assigned again, and anyone who doesn't finish in time is marked as missed." : `Anyone can ${isForm ? "fill it out" : "take it"} once more each round.`}
                 </p>
               )}
             </>
@@ -479,6 +514,7 @@ export function TestBuilder({
         automations={settings.automations}
         onChange={(a) => update("automations", a)}
         kind={kind}
+        isForm={isForm}
         showGate={kind === "university"}
         showMissed={assigned || isRequirement}
       />
@@ -490,7 +526,15 @@ export function TestBuilder({
               Questions
             </h2>
             <p className="text-sm text-ink-3">
-              {questions.length} {questions.length === 1 ? "question" : "questions"} · {totalPoints(payload)} {totalPoints(payload) === 1 ? "point" : "points"} · multiple choice is scored instantly; written answers wait for a reviewer.
+              {isForm ? (
+                <>
+                  {questions.length} {questions.length === 1 ? "question" : "questions"} · every question needs an answer. Nothing is graded.
+                </>
+              ) : (
+                <>
+                  {questions.length} {questions.length === 1 ? "question" : "questions"} · {totalPoints(payload)} {totalPoints(payload) === 1 ? "point" : "points"} · multiple choice is scored instantly; written answers wait for a reviewer.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -503,6 +547,7 @@ export function TestBuilder({
             total={questions.length}
             clubId={scope.clubId}
             aiOn={aiOn}
+            isForm={isForm}
             problems={problems.filter((p) => p.questionId === q.id)}
             onChange={(next) => changeQuestions((qs) => qs.map((x) => (x.key === q.key ? next : x)))}
             onMove={(dir) =>
@@ -595,9 +640,13 @@ export function TestBuilder({
       <ConfirmDialog
         open={confirm === "archive"}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title="Archive this test?"
-        description="Nobody can start it anymore, and anyone who still owes it is excused. Results and grading stay available, and you can reopen it later."
-        confirmLabel="Archive test"
+        title={`Archive this ${noun}?`}
+        description={
+          isForm
+            ? "Nobody can fill it out anymore, and anyone who still owes it is excused. Responses stay available, and you can reopen it later."
+            : "Nobody can start it anymore, and anyone who still owes it is excused. Results and grading stay available, and you can reopen it later."
+        }
+        confirmLabel={`Archive ${noun}`}
         onConfirm={() => {
           setConfirm(null);
           onArchive();
@@ -607,7 +656,7 @@ export function TestBuilder({
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this draft?"
-        description="The test and its questions are removed for good. This can't be undone."
+        description={`The ${noun} and its questions are removed for good. This can't be undone.`}
         confirmLabel="Delete draft"
         danger
         onConfirm={() => {
@@ -628,16 +677,18 @@ function AutomationsCard({
   automations,
   onChange,
   kind,
+  isForm,
   showGate,
   showMissed,
 }: {
   automations: Automation[];
   onChange: (a: Automation[]) => void;
   kind: "club" | "university";
+  isForm: boolean;
   showGate: boolean;
   showMissed: boolean;
 }) {
-  const triggers = AUTOMATION_TRIGGERS.filter((t) => t !== "MISSED_DEADLINE" || showMissed || automations.some((a) => a.trigger === t));
+  const triggers = triggersFor(isForm).filter((t) => t !== "MISSED_DEADLINE" || showMissed || automations.some((a) => a.trigger === t));
   const used = new Set(automations.map((a) => `${a.trigger}:${a.action}`));
   const nextFree = (): Automation | null => {
     for (const trigger of triggers) for (const action of actionsFor(trigger, kind)) if (!used.has(`${trigger}:${action}`)) return { trigger, action };
@@ -651,24 +702,27 @@ function AutomationsCard({
   };
   return (
     <Card>
-      <CardHeader title="Automations" description="What happens on its own after a result. Taking the step yourself is always still an option." />
+      <CardHeader
+        title="Automations"
+        description={`What happens on its own after ${isForm ? "someone submits it or misses the deadline" : "a result"}. Taking the step yourself is always still an option.`}
+      />
       <CardBody className="space-y-3">
         {showGate ? (
           <div className="flex gap-3 rounded-xl bg-brand-50/70 px-3 py-2.5 text-sm text-brand-700">
             <Zap className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             <p>
-              Built in for officer requirements: passing meets the requirement right away, and missing the deadline pauses that person&apos;s leadership permissions until they pass.
+              Built in for WSUSA requirements: {isForm ? "submitting the form" : "passing"} meets the requirement right away. What a missed deadline pauses is set on the requirement.
             </p>
           </div>
         ) : null}
-        {automations.length === 0 ? <p className="text-sm text-ink-3">No automations. Results still show on the results page.</p> : null}
+        {automations.length === 0 ? <p className="text-sm text-ink-3">No automations. {isForm ? "Responses still show on the Responses page." : "Results still show on the results page."}</p> : null}
         <ul className="space-y-2">
           {automations.map((a, i) => (
             <li key={i} className="flex flex-col gap-2 rounded-xl border border-line p-3 sm:flex-row sm:items-center">
               <Select aria-label={`Automation ${i + 1}: when`} value={a.trigger} onChange={(e) => setTrigger(i, a, e.target.value as Automation["trigger"])} className="sm:w-64">
                 {triggers.map((t) => (
                   <option key={t} value={t}>
-                    {TRIGGER_LABEL[t]}
+                    {triggerLabel(t, isForm)}
                   </option>
                 ))}
               </Select>
@@ -678,7 +732,7 @@ function AutomationsCard({
               <Select aria-label={`Automation ${i + 1}: then`} value={a.action} onChange={(e) => set(i, { ...a, action: e.target.value as Automation["action"] })} className="sm:flex-1">
                 {actionsFor(a.trigger, kind).map((x) => (
                   <option key={x} value={x}>
-                    {actionLabel(x, kind)}
+                    {actionLabel(x, kind, isForm)}
                   </option>
                 ))}
               </Select>
@@ -693,9 +747,9 @@ function AutomationsCard({
         ) : null}
         {automations.some((a) => isClubAction(a.action)) ? (
           <p className="text-xs text-ink-3">
-            Approvals and permission changes are made in the name of the person who created this test, and only while they could make them by hand (approving takes the Members permission;
+            Approvals and permission changes are made in the name of the person who created this {isForm ? "form" : "test"}, and only while they could make them by hand (approving takes the Members permission;
             officer permissions take the President, a Vice President or the advisor). Adding one takes the same permission.
-            {automations.some((a) => a.action === "APPROVE_JOIN_REQUEST") ? " People waiting to join can only take a test that's open to anyone." : ""}
+            {automations.some((a) => a.action === "APPROVE_JOIN_REQUEST") ? (isForm ? " People waiting to join can only fill out a form that's open to anyone." : " People waiting to join can only take a test that's open to anyone.") : ""}
           </p>
         ) : null}
         <Button

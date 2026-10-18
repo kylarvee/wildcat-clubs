@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { Assignment, ClubM, Ctx } from "../ctx";
 import { POLICIES } from "../data/policies";
-import { FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
+import { CONDUCT_FORM_INTRO, CONDUCT_QUESTIONS, FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
 import { addDays, addMin, DAY, maxDate, minDate } from "../lib/dates";
 import { addFolder, addPdf } from "./filehelp";
 import { fallStartDate } from "./reference";
@@ -282,7 +282,7 @@ export function buildGovernance(ctx: Ctx) {
       ];
       for (const [reqId, title, description, dueAt, metAt, href] of tasks) {
         ctx.rows.tasks.push({
-          id: ctx.id(), kind: "REQUIREMENT", title, description, assigneeType: "USER", assigneeId: userId, clubId: club.id, href, dueAt,
+          id: ctx.id(), kind: "REQUIREMENT", title, description, assigneeType: "USER", assigneeId: userId, clubId: club.id, href, dueAt, required: true,
           status: metAt ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock,
           completedAt: metAt, completedById: metAt ? userId : null,
         });
@@ -322,6 +322,8 @@ export function buildGovernance(ctx: Ctx) {
       createdAt: addDays(currentAy.start, 30.5), readAt: null,
     });
   }
+
+  memberConductForm(ctx, currentAy);
 
   // ─── Event Safety Quiz (Wildcat Robotics) ──────────────────────────────────
   const robotics = ctx.club("robotics");
@@ -384,6 +386,80 @@ export function buildGovernance(ctx: Ctx) {
       href: club ? `/clubs/${club.slug}/manage/tests/${test.id}/review/${a.id}` : `/admin/tests/${test.id}/review/${a.id}`,
       status: "OPEN", sourceType: "testAttempt", sourceId: a.id as string, createdAt: a.submittedAt as Date,
     });
+  }
+}
+
+/**
+ * Club Member Code of Conduct: a WSUSA form every student in an approved
+ * club fills out once a year (a MEMBER requirement). It was added this fall,
+ * so each person's clock is the latest of joining, the club's approval, the
+ * year's start and the day it was added (requirementStatus's rule). About two
+ * thirds have signed. Vanessa hasn't, so her dashboard shows a required task;
+ * Oscar has, so his officer-requirement story is unchanged.
+ */
+function memberConductForm(ctx: Ctx, ay: { label: string; start: Date }) {
+  const { rng, NOW } = ctx;
+  const formId = ctx.id();
+  ctx.refs.conductFormId = formId;
+  const created = addDays(NOW, -17.2);
+  ctx.rows.tests.push({
+    id: formId, clubId: null, title: "Club Member Code of Conduct", isForm: true, introHtml: CONDUCT_FORM_INTRO, timeLimitMinutes: null, passingPercent: 0, maxAttempts: 1,
+    status: "PUBLISHED", audience: "ROLE_REQUIREMENT", recurrence: "ACADEMIC_YEAR", dueDays: 30, closesAt: null,
+    automations: [], createdById: ctx.p("alex").id, createdAt: created, updatedAt: created,
+  });
+  const qs = questionRows(ctx, formId, CONDUCT_QUESTIONS);
+  const reqId = ctx.id();
+  ctx.refs.conductRequirementId = reqId;
+  const description = "Read WSUSA's code of conduct and confirm it once each academic year.";
+  ctx.rows.requirements.push({
+    id: reqId, name: "Club Member Code of Conduct", description, appliesTo: ["MEMBER"], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created,
+  });
+
+  // Each student's earliest-clock membership in an approved club decides their due date.
+  const firsts = new Map<string, { clock: Date }>();
+  for (const club of ctx.clubs) {
+    if (club.status !== "APPROVED" || !club.approvedAt) continue;
+    for (const m of club.members) {
+      if (m.status !== "ACTIVE" || !m.joinedAt) continue;
+      const person = ctx.person(m.userId);
+      if (person.kind !== "STUDENT" || person.status !== "ACTIVE") continue;
+      const clock = maxDate(maxDate(m.joinedAt, club.approvedAt), maxDate(ay.start, created));
+      const cur = firsts.get(m.userId);
+      if (!cur || clock < cur.clock) firsts.set(m.userId, { clock });
+    }
+  }
+  const vanessa = ctx.p("vanessa").id;
+  const signedAlready = new Set([ctx.p("maya").id, ctx.p("priya").id, ctx.p("oscar").id]);
+  const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" });
+  for (const [userId, { clock }] of firsts) {
+    const dueAt = addDays(clock, 30);
+    const signed = userId !== vanessa && clock < addDays(NOW, -1) && (signedAlready.has(userId) || rng.chance(0.64));
+    let submittedAt: Date | null = null;
+    if (signed) {
+      submittedAt = new Date(clock.getTime() + rng.next() * (NOW.getTime() - clock.getTime() - DAY / 2));
+      const attemptId = ctx.id();
+      ctx.rows.attempts.push({
+        id: attemptId, testId: formId, userId, cycleKey: ay.label, startedAt: addMin(submittedAt, -rng.float(1, 4)), deadlineAt: null, submittedAt, autoSubmitted: false,
+        status: "GRADED", scorePercent: null, passed: true, gradedById: null, gradedAt: submittedAt,
+      });
+      for (const q of qs) {
+        ctx.rows.answers.push({
+          id: ctx.id(), attemptId, questionId: q.id, selectedOptionIds: q.def.options ? [q.def.options[0].id] : [], text: q.def.options ? null : ctx.person(userId).name, pointsAwarded: null, reviewerComment: null,
+        });
+      }
+    }
+    ctx.rows.testAssignments.push({ id: ctx.id(), testId: formId, userId, cycleKey: ay.label, dueAt, status: signed ? "COMPLETED" : "ASSIGNED", createdAt: clock, resolvedAt: submittedAt });
+    ctx.rows.tasks.push({
+      // Member-wide requirements are WSUSA's, so the task isn't about any one club (requirements.syncUserRequirements).
+      id: ctx.id(), kind: "REQUIREMENT", title: "Fill out: Club Member Code of Conduct", description, assigneeType: "USER", assigneeId: userId, clubId: null, href: `/tests/${formId}`, dueAt, required: true,
+      status: signed ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt: submittedAt, completedById: signed ? userId : null,
+    });
+    if (!signed && (userId === vanessa || rng.chance(0.3))) {
+      ctx.rows.notifications.push({
+        id: ctx.id(), userId, kind: "requirement.assigned", title: "Required by WSUSA", body: `WSUSA asks every club member to finish Club Member Code of Conduct by ${shortDate(dueAt)}.`,
+        href: "/tasks", createdAt: addMin(clock, 3), readAt: userId === vanessa ? null : rng.chance(0.5) ? addDays(clock, 1) : null,
+      });
+    }
   }
 }
 

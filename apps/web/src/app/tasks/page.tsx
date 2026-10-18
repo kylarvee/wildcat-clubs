@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { TaskKind } from "@prisma/client";
-import { CheckCircle2, ClipboardList, Inbox, ListChecks, Send } from "lucide-react";
+import { CheckCircle2, ClipboardList, Inbox, ListChecks, Send, ShieldAlert } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { CAPABILITIES } from "@/lib/authz";
 import { clubsYouCanAssignIn, listAssignedByYou, listTasks } from "@/lib/domain/tasks";
@@ -13,7 +13,7 @@ import { AddTaskForm } from "@/components/tasks/AddTaskForm";
 import { AssignTaskDialog } from "@/components/tasks/AssignTaskDialog";
 import { TaskList } from "@/components/tasks/TaskList";
 import { toTaskItem, type TaskItem } from "@/components/tasks/items";
-import { isKind, KIND_ORDER, KIND_PLURAL } from "@/components/tasks/labels";
+import { isKind, KIND_ORDER, KIND_PLURAL, REQUIRED_LABEL } from "@/components/tasks/labels";
 
 export const metadata: Metadata = { title: "Tasks" };
 
@@ -36,7 +36,8 @@ const DONE_LIMIT = 100;
  * officer requirements, invoices, club tasks and your own to-dos. Approvals,
  * requirements and invoices close on their own when the thing is done;
  * personal and club tasks you check off. Leaders can hand club tasks to
- * members and follow them under "Assigned by you".
+ * members and follow them under "Assigned by you". What WSUSA requires sits
+ * in its own card at the top of the open list.
  */
 export default async function TasksPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("/tasks");
@@ -74,6 +75,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
   const filtered = source.filter((t) => (!kind || t.kind === kind) && (!clubFilter || (clubFilter === "none" ? !t.club : t.club?.slug === clubFilter)));
 
   const overdue = openItems.filter((t) => t.due?.overdue).length;
+  const requiredCount = openItems.filter((t) => t.required).length;
+  // Open view: required tasks get their own card above the rest.
+  const requiredItems = view === "open" ? filtered.filter((t) => t.required) : [];
+  const otherItems = view === "open" ? filtered.filter((t) => !t.required) : filtered;
   const showAssigned = assignClubs.length > 0 || assignedOpen.length > 0;
   const capabilityOptions = Object.entries(CAPABILITIES).map(([value, c]) => ({ value, label: c.label, description: c.description }));
 
@@ -103,8 +108,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
         title="Tasks"
         description={
           openItems.length
-            ? `${openItems.length} open${overdue ? ` · ${overdue} overdue` : ""}. Approvals, requirements and invoices close themselves when they're done; check off the rest.`
-            : "Approvals, officer requirements, invoices, club tasks and your own to-dos — all in one list."
+            ? `${openItems.length} open${requiredCount ? ` · ${requiredCount} required` : ""}${overdue ? ` · ${overdue} overdue` : ""}. Approvals, requirements and invoices close themselves when they're done; check off the rest.`
+            : "Approvals, WSUSA requirements, invoices, club tasks and your own to-dos — all in one list."
         }
         actions={assignClubs.length ? <AssignTaskDialog clubs={assignClubs.map((c) => ({ id: c.id, name: c.name, roleLabel: c.roleLabel }))} capabilities={capabilityOptions} /> : null}
       />
@@ -175,12 +180,27 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
           ) : null}
 
           {filtered.length ? (
-            <Card className="p-4 sm:p-5">
-              <h2 className="sr-only">{view === "open" ? "Open tasks" : "Finished tasks"}</h2>
-              <TaskList items={filtered} />
-              {view === "done" && done.length >= DONE_LIMIT ? <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3">Showing your {DONE_LIMIT} most recently finished tasks.</p> : null}
-              {view === "open" && open.length >= OPEN_LIMIT ? <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3">Showing the first {OPEN_LIMIT} open tasks, soonest due first.</p> : null}
-            </Card>
+            <>
+              {requiredItems.length ? (
+                <Card className="border-red-200 p-4 sm:p-5">
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+                    <ShieldAlert className="h-4.5 w-4.5 text-danger" aria-hidden /> {REQUIRED_LABEL}
+                  </h2>
+                  <p className="mb-4 mt-0.5 text-sm text-ink-3">
+                    WSUSA requires these, and each one closes on its own once it&apos;s done. If you lead a club, an overdue officer requirement pauses your leadership permissions until you finish it.
+                  </p>
+                  <TaskList items={requiredItems} />
+                </Card>
+              ) : null}
+              {otherItems.length ? (
+                <Card className="p-4 sm:p-5">
+                  <h2 className="sr-only">{view === "open" ? (requiredItems.length ? "Other open tasks" : "Open tasks") : "Finished tasks"}</h2>
+                  <TaskList items={otherItems} />
+                  {view === "done" && done.length >= DONE_LIMIT ? <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3">Showing your {DONE_LIMIT} most recently finished tasks.</p> : null}
+                  {view === "open" && open.length >= OPEN_LIMIT ? <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3">Showing the first {OPEN_LIMIT} open tasks, required first, then soonest due.</p> : null}
+                </Card>
+              ) : null}
+            </>
           ) : source.length ? (
             <EmptyState
               icon={<ListChecks />}
@@ -196,7 +216,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
             <EmptyState
               icon={<CheckCircle2 />}
               title="You're all caught up"
-              description="Nothing is waiting on you. Approvals, officer requirements and tasks from your clubs will show up here — and anything you add above."
+              description="Nothing is waiting on you. Approvals, WSUSA requirements and tasks from your clubs will show up here — and anything you add above."
             />
           ) : (
             <EmptyState icon={<ClipboardList />} title="Nothing finished yet" description="Tasks you check off, and approvals that get decided, are kept here." />

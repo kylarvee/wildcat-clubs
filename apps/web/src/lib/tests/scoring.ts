@@ -3,6 +3,8 @@
  * in tests. Choice questions are all-or-nothing: you get the points only when
  * you picked exactly the correct options (no partial credit for picking two
  * of three). Open answers need a person, except blank ones, which score 0.
+ * Forms aren't scored at all; they only need every question answered
+ * (unansweredQuestionIds).
  */
 import type { QuestionType } from "@prisma/client";
 import { isChoice, isOpen } from "@/lib/tests/types";
@@ -41,6 +43,15 @@ export function autoPoints(q: ScoringQuestion, a: ScoringAnswer | undefined): nu
 export function isAnswered(q: Pick<ScoringQuestion, "type">, a: Pick<ScoringAnswer, "selectedOptionIds" | "text"> | undefined): boolean {
   if (!a) return false;
   return isChoice(q.type) ? a.selectedOptionIds.length > 0 : hasText(a.text);
+}
+
+/** Questions still without an answer, in question order. A form can't be submitted until this is empty. */
+export function unansweredQuestionIds(
+  questions: Pick<ScoringQuestion, "id" | "type">[],
+  answers: Pick<ScoringAnswer, "questionId" | "selectedOptionIds" | "text">[],
+): string[] {
+  const byQ = new Map(answers.map((a) => [a.questionId, a]));
+  return questions.filter((q) => !isAnswered(q, byQ.get(q.id))).map((q) => q.id);
 }
 
 export type AttemptScore = {

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { testOrFormTitle } from "@/lib/tests/queries";
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { attemptForTaker } from "@/lib/tests/queries";
@@ -7,7 +8,9 @@ import { Container, PageHeader } from "@/components/ui/layout";
 import { RichContent } from "@/components/rich/RichContent";
 import { AttemptRunner, type RunnerQuestion } from "@/components/tests/AttemptRunner";
 
-export const metadata: Metadata = { title: "Taking a test" };
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  return { title: await testOrFormTitle((await params).id, "Taking a test", "Filling out a form") };
+}
 
 /**
  * An attempt in progress. Only its taker can open it. Handed-in attempts go
@@ -33,10 +36,15 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
 
   return (
     <Container size="md">
-      <PageHeader title={attempt.test.title} description={`From ${attempt.test.club?.name ?? "WSUSA"} · passing score ${attempt.test.passingPercent}%`} className="mb-4" />
+      <PageHeader
+        title={attempt.test.title}
+        description={`From ${attempt.test.club?.name ?? "WSUSA"}${attempt.test.isForm ? " · every question needs an answer" : ` · passing score ${attempt.test.passingPercent}%`}`}
+        className="mb-4"
+      />
       <AttemptRunner
         mode="live"
         attemptId={attempt.id}
+        isForm={attempt.test.isForm}
         title={attempt.test.title}
         startedAt={attempt.startedAt.toISOString()}
         deadlineAt={attempt.deadlineAt?.toISOString() ?? null}

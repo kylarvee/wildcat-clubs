@@ -108,7 +108,7 @@ export const OCC_INCLUDE = {
       updatedAt: true,
       clubId: true,
       club: { select: { id: true, name: true, slug: true, logoColor: true, status: true } },
-      building: { select: { name: true, lat: true, lng: true } },
+      building: { select: { name: true, code: true, lat: true, lng: true } },
       cohosts: { where: { status: "APPROVED" }, select: { club: { select: { id: true, name: true, slug: true } } } },
     },
   },

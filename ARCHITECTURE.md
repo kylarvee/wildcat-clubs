@@ -24,7 +24,8 @@ web app (`apps/web`) plus a simplified mobile app (`apps/mobile`), one server, o
 6. **One metrics layer.** Every derived number (activity, retention, attendance rate, ratings,
    interconnection) comes from `src/lib/metrics`, so no two screens disagree.
 7. **One inbox.** Anything waiting on a person (approvals, requirements, invoices, club to-dos,
-   personal to-dos) is a `Task`. When the thing is decided anywhere, its tasks close.
+   personal to-dos) is a `Task`. When the thing is decided anywhere, its tasks close. What WSUSA
+   requires (`Task.required`) is listed first and marked "Required by WSUSA" on every surface.
 8. **Simple beats clever.** When the spec contradicts itself, pick the simplest rule that keeps
    the user's intent (§6).
 
@@ -65,10 +66,12 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
   budget, files, announcements, elections, constitution, tests`.
 * **Club phase:** founding clubs (DRAFT/SUBMITTED/CHANGES_REQUESTED) only have `profile, orgchart,
   constitution, files`. APPROVED clubs have everything. RETIRED/REJECTED clubs are read-only.
-* **Officer requirements:** admins attach tests/trainings to roles (`RoleRequirement`). They must be
-  met within `graceDays` (default 30; 0 = hard gate) of the later of taking the role, club approval,
-  or the renewal period start. Overdue → the role's capabilities pause until done. Fulfillment is
-  computed from test attempts and training check-ins — never stored twice.
+* **Requirements:** admins require tests, forms or trainings (`RoleRequirement`) of every club
+  member (`MEMBER`), chosen leader roles, or both. They must be met within `graceDays` (default 30;
+  0 = hard gate) of the latest of joining or taking the role, club approval, the renewal period
+  start, and the day the requirement was added. Overdue → a leader role's capabilities pause until
+  done; members have nothing to pause, so theirs just shows overdue. Fulfillment is computed from
+  test attempts (a submitted form counts as passed) and training check-ins — never stored twice.
 * **Account kind** comes from the email domain: `@mail.weber.edu` = student, `@weber.edu` =
   faculty/staff. Only faculty/staff can be advisors; only students hold student roles.
 * **Privacy:** profiles and attendance are visible only to signed-in university accounts; a
@@ -88,7 +91,8 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | General costs & funding requests | Funding & Budgeting tool | admin approvals, invoices |
 | Files | Club Files (explorer) | file picker everywhere, Resources |
 | Policies | Policy editor (admin) | `<PolicyNotices placement=…>` across the app, policy library |
-| Tests, attempts, grades | Test Tool | role requirements, results |
+| Tests and forms, attempts, grades and responses | Test Tool (a form is a test with grading off) | requirements, results |
+| Requirements (what WSUSA requires of members and leaders) | Admin → Requirements | tasks (required), compliance |
 | Reviews | Review form on the club page | clubs list, club page |
 | Complaints | Report form (`/report`) | admin complaints only |
 | Messages | Messages | — |
@@ -119,6 +123,7 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 | Funding sources listed differently (University/WSUSA/Department vs University/College/Department) | One list: **University, WSUSA, College, Department**. Default: Registered → WSUSA; Sponsored/Affiliate → Department if the club has one, else WSUSA; College Ambassadors orgs → College. |
 | Costs in Events Builder *and* Budget *and* Calendar | Event costs are entered only in the Events Builder (they belong to the event; recurring events multiply by occurrences). General costs and all funding requests are entered only in the Budget tool. Calendars show costs read-only and link to Budget to request funds. |
 | Officer "gate" vs. clubs needing officers to work immediately | Requirements with a grace period (default 30 days; set 0 for a hard gate). Permissions pause, the title stays. |
+| Critical WSUSA tasks members or leaders must fill out | No second tool: a WSUSA **form** is a Test-Tool test with grading off, required through Admin → Requirements (members, leader roles or both). Anything WSUSA requires or assigns is a `required` task: first in every list, its own card on /tasks, a badge on the dashboard, the top of mobile Home. Only leaders can be gated; overdue members just see it overdue. A new requirement's clock starts the day it's added, so nobody starts out overdue. |
 | VP permissions vs. role assignment | Rank rule: assign only below your rank; President may also name a President. |
 | Auto-enroll on check-in vs. membership gates | Check-in always records attendance. Open clubs: you become a member. Gated clubs: a join request is filed. |
 | Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`), started by an admin (Admin → Club reviews → Ambassador programs). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. |

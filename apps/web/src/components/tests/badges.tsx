@@ -1,5 +1,5 @@
 import type { TestStatus } from "@prisma/client";
-import { CheckCircle2, Clock, Hourglass, MinusCircle, PlayCircle, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, FileText, Hourglass, MinusCircle, PlayCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { STATUS_LABEL } from "@/lib/tests/types";
 
@@ -10,14 +10,24 @@ export function TestStatusBadge({ status }: { status: TestStatus }) {
   return <Badge tone={tone}>{STATUS_LABEL[status]}</Badge>;
 }
 
+/** Marks a form (a test with grading switched off) wherever tests and forms are listed together. */
+export function FormBadge() {
+  return (
+    <Badge tone="info">
+      <FileText className="h-3 w-3" aria-hidden /> Form
+    </Badge>
+  );
+}
+
 export type ResultStatus = "not-started" | "in-progress" | "needs-review" | "passed" | "failed" | "missed" | "excused" | "todo";
 
-export function ResultBadge({ status }: { status: ResultStatus }) {
+/** `form` words a result for a form: a pass is "Submitted", not starting is "Not yet". */
+export function ResultBadge({ status, form = false }: { status: ResultStatus; form?: boolean }) {
   switch (status) {
     case "passed":
       return (
         <Badge tone="success">
-          <CheckCircle2 className="h-3 w-3" aria-hidden /> Passed
+          <CheckCircle2 className="h-3 w-3" aria-hidden /> {form ? "Submitted" : "Passed"}
         </Badge>
       );
     case "failed":
@@ -59,7 +69,7 @@ export function ResultBadge({ status }: { status: ResultStatus }) {
     default:
       return (
         <Badge>
-          <MinusCircle className="h-3 w-3" aria-hidden /> Not started
+          <MinusCircle className="h-3 w-3" aria-hidden /> {form ? "Not yet" : "Not started"}
         </Badge>
       );
   }

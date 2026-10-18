@@ -87,3 +87,12 @@ export function locationText(e: {
       return "Location to be decided";
   }
 }
+
+/** Compact location for lists ("NB 220", "Online"): the building's code instead of its name. */
+export function shortLocationText(e: Parameters<typeof locationText>[0] & { building?: { name: string; code?: string | null } | null }): string {
+  if (e.locationType === "CAMPUS" && e.building?.code) {
+    const room = (e.roomOverride || e.room || "").trim().replace(/^(room|rm\.?)\s+/i, "");
+    return room ? `${e.building.code} ${room}` : e.building.name;
+  }
+  return locationText(e);
+}

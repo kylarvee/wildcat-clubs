@@ -64,10 +64,10 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
-    await job("Officer requirements", async () => {
+    await job("WSUSA requirements", async () => {
       const synced = await syncAllRequirementHolders({ notify: "due", now });
       const overdue = await notifyOverdueRequirements(now);
-      return `Re-checked ${plural(synced.people, "student leader")}; opened ${plural(synced.opened, "new requirement task")}; told ${plural(overdue.notified, "person", "people")} their permissions paused.`;
+      return `Re-checked ${plural(synced.people, "person", "people")}; opened ${plural(synced.opened, "new requirement task")}; told ${plural(overdue.notified, "person", "people")} a requirement is overdue.`;
     }),
   );
   reports.push(

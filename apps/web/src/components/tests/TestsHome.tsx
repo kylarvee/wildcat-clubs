@@ -4,7 +4,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageHeader, Section, Stat } from "@/components/ui/layout";
 import { CreateTestButton } from "@/components/tests/CreateTestButton";
-import { TestStatusBadge } from "@/components/tests/badges";
+import { FormBadge, TestStatusBadge } from "@/components/tests/badges";
 import type { TestScope } from "@/components/tests/scope";
 import { combineStats, listManagedTests, type ManagedTestRow } from "@/lib/tests/queries";
 import { durationLabel, minutesLabel } from "@/lib/tests/deadlines";
@@ -14,13 +14,16 @@ import { fmtAgo } from "@/lib/time";
 const pct = (rate: number | null) => (rate === null ? "—" : `${Math.round(rate * 100)}%`);
 
 /**
- * The Test Tool's home: every test this scope manages with its numbers, plus
- * an "All tests" row. Shared by /admin/tests and /clubs/[slug]/manage/tests.
+ * The Test Tool's home: every test and form this scope manages with its
+ * numbers, plus an "All tests" row (graded tests only: forms have no scores
+ * or pass rates). Shared by /admin/tests and /clubs/[slug]/manage/tests.
  */
 export async function TestsHome({ scope }: { scope: TestScope }) {
   const tests = await listManagedTests(scope.clubId);
-  const all = combineStats(tests.map((t) => t.stats));
-  const published = tests.filter((t) => t.status === "PUBLISHED").length;
+  const graded = tests.filter((t) => !t.isForm);
+  const forms = tests.length - graded.length;
+  const all = combineStats(graded.map((t) => t.stats));
+  const published = graded.filter((t) => t.status === "PUBLISHED").length;
   const kind = scope.kind;
 
   return (
@@ -29,8 +32,8 @@ export async function TestsHome({ scope }: { scope: TestScope }) {
         title={kind === "club" ? "Club tests" : "Tests"}
         description={
           kind === "club"
-            ? `Quizzes and checks for ${scope.ownerName}'s members — safety briefings, training refreshers, anything you need people to know. Multiple choice is scored instantly; written answers come to you for review.`
-            : "University tests for student leaders and students: officer policy tests, refreshers and campus-wide checks. Attach a test to roles in Officer requirements to make it a gate."
+            ? `Quizzes, checks and forms for ${scope.ownerName}'s members — safety briefings, training refreshers, sign-up questions. Multiple choice is scored instantly; written answers come to you for review. Forms aren't graded.`
+            : "University tests and forms for student leaders and students: officer policy tests, refreshers, contact forms and acknowledgements. Attach a test or form to a requirement in Admin → Requirements to make it a gate."
         }
         actions={tests.length ? <CreateTestButton clubId={scope.clubId} basePath={scope.basePath} /> : null}
       />
@@ -38,32 +41,37 @@ export async function TestsHome({ scope }: { scope: TestScope }) {
       {tests.length === 0 ? (
         <EmptyState
           icon={<ClipboardCheck />}
-          title="No tests yet"
+          title="No tests or forms yet"
           description={
             kind === "club"
-              ? "Build a quiz for your members: add an intro page, a few questions and a passing score, then publish it to assign it."
-              : "Build the officer policy test or a campus-wide refresher. Publish it, then attach it to roles in Officer requirements."
+              ? "Build a quiz for your members (an intro page, a few questions and a passing score), or a form for them to fill out. Publish it to assign it."
+              : "Build the officer policy test, a campus-wide refresher, or a form like an officer contact form. Publish it, then attach it to a requirement in Admin → Requirements."
           }
-          action={<CreateTestButton clubId={scope.clubId} basePath={scope.basePath} label="Build your first test" />}
+          action={<CreateTestButton clubId={scope.clubId} basePath={scope.basePath} label="Build your first test or form" />}
         />
       ) : (
         <>
-          <Section title="All tests" description={`Across ${tests.length} ${tests.length === 1 ? "test" : "tests"} (${published} published), every round.`}>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              <Stat label="Attempts" value={all.attempts.toLocaleString()} hint={`${all.takers.toLocaleString()} ${all.takers === 1 ? "person" : "people"}`} />
-              <Stat label="Pass rate" value={pct(all.passRate)} hint={all.graded ? `${all.passed.toLocaleString()} of ${all.graded.toLocaleString()} graded` : "Nothing graded yet"} />
-              <Stat label="Average score" value={fmtPercent(all.avgScore)} hint="graded attempts" />
-              <Stat label="Average time" value={all.avgTimeMs === null ? "—" : durationLabel(all.avgTimeMs)} hint="start to hand-in" />
-              <Stat
-                label="Waiting for review"
-                value={all.needsReview}
-                hint={all.needsReview ? "written answers to grade" : "All caught up"}
-                className="col-span-2 md:col-span-1"
-              />
-            </div>
-          </Section>
+          {graded.length ? (
+            <Section
+              title="All tests"
+              description={`Across ${graded.length} ${graded.length === 1 ? "test" : "tests"} (${published} published), every round.${forms ? ` Forms aren't graded, so they're not counted here.` : ""}`}
+            >
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                <Stat label="Attempts" value={all.attempts.toLocaleString()} hint={`${all.takers.toLocaleString()} ${all.takers === 1 ? "person" : "people"}`} />
+                <Stat label="Pass rate" value={pct(all.passRate)} hint={all.graded ? `${all.passed.toLocaleString()} of ${all.graded.toLocaleString()} graded` : "Nothing graded yet"} />
+                <Stat label="Average score" value={fmtPercent(all.avgScore)} hint="graded attempts" />
+                <Stat label="Average time" value={all.avgTimeMs === null ? "—" : durationLabel(all.avgTimeMs)} hint="start to hand-in" />
+                <Stat
+                  label="Waiting for review"
+                  value={all.needsReview}
+                  hint={all.needsReview ? "written answers to grade" : "All caught up"}
+                  className="col-span-2 md:col-span-1"
+                />
+              </div>
+            </Section>
+          ) : null}
 
-          <Section title="Your tests">
+          <Section title={forms ? "Your tests and forms" : "Your tests"}>
             <ul className="space-y-3">
               {tests.map((t) => (
                 <li key={t.id}>
@@ -82,12 +90,19 @@ function TestRow({ t, scope }: { t: ManagedTestRow; scope: TestScope }) {
   const kind = scope.kind;
   const href = `${scope.basePath}/${t.id}`;
   const facts = [
-    audienceLabel(t.audience, kind),
+    audienceLabel(t.audience, kind, t.isForm),
     t.audience === "ROLE_REQUIREMENT" ? null : RECURRENCE_LABEL[t.recurrence],
-    t.timeLimitMinutes ? minutesLabel(t.timeLimitMinutes) : "No time limit",
+    t.isForm ? null : t.timeLimitMinutes ? minutesLabel(t.timeLimitMinutes) : "No time limit",
     `${t.questions} ${t.questions === 1 ? "question" : "questions"}`,
-    `pass at ${t.passingPercent}%`,
+    t.isForm ? null : `pass at ${t.passingPercent}%`,
   ].filter(Boolean);
+  const round = (
+    <Fact
+      label={t.cycle.key === "once" ? "Assigned" : `This round (${t.cycle.label})`}
+      value={t.assignment.total ? `${t.assignment.completed} of ${t.assignment.total} done${t.assignment.missed ? ` · ${t.assignment.missed} missed` : ""}` : t.audience === "OPEN" ? "Open to anyone" : "Nobody yet"}
+      className="col-span-2 sm:col-span-1"
+    />
+  );
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-start gap-3">
@@ -96,6 +111,7 @@ function TestRow({ t, scope }: { t: ManagedTestRow; scope: TestScope }) {
             <Link href={href} className="text-base font-semibold text-ink hover:text-brand-600 hover:underline">
               {t.title}
             </Link>
+            {t.isForm ? <FormBadge /> : null}
             <TestStatusBadge status={t.status} />
             {t.requirementNames.length ? (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
@@ -113,24 +129,28 @@ function TestRow({ t, scope }: { t: ManagedTestRow; scope: TestScope }) {
             </ButtonLink>
           ) : null}
           <ButtonLink href={`${href}/results`} size="sm" variant="outline">
-            <BarChart3 className="h-4 w-4" aria-hidden /> Results
+            <BarChart3 className="h-4 w-4" aria-hidden /> {t.isForm ? "Responses" : "Results"}
           </ButtonLink>
           <ButtonLink href={href} size="sm" variant="ghost">
             <Pencil className="h-4 w-4" aria-hidden /> Edit
           </ButtonLink>
         </div>
       </div>
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-sm sm:grid-cols-5">
-        <Fact label="Attempts" value={t.stats.attempts.toLocaleString()} />
-        <Fact label="Pass rate" value={pct(t.stats.passRate)} />
-        <Fact label="Avg. score" value={fmtPercent(t.stats.avgScore)} />
-        <Fact label="Avg. time" value={t.stats.avgTimeMs === null ? "—" : durationLabel(t.stats.avgTimeMs)} />
-        <Fact
-          label={t.cycle.key === "once" ? "Assigned" : `This round (${t.cycle.label})`}
-          value={t.assignment.total ? `${t.assignment.completed} of ${t.assignment.total} done${t.assignment.missed ? ` · ${t.assignment.missed} missed` : ""}` : t.audience === "OPEN" ? "Open to anyone" : "Nobody yet"}
-          className="col-span-2 sm:col-span-1"
-        />
-      </dl>
+      {t.isForm ? (
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-sm sm:grid-cols-5">
+          <Fact label="Responses" value={t.stats.attempts.toLocaleString()} />
+          <Fact label="Avg. time" value={t.stats.avgTimeMs === null ? "—" : durationLabel(t.stats.avgTimeMs)} />
+          {round}
+        </dl>
+      ) : (
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-sm sm:grid-cols-5">
+          <Fact label="Attempts" value={t.stats.attempts.toLocaleString()} />
+          <Fact label="Pass rate" value={pct(t.stats.passRate)} />
+          <Fact label="Avg. score" value={fmtPercent(t.stats.avgScore)} />
+          <Fact label="Avg. time" value={t.stats.avgTimeMs === null ? "—" : durationLabel(t.stats.avgTimeMs)} />
+          {round}
+        </dl>
+      )}
     </Card>
   );
 }

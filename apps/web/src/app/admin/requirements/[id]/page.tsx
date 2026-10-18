@@ -15,7 +15,7 @@ export default async function EditRequirementPage({ params }: { params: Promise<
   if (!r) notFound();
   return (
     <div>
-      <PageHeader breadcrumbs={[{ href: "/admin/requirements", label: "Officer requirements" }, { label: r.name }]} title={r.name} />
+      <PageHeader breadcrumbs={[{ href: "/admin/requirements", label: "Requirements" }, { label: r.name }]} title={r.name} />
       <RequirementForm
         id={r.id}
         tests={targets.tests}

@@ -86,10 +86,10 @@ export default async function AdminTrainingsPage({ searchParams }: { searchParam
         title="Trainings & university events"
         description="Plan officer trainings and campus-wide events with the same Events Builder clubs use. Run check-in from any meeting and see who attended."
       />
-      <Callout tone="brand" icon={<GraduationCap />} title="Making a training required for officers?">
-        Create the training here, then attach it to roles under{" "}
+      <Callout tone="brand" icon={<GraduationCap />} title="Making a training required?">
+        Create the training here, then require it of members or leader roles under{" "}
         <Link href="/admin/requirements" className="font-medium underline">
-          Admin → Officer requirements
+          Admin → Requirements
         </Link>
         . Check-ins at the training count toward the requirement automatically.
       </Callout>

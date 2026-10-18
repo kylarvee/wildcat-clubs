@@ -1142,6 +1142,8 @@ model Test {
   title            String
   introHtml        String            @default("")
   timeLimitMinutes Int? // null = unlimited (the clock still runs)
+  /// A form: nothing is graded, every question needs an answer, and submitting completes it.
+  isForm           Boolean           @default(false)
   passingPercent   Int               @default(80)
   maxAttempts      Int? // null = unlimited
   status           TestStatus        @default(DRAFT)
@@ -1403,6 +1405,8 @@ model Task {
   capability    String? // for CLUB tasks: who in the club can act on it
   href          String?
   dueAt         DateTime?
+  /// WSUSA requires it (officer/member requirements, WSUSA-assigned tests and forms): listed first and marked Required everywhere.
+  required      Boolean          @default(false)
   status        TaskStatus       @default(OPEN)
   sourceType    String? // "membership", "cohost", "funding", "invoice", "club", "testAssignment", …
   sourceId      String?

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { autoPoints, choiceCorrect, clampPoints, hasText, isAnswered, passes, scoreAttempt, type ScoringQuestion } from "@/lib/tests/scoring";
-import { actionsFor, automationAllowed, parseAutomations, parseOptions } from "@/lib/tests/types";
+import { autoPoints, choiceCorrect, clampPoints, hasText, isAnswered, passes, scoreAttempt, unansweredQuestionIds, type ScoringQuestion } from "@/lib/tests/scoring";
+import { actionsFor, attemptLabel, automationAllowed, defaultAutomations, fmtPercent, parseAutomations, parseOptions, triggerLabel, triggersFor } from "@/lib/tests/types";
 
 const single: ScoringQuestion = { id: "q1", type: "SINGLE_CHOICE", points: 1, correctOptionIds: ["b"] };
 const multi: ScoringQuestion = { id: "q2", type: "MULTI_CHOICE", points: 2, correctOptionIds: ["a", "b", "d"] };
@@ -128,5 +128,33 @@ describe("automation choices", () => {
     expect(automationAllowed({ trigger: "PASSED", action: "PAUSE_PERMISSIONS" }, "club")).toBe(false);
     expect(automationAllowed({ trigger: "PASSED", action: "RESUME_PERMISSIONS" }, "university")).toBe(false);
     expect(automationAllowed({ trigger: "MISSED_DEADLINE", action: "NOTIFY_ADMINS" }, "university")).toBe(true);
+  });
+});
+
+describe("forms", () => {
+  it("list the questions still without an answer, in order", () => {
+    const answers = [
+      { questionId: "q1", selectedOptionIds: ["b"], text: null },
+      { questionId: "q3", selectedOptionIds: [], text: "<p></p>" },
+    ];
+    expect(unansweredQuestionIds([single, multi, short, long], answers)).toEqual(["q2", "q3", "q4"]);
+    expect(unansweredQuestionIds([single], answers)).toEqual([]);
+  });
+
+  it("can't be failed: no FAILED automations, and PASSED reads as submitting", () => {
+    expect(triggersFor(true)).toEqual(["PASSED", "MISSED_DEADLINE"]);
+    expect(automationAllowed({ trigger: "FAILED", action: "NOTIFY_TAKER" }, "university", true)).toBe(false);
+    expect(automationAllowed({ trigger: "FAILED", action: "NOTIFY_TAKER" }, "university")).toBe(true);
+    expect(automationAllowed({ trigger: "PASSED", action: "APPROVE_JOIN_REQUEST" }, "club", true)).toBe(true);
+    expect(automationAllowed({ trigger: "MISSED_DEADLINE", action: "PAUSE_PERMISSIONS" }, "club", true)).toBe(true);
+    expect(triggerLabel("PASSED", true)).toBe("When someone submits it");
+    expect(triggerLabel("PASSED", false)).toBe("When someone passes");
+    expect(defaultAutomations(true)).toEqual([]);
+  });
+
+  it("show as submitted, with no score", () => {
+    expect(attemptLabel({ status: "GRADED", passed: true }, true)).toBe("Submitted");
+    expect(attemptLabel({ status: "GRADED", passed: true })).toBe("Passed");
+    expect(fmtPercent(null)).toBe("—");
   });
 });
