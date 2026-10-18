@@ -87,12 +87,15 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | Calendar subscriptions | Subscribe toggle (club pages, dashboard) | united calendar, ICS feeds |
 | Roles & seats | Org Chart tool (`roles.assignRole`); elections & hand-offs apply through it | org chart, profiles, role history |
 | Events, schedule, location, co-hosts, **event costs** | Events Builder | calendars, ICS, club page, budget, attendance |
-| Attendance | Attendance Tool only (QR scan, in-app self check-in, leader manual add) | tracker, activity, reviews gate, network, clubs list |
+| Attendance | Attendance Tool only (QR scan, the code shown at the event, one-tap for online events, leader manual add) | tracker, activity, reviews gate, network, clubs list |
 | General costs & funding requests | Funding & Budgeting tool | admin approvals, invoices |
 | Files | Club Files (explorer) | file picker everywhere, Resources |
 | Policies | Policy editor (admin) | `<PolicyNotices placement=…>` across the app, policy library |
 | Tests and forms, attempts, grades and responses | Test Tool (a form is a test with grading off) | requirements, results |
 | Requirements (what WSUSA requires of members and leaders) | Admin → Requirements | tasks (required), compliance |
+| Member details (student ID, birth date, gender, phone, year in school, address, emergency contact) | Settings → Member details (`lib/domain/details`; who sees what: `lib/authz/details`) | club roster (contact basics), admin People page, the yearly "Member details" requirement |
+| Club category, website, social links | Club Profile editor | club page, clubs list filter, assistant |
+| Meeting schedule | Events Builder (a repeating MEETING event) | "Meets" on the club page, next meeting on dashboards |
 | Reviews | Review form on the club page | clubs list, club page |
 | Complaints | Report form (`/report`) | admin complaints only |
 | Messages | Messages | — |
@@ -123,6 +126,8 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 | Funding sources listed differently (University/WSUSA/Department vs University/College/Department) | One list: **University, WSUSA, College, Department**. Default: Registered → WSUSA; Sponsored/Affiliate → Department if the club has one, else WSUSA; College Ambassadors orgs → College. |
 | Costs in Events Builder *and* Budget *and* Calendar | Event costs are entered only in the Events Builder (they belong to the event; recurring events multiply by occurrences). General costs and all funding requests are entered only in the Budget tool. Calendars show costs read-only and link to Budget to request funds. |
 | Officer "gate" vs. clubs needing officers to work immediately | Requirements with a grace period (default 30 days; set 0 for a hard gate). Permissions pause, the title stays. |
+| The old system (weberorgs.dserec.com) asked for personal details, three agreements and club details inside every club's sign-up | Each datum has one home. Personal details live once on the person (`PersonalDetails`, private), reused by every club and confirmed yearly through a PROFILE requirement. The waiver, anti-hazing and non-discrimination agreements are one yearly WSUSA form for all clubs. Club email, social links, category, advisor and meetings live on the club (profile editor, advisor invite, Events Builder). The president's "we'll be active this year" is a yearly re-registration form for presidents. Event setup/cleanup minutes and a Practice type are in the Events Builder. Not carried over (yet): WSUSA pre-approving every event (clubs publish directly; policy notices cover safety), the club-sports lineup and travel forms, the driver roster (every roster row was "approved", so it said nothing), compliance points (the clubs checked showed 0), and separate logo approval (WSUSA sees the logo when it reviews the club). |
+| One-tap "Are you here? Check in" vs. proof of being in the room | In person, check-in takes the rotating QR code, or the event's code typed from the screen (members of the host or co-host clubs only); the app never shows an in-person event's code remotely. Only online events (nothing to scan) get the one-tap prompt (`rules.allowsTapCheckIn`). The old per-event "self check-in" switch is gone; `Event.allowSelfCheckIn` is a leftover column nothing reads. |
 | Critical WSUSA tasks members or leaders must fill out | No second tool: a WSUSA **form** is a Test-Tool test with grading off, required through Admin → Requirements (members, leader roles or both). Anything WSUSA requires or assigns is a `required` task: first in every list, its own card on /tasks, a badge on the dashboard, the top of mobile Home. Only leaders can be gated; overdue members just see it overdue. A new requirement's clock starts the day it's added, so nobody starts out overdue. |
 | VP permissions vs. role assignment | Rank rule: assign only below your rank; President may also name a President. |
 | Auto-enroll on check-in vs. membership gates | Check-in always records attendance. Open clubs: you become a member. Gated clubs: a join request is filed. |

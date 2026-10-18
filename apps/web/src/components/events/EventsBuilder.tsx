@@ -11,19 +11,17 @@ import interactionPlugin, { type EventResizeDoneArg } from "@fullcalendar/intera
 import type { CalendarApi, DateSelectArg, EventClickArg, EventDropArg } from "@fullcalendar/core";
 import * as Popover from "@radix-ui/react-popover";
 import type { EventKind, Visibility } from "@prisma/client";
-import { AlertCircle, ArrowRight, Ban, CalendarPlus, ChevronDown, ExternalLink, Lightbulb, Loader2, Pencil, Plus, QrCode, RotateCcw, RotateCw, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Ban, CalendarPlus, ExternalLink, Loader2, Pencil, QrCode, RotateCcw, RotateCw, X } from "lucide-react";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/form";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
 import { Skeleton } from "@/components/ui/layout";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
 import { CalendarToolbar, calendarSource, campusNow, isNarrowScreen, OccurrenceDetails, useIsClient, type ViewName } from "@/components/calendar/shared";
 import { WhenFields } from "@/components/events/WhenFields";
 import { LocationFields, EMPTY_LOCATION, type BuildingOption, type LocationValue } from "@/components/events/LocationFields";
-import { CohostPanel, IdeasPanel, type IdeaRow, type IncomingCohost, type OutgoingCohost } from "@/components/events/BuilderPanels";
+import { CohostPanel, type IdeaRow, type IncomingCohost, type OutgoingCohost } from "@/components/events/BuilderPanels";
 import { defaultWhen, toSchedule, whenFrom, type WhenValue } from "@/components/events/when";
 import { EVENT_KINDS, KIND_LABEL, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { fromFakeUtc, fromInputs } from "@/lib/events/wallclock";
@@ -77,19 +75,17 @@ export function EventsBuilder(props: EventsBuilderProps) {
   const [view, setView] = useState<ViewName>("dayGridMonth");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState(props.initialTab ?? "ideas");
 
   const [selected, setSelected] = useState<Selected | null>(null);
   const anchor = useRef<{ getBoundingClientRect: () => DOMRect }>({ getBoundingClientRect: () => new DOMRect() });
   const [quick, setQuick] = useState<QuickState | null>(null);
-  const [scheduling, setScheduling] = useState<{ idea: IdeaRow; when: WhenValue } | null>(null);
 
   const query = isClub ? `scope=club&clubId=${encodeURIComponent(club.id)}` : "scope=trainings";
   const events = useMemo(() => calendarSource(query, setError), [query]);
   const pendingCohosts = incoming.filter((c) => c.status === "PENDING").length;
   const refetch = () => api?.refetchEvents();
 
-  /** The campus date the calendar is looking at (for "New event" / "Add from ideas"). */
+  /** The campus date the calendar is looking at (for "New event"). */
   function focusDate(): string {
     if (!api) return defaultWhen().date;
     const d = api.getDate();
@@ -102,11 +98,6 @@ export function EventsBuilder(props: EventsBuilderProps) {
   function openQuick(when: WhenValue) {
     setSelected(null);
     setQuick({ when, title: "", kind: isClub ? "MEETING" : "TRAINING", visibility: isClub ? "PUBLIC" : "UNIVERSITY", location: EMPTY_LOCATION });
-  }
-
-  function openSchedule(idea: IdeaRow, date?: string) {
-    setSelected(null);
-    setScheduling({ idea, when: defaultWhen(date ?? focusDate()) });
   }
 
   function onSelect(arg: DateSelectArg) {
@@ -153,32 +144,6 @@ export function EventsBuilder(props: EventsBuilderProps) {
 
   const toolbarExtras = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
-            <Lightbulb className="h-4 w-4" /> Add from ideas <ChevronDown className="h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="max-w-xs">
-          <DropdownMenuLabel>{ideas.length ? "Put an idea on the calendar" : "No ideas yet"}</DropdownMenuLabel>
-          {ideas.slice(0, 12).map((idea) => (
-            <DropdownMenuItem key={idea.id} onSelect={() => openSchedule(idea)}>
-              <span className="truncate">{idea.title}</span>
-            </DropdownMenuItem>
-          ))}
-          {ideas.length > 12 ? <DropdownMenuLabel>{ideas.length - 12} more in the Ideas list</DropdownMenuLabel> : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              setTab("ideas");
-              document.getElementById("builder-panel")?.scrollIntoView({ behavior: "smooth" });
-              setTimeout(() => document.querySelector<HTMLInputElement>("#builder-panel input")?.focus(), 300);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Write a new idea
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
       <Button size="sm" className="flex-1 sm:flex-none" onClick={() => openQuick(defaultWhen(focusDate()))}>
         <CalendarPlus className="h-4 w-4" /> New event
       </Button>
@@ -233,7 +198,7 @@ export function EventsBuilder(props: EventsBuilderProps) {
                 scrollTime="08:00:00"
                 eventTimeFormat={{ hour: "numeric", minute: "2-digit", meridiem: "short" }}
                 eventClassNames={(arg) => ((arg.event.extendedProps as CalendarEventProps).cancelled ? ["line-through", "opacity-60"] : [])}
-                noEventsContent={() => <p className="py-6 text-center text-sm text-ink-3">Nothing scheduled here yet. Use “New event” or add one of your ideas.</p>}
+                noEventsContent={() => <p className="py-6 text-center text-sm text-ink-3">Nothing scheduled here yet. Use “New event” or drag across the calendar.</p>}
                 loading={setLoading}
                 datesSet={(arg) => {
                   setTitle(arg.view.title);
@@ -248,26 +213,14 @@ export function EventsBuilder(props: EventsBuilderProps) {
         )}
       </div>
 
-      <aside id="builder-panel" aria-label="Ideas and co-host requests" className="order-2 min-w-0 scroll-mt-20 xl:order-1">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "ideas" | "cohosts")}>
-          <TabsList className="mb-4">
-            <TabsTrigger value="ideas">Ideas {ideas.length ? <span className="ml-1 rounded-full bg-muted px-1.5 text-xs text-ink-2">{ideas.length}</span> : null}</TabsTrigger>
-            {isClub ? (
-              <TabsTrigger value="cohosts">
-                Co-host requests {pendingCohosts ? <span className="ml-1 rounded-full bg-brand px-1.5 text-xs text-white">{pendingCohosts}</span> : null}
-              </TabsTrigger>
-            ) : null}
-          </TabsList>
-          <TabsContent value="ideas">
-            <IdeasPanel clubId={club?.id ?? null} ideas={ideas} basePath={basePath} onSchedule={(idea) => openSchedule(idea)} />
-          </TabsContent>
-          {isClub ? (
-            <TabsContent value="cohosts">
-              <CohostPanel incoming={incoming} outgoing={outgoing} basePath={basePath} />
-            </TabsContent>
-          ) : null}
-        </Tabs>
-      </aside>
+      {isClub ? (
+        <aside id="builder-panel" aria-label="Co-host requests" className="order-2 min-w-0 scroll-mt-20 xl:order-1">
+          <h2 className="mb-4 border-b border-line pb-2 text-sm font-semibold text-ink">
+            Co-host requests {pendingCohosts ? <span className="ml-1 rounded-full bg-brand px-1.5 text-xs text-white">{pendingCohosts}</span> : null}
+          </h2>
+          <CohostPanel incoming={incoming} outgoing={outgoing} basePath={basePath} />
+        </aside>
+      ) : null}
 
       <Popover.Root open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
         <Popover.Anchor virtualRef={anchor} />
@@ -306,17 +259,6 @@ export function EventsBuilder(props: EventsBuilderProps) {
         googleLive={googleLive}
         onCreated={() => {
           setQuick(null);
-          refetch();
-        }}
-      />
-
-      <ScheduleIdeaDialog
-        state={scheduling}
-        onChange={setScheduling}
-        basePath={basePath}
-        terms={terms}
-        onScheduled={() => {
-          setScheduling(null);
           refetch();
         }}
       />
@@ -557,83 +499,6 @@ function QuickCreateDialog({
                 </Button>
                 <Button type="submit" disabled={pending}>
                   {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save
-                </Button>
-              </div>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      ) : null}
-    </Dialog>
-  );
-}
-
-// ─── Schedule an idea ────────────────────────────────────────────────────────
-
-function ScheduleIdeaDialog({
-  state,
-  onChange,
-  basePath,
-  terms,
-  onScheduled,
-}: {
-  state: { idea: IdeaRow; when: WhenValue } | null;
-  onChange: (s: { idea: IdeaRow; when: WhenValue } | null) => void;
-  basePath: string;
-  terms: TermJson[];
-  onScheduled: () => void;
-}) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!state) return;
-    const s = toSchedule(state.when);
-    if (!s.ok) return setError(s.error);
-    const ideaId = state.idea.id;
-    start(async () => {
-      const res = await scheduleIdeaAction(ideaId, s.value);
-      if (!res.ok) return setError(res.error);
-      const first = fromInputs(state.when.date, state.when.startTime);
-      toast.success(`“${state.idea.title}” is on the calendar${first ? ` for ${fmtDate(first)}` : ""}`, {
-        action: { label: "Add place & details", onClick: () => router.push(`${basePath}/${ideaId}`) },
-      });
-      setError(null);
-      onScheduled();
-    });
-  }
-
-  return (
-    <Dialog
-      open={state !== null}
-      onOpenChange={(o) => {
-        if (!o) {
-          onChange(null);
-          setError(null);
-        }
-      }}
-    >
-      {state ? (
-        <DialogContent title={`Add “${state.idea.title}” to the calendar`} description="Pick when it happens. You can add the place, details and costs next." wide>
-          <form onSubmit={submit} className="space-y-5" noValidate>
-            {state.idea.notes ? <p className="line-clamp-3 whitespace-pre-line rounded-lg bg-muted/60 px-3 py-2 text-sm text-ink-2">{state.idea.notes}</p> : null}
-            <WhenFields compact value={state.when} onChange={(when) => onChange({ ...state, when })} terms={terms} />
-            {error ? (
-              <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-sm text-danger">
-                {error}
-              </p>
-            ) : null}
-            <DialogFooter className="justify-between">
-              <Link href={`${basePath}/${state.idea.id}`} className="text-sm font-medium text-brand-600 hover:underline">
-                Open the full editor
-              </Link>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => onChange(null)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />} Add to calendar
                 </Button>
               </div>
             </DialogFooter>

@@ -192,8 +192,10 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
     return make(seatName, u, at);
   };
 
+  const dormantAfter = def.life === "dormant" && lastActive ? lastActive : null;
   const wantFor = (seatName: string, start: Date, pi: number): number => {
     const inactiveNow = lastActive && start > lastActive;
+    if (dormantAfter && start > dormantAfter) return 0; // nobody took over once the club went quiet
     const tier = inactiveNow ? 0 : tierBase;
     if (isAmb) {
       if (seatName === "President") return 1;
@@ -222,7 +224,8 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
         const seat = club.seats.get(a.seatName!)!;
         const pinnedOut = seat.maxHolders === 1 && pinsOverlapping(a.seatName!, p.start, p.end) > 0;
         const stays = rng.chance(a.seatName === "President" ? 0.3 : 0.42) && okAt(a.userId, p.start, 0);
-        if (pinnedOut || !stays) end(a, p.start, "SUCCEEDED");
+        if (dormantAfter && p.start > dormantAfter) end(a, p.start, "RESIGNED");
+        else if (pinnedOut || !stays) end(a, p.start, "SUCCEEDED");
       }
     }
 
@@ -276,6 +279,7 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
       const nextSpring = springStartDate(new Date(endAt).getUTCFullYear() + (new Date(endAt).getUTCMonth() >= 6 ? 1 : 0));
       const refillAt = reason === "GRADUATED" ? addDays(nextSpring, rng.float(5, 20)) : addDays(endAt, rng.float(12, 40));
       if (refillAt >= minDate(p.end, NOW)) continue;
+      if (dormantAfter && refillAt > dormantAfter) continue;
       const b = place(seatName, refillAt, 21);
       if (b) {
         const bp = ctx.person(b.userId);
@@ -308,8 +312,49 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
   }
   for (const a of club.assignments) if (a.pinned && !a.assignedById) a.assignedById = otherLeader(club, a);
 
-  // Every approved club has a president today.
-  if (club.status === "APPROVED" && !club.assignments.some((a) => a.role === "PRESIDENT" && !a.endedAt)) {
+  // Dormant clubs: whoever still held a seat when the club went quiet stepped down at the next hand-off.
+  if (dormantAfter) {
+    const stop = periods.find((x) => x.start > dormantAfter)?.start ?? addDays(dormantAfter, 30);
+    for (const a of [...live]) end(a, minDate(maxDate(stop, addDays(a.startedAt, 1)), addDays(NOW, -30)), "RESIGNED");
+  }
+
+  // Directory clubs: today's seats match the real list's officer counts.
+  if (def.seatPlan && !dormantAfter) {
+    const plan = def.seatPlan;
+    const yearStart = periods[periods.length - 1].start;
+    const recent = () => minDate(maxDate(addDays(NOW, -rng.float(20, 140)), addDays(club.approvedAt ?? club.createdAt, 2), yearStart), addDays(NOW, -2));
+    for (const seatName of order) {
+      if (!club.seats.has(seatName)) continue;
+      const want = plan[seatName] ?? 0;
+      // More holders than the list shows: the extras stepped down earlier this year.
+      for (const a of liveIn(seatName).sort((x, y) => x.startedAt.getTime() - y.startedAt.getTime()).slice(want)) {
+        end(a, minDate(addDays(NOW, -1), maxDate(addDays(a.startedAt, 1), addDays(NOW, -rng.float(10, 60)))), "RESIGNED");
+      }
+      for (let guard = 0; liveIn(seatName).length < want && guard < 4; guard++) {
+        const at = recent();
+        if (place(seatName, at, 14)) continue;
+        // Small clubs: anyone still on the roster without a seat.
+        const free = club.members.filter((m) => {
+          const p = ctx.person(m.userId);
+          return m.status === "ACTIVE" && m.joinedAt && m.joinedAt < addDays(NOW, -3) && p.kind === "STUDENT" && !p.persona && !excluded.has(m.userId) && !live.some((a) => a.userId === m.userId);
+        });
+        if (!free.length) break;
+        const m = rng.weighted(free, (x) => x.eng.base);
+        make(seatName, m.userId, minDate(maxDate(at, addDays(m.joinedAt!, 1)), addDays(NOW, -1)));
+      }
+    }
+    // A seat holder registered before taking the seat (a check-in join would move their join date past it).
+    for (const a of club.assignments) {
+      const m = club.byUser.get(a.userId);
+      if (m?.viaCheckin) {
+        m.viaCheckin = false;
+        m.source = "REGISTER";
+      }
+    }
+  }
+
+  // Every story club has a president today (directory clubs follow the list).
+  if (club.status === "APPROVED" && def.story && !club.assignments.some((a) => a.role === "PRESIDENT" && !a.endedAt)) {
     const at = maxDate(addDays(NOW, -rng.float(20, 60)), addDays(club.approvedAt!, 1));
     let u = pick("President", at, 0);
     if (!u) {
@@ -337,18 +382,45 @@ function otherLeader(club: ClubM, a: Assignment): string | null {
 const STAFF_FOR: Record<string, string> = {
   bsu: "multicultural", lia: "multicultural2", firstgen: "multicultural", veterans: "veterans", isa: "international",
   climbing: "rec2", ultimate: "rec", ski: "rec2", pickleball: "rec", rugby: "rec", pride: "lgbt", service: "service",
-  anime: "library", chess: "library", boardgames: "library", poker: "success",
+  anime: "library", chess: "library", boardgames: "library", poker: "success", paintball: "rec", discgolf: "rec2",
 };
+
+/** Campus offices whose staff advise directory clubs without a department, by WSUSA category. */
+const STAFF_BY_CATEGORY: Record<string, string[]> = {
+  CULTURAL: ["multicultural", "multicultural2", "international", "nontrad"],
+  SERVICE_ADVOCACY: ["service", "sustain", "womens", "access", "involvement2"],
+  FSL: ["involvement", "involvement2"],
+  HONOR_SOCIETY: ["honors", "success"],
+  RELIGIOUS: ["library", "success", "involvement", "alumni"],
+  STUDENT_LIFE: ["involvement", "involvement2", "library", "alumni"],
+  ACADEMIC: ["success", "healthadv", "honors"],
+};
+
+/** Current advisorships per person, so advisors spread across faculty and staff. */
+const advisorLoad = new Map<string, number>();
 
 function advisorFor(ctx: Ctx, club: ClubM, exclude: string[] = []): Person {
   const { rng } = ctx;
-  const staffKey = STAFF_FOR[club.def.key];
-  if (staffKey && !exclude.includes(ctx.refs[`staff:${staffKey}`])) return ctx.person(ctx.refs[`staff:${staffKey}`]);
+  const def = club.def;
+  const staffKey = STAFF_FOR[def.key];
+  if (def.story && staffKey && !exclude.includes(ctx.refs[`staff:${staffKey}`])) return ctx.person(ctx.refs[`staff:${staffKey}`]);
+  const leastLoaded = (xs: Person[]) => {
+    const min = Math.min(...xs.map((x) => advisorLoad.get(x.id) ?? 0));
+    return rng.pick(xs.filter((x) => (advisorLoad.get(x.id) ?? 0) === min));
+  };
   const faculty = ctx.staff.filter((s) => s.departmentId && !exclude.includes(s.id));
   const inDept = faculty.filter((s) => club.departmentId && s.departmentId === club.departmentId);
-  if (inDept.length) return rng.pick(inDept);
+  if (inDept.length) return def.story ? rng.pick(inDept) : leastLoaded(inDept);
   const inCollege = faculty.filter((s) => club.collegeKey && s.collegeKey === club.collegeKey);
-  if (inCollege.length) return rng.pick(inCollege);
+  if (inCollege.length) return def.story ? rng.pick(inCollege) : leastLoaded(inCollege);
+  if (!def.story) {
+    const keys = club.scope === "SPORTS" ? ["rec", "rec2", "athletics"] : def.topic === "health" ? ["healthadv", "success"] : STAFF_BY_CATEGORY[def.category] ?? ["involvement"];
+    const offices = keys.map((k) => ctx.refs[`staff:${k}`]).filter((id) => id && !exclude.includes(id)).map((id) => ctx.person(id));
+    // Faculty from any college volunteer too.
+    const volunteers = rng.sample(faculty, 3);
+    const pool = [...offices, ...volunteers];
+    if (pool.length) return leastLoaded(pool);
+  }
   const success = ctx.refs["staff:success"];
   return ctx.person(exclude.includes(success) ? rng.pick(faculty).id : success);
 }
@@ -359,6 +431,7 @@ function addAdvisor(ctx: Ctx, club: ClubM, advisor: Person, start: Date, endAt: 
     id: ctx.id(), clubId: club.id, userId: advisor.id, positionId: null, seatName: null, role: "ADVISOR", permissions: [], viaClubId: null,
     startedAt: start, endedAt: endAt, endReason: reason, assignedById: null,
   });
+  if (!endAt) advisorLoad.set(advisor.id, (advisorLoad.get(advisor.id) ?? 0) + 1);
   if (!club.advisorIds.includes(advisor.id) && !endAt) club.advisorIds.unshift(advisor.id);
   else if (!club.advisorIds.includes(advisor.id)) club.advisorIds.push(advisor.id);
   const m = addMember(ctx, club, advisor.id, { status: endAt ? (club.retiredAt ? "ALUMNI" : "LEFT") : "ACTIVE", source: "ADVISOR", joinedAt: start, endedAt: endAt, eng: { base: 0.08, half: 999, floor: 1 } });
@@ -370,14 +443,49 @@ function addAdvisor(ctx: Ctx, club: ClubM, advisor: Person, start: Date, endAt: 
   });
 }
 
+/**
+ * A directory club's advisors follow the real list: as many current advisors
+ * as it shows. Clubs without one had an advisor when they were approved who
+ * has since stepped down; dormant clubs' advisor term ended once they went quiet.
+ */
+function directoryAdvisors(ctx: Ctx, club: ClubM, start: Date) {
+  const { rng, NOW } = ctx;
+  const def = club.def;
+  const first = advisorFor(ctx, club);
+  if (def.life === "dormant") {
+    const quiet = ctx.term(def.lastActiveTerm!).endsOn;
+    const endAt = minDate(maxDate(addDays(quiet, rng.float(20, 120)), addDays(start, 120)), addDays(NOW, -200));
+    addAdvisor(ctx, club, first, start, endAt, "TERM_ENDED", club.founderId);
+    return;
+  }
+  const want = def.advisors ?? 0;
+  if (want === 0) {
+    const options = [H(2025), H(2026)].filter((h) => h > addDays(start, 150) && h < NOW);
+    const endAt = options.length ? rng.pick(options) : addDays(NOW, -rng.float(20, Math.max(25, Math.min(150, (NOW.getTime() - start.getTime()) / DAY - 60))));
+    addAdvisor(ctx, club, first, start, maxDate(endAt, addDays(start, 30)), rng.pick(["TERM_ENDED", "RESIGNED"] as RoleEndReason[]), club.founderId);
+    return;
+  }
+  addAdvisor(ctx, club, first, start, null, null, club.founderId);
+  if (want >= 2) {
+    const second = advisorFor(ctx, club, [first.id]);
+    const at = maxDate(addDays(start, rng.float(30, 400)), start);
+    addAdvisor(ctx, club, second, minDate(at, addDays(NOW, -10)), null, null, ctx.leaderAt(club, at));
+  }
+}
+
 function buildAdvisors(ctx: Ctx) {
   const { rng, NOW } = ctx;
   const elena = ctx.p("elena");
+  advisorLoad.clear();
   for (const club of ctx.clubs) {
     if (club.def.life === "draft") continue;
     const start =
       club.def.life === "submitted" ? addDays(NOW, -30.2) : addDays(club.createdAt, rng.float(3, Math.max(3.5, Math.min(9, ((club.submittedAt ?? NOW).getTime() - club.createdAt.getTime()) / DAY - 0.5))));
     const finalEnd = club.retiredAt;
+    if (!club.def.story) {
+      directoryAdvisors(ctx, club, start);
+      continue;
+    }
     if (club.def.key === "robotics") {
       addAdvisor(ctx, club, elena, start, null, null, club.founderId);
       continue;
@@ -446,7 +554,8 @@ function foundingRoles(ctx: Ctx, club: ClubM) {
 function placements(ctx: Ctx) {
   const { rng, NOW } = ctx;
   for (const org of ctx.clubs.filter((c) => c.type === "COLLEGE_AMBASSADORS")) {
-    const targets = ctx.clubs.filter((c) => c.collegeKey === org.collegeKey && c.type !== "COLLEGE_AMBASSADORS" && c.approvedAt && (c.status === "APPROVED" || c.status === "RETIRED"));
+    // Reps go to the college's clubs that meet (not the small or dormant ones on the list).
+    const targets = ctx.clubs.filter((c) => c.collegeKey === org.collegeKey && c.type !== "COLLEGE_AMBASSADORS" && c.approvedAt && (c.status === "APPROVED" || c.status === "RETIRED") && c.def.life !== "dormant" && c.def.life !== "small");
     const place = (target: ClubM, userId: string, start: Date, endAt: Date | null, reason: RoleEndReason | null) => {
       const seat = target.seats.get("College Ambassador")!;
       target.assignments.push({

@@ -10,6 +10,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
   const user = await requireUser("/settings");
   const links = [
     { href: "/settings", label: "Profile", exact: true },
+    { href: "/settings/details", label: "Member details" },
     { href: "/settings/experience", label: "Experience" },
     { href: "/settings/education", label: "Education" },
     { href: "/settings/projects", label: "Projects" },

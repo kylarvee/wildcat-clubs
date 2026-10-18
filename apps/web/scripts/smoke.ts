@@ -11,6 +11,7 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { PERSONAS } from "../src/lib/auth/personas";
+import { clubByKey } from "../prisma/seed/data/clubs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3100";
 const db = new PrismaClient();
@@ -32,7 +33,8 @@ function pageRoutes(dir: string, base = ""): string[] {
 
 async function ids() {
   const pick = async <T>(p: Promise<T | null>) => (await p) ?? null;
-  const approved = await db.club.findFirst({ where: { slug: "wildcat-robotics" }, select: { id: true, slug: true } });
+  // Priya's club (story key "robotics"; its slug follows the real club's name).
+  const approved = await db.club.findFirst({ where: { slug: clubByKey("robotics").slug }, select: { id: true, slug: true } });
   const event = await pick(db.event.findFirst({ where: { clubId: approved?.id, status: "SCHEDULED" }, select: { id: true } }));
   const training = await pick(db.event.findFirst({ where: { clubId: null, status: "SCHEDULED" }, select: { id: true } }));
   const occ = await pick(db.eventOccurrence.findFirst({ where: { event: { clubId: approved?.id } }, orderBy: { startsAt: "desc" }, select: { id: true, checkinCode: true } }));

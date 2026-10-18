@@ -1,4 +1,4 @@
-import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
+import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, Gender, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
 import { createIdFactory, createRng, type Rng } from "./lib/rng";
 import type { ClubDef } from "./data/clubs";
 import type { CollegeKey } from "./data/reference";
@@ -18,6 +18,8 @@ export type Person = {
   handle: string;
   kind: "STUDENT" | "FACULTY_STAFF";
   status: "ACTIVE" | "ALUMNI";
+  /** Matches their first name and pronouns; goes on their member details. */
+  gender: Gender | null;
   persona?: string;
   collegeKey: CollegeKey | null;
   majorId: string | null;
@@ -170,6 +172,8 @@ export class Ctx {
 
   // Rows written as-is (in insert order in index.ts)
   rows = {
+    /** Member details (Settings → Member details): built with the people, before governance reads them. */
+    personalDetails: [] as Prisma.PersonalDetailsCreateManyInput[],
     userMajors: [] as Prisma.UserMajorCreateManyInput[],
     experiences: [] as Prisma.ExperienceCreateManyInput[],
     educations: [] as Prisma.EducationCreateManyInput[],

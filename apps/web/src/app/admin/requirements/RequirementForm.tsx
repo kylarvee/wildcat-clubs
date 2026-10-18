@@ -80,11 +80,12 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
           </Field>
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-ink">Kind</legend>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               {(
                 [
                   ["TEST", "Pass a test or fill out a form", "Met by passing a university test, or by submitting a university form."],
                   ["TRAINING", "Attend a training", "Met by a check-in at any session of a university training."],
+                  ["PROFILE", "Confirm member details", "Met when someone's member details (Settings → Member details) are complete and confirmed this period."],
                 ] as const
               ).map(([value, label, detail]) => (
                 <label key={value} className={cn("flex cursor-pointer gap-3 rounded-xl border p-3", v.kind === value ? "border-brand bg-brand-50/60" : "border-line hover:bg-muted/50")}>
@@ -97,7 +98,11 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
               ))}
             </div>
           </fieldset>
-          {v.kind === "TEST" ? (
+          {v.kind === "PROFILE" ? (
+            <p className="rounded-xl bg-muted/70 px-3.5 py-3 text-sm text-ink-2">
+              People confirm their student ID, date of birth, contact details, address and emergency contact once, in Settings → Member details. Every club reuses them, so nobody types them twice.
+            </p>
+          ) : v.kind === "TEST" ? (
             <Field
               label="Test or form"
               required

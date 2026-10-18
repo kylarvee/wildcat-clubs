@@ -3,6 +3,7 @@ import { expandOccurrences, type OccurrenceTimes } from "@/lib/events/recurrence
 import { generateCheckinSecret } from "@/lib/attendance/token";
 import type { ClubM, Ctx, Ev, Occ } from "../ctx";
 import { COLLEGE_BUILDINGS, OFFSITE } from "../data/reference";
+import { isQuiet } from "../data/clubs";
 import { DRAFT_IDEAS, EVENT_IDEAS, type EventIdea } from "../data/text";
 import { addDays, addMin, calAdd, campusDate, DAY, floor5, local, maxDate, minDate } from "../lib/dates";
 import { fallStart, holidayNote, springEnd } from "./reference";
@@ -140,6 +141,7 @@ function clubEvents(ctx: Ctx, club: ClubM) {
     const winEnd = minDate(addDays(term.endsOn, -7), club.end < NOW ? club.end : addDays(term.endsOn, -7));
     if (winEnd.getTime() - winStart.getTime() < 21 * DAY) continue;
     const quiet = Boolean(lastActive && term.startsOn > lastActive);
+    if (quiet && def.life === "dormant") continue; // nothing at all once a dormant club went quiet
     if (term.academicYear !== lastAy) {
       // Meeting nights stay put: club descriptions name the day ("Tuesday build nights").
       lastAy = term.academicYear;
@@ -152,7 +154,7 @@ function clubEvents(ctx: Ctx, club: ClubM) {
         clubId: club.id,
         title: def.meeting.title ?? "General Meeting",
         descriptionHtml: describe(club, def.meeting.title ?? "General Meeting", "MEETING"),
-        kind: "MEETING",
+        kind: def.meeting.kind ?? "MEETING",
         visibility: "PUBLIC",
         startsAt: first,
         durationMinutes: def.meeting.duration,
@@ -172,8 +174,13 @@ function clubEvents(ctx: Ctx, club: ClubM) {
       if (ev.occurrences.length) club.events.push(ev);
     }
 
-    const n = def.life === "pilot" ? rng.int(2, 4) : quiet ? (rng.chance(0.3) ? 1 : 0) : Math.max(3, Math.round(def.activity * rng.int(4, 10)));
-    const bank = EVENT_IDEAS[def.category];
+    // Story clubs run full calendars; directory clubs a lighter one (a meeting series plus a few events).
+    const n =
+      def.life === "pilot" ? rng.int(2, 4) :
+      quiet ? (rng.chance(0.3) ? 1 : 0) :
+      def.story ? Math.max(3, Math.round(def.activity * rng.int(4, 10))) :
+      def.life === "active" ? rng.int(1, 3) : def.life === "small" ? (rng.chance(0.5) ? 1 : 0) : rng.int(0, 2);
+    const bank = EVENT_IDEAS[def.topic];
     for (let i = 0; i < n; i++) {
       const fresh = bank.filter((x) => !ideasUsed.has(`${term.id}:${x.title}`));
       const idea = rng.pick(fresh.length ? fresh : bank);
@@ -207,16 +214,16 @@ function clubEvents(ctx: Ctx, club: ClubM) {
       club.events.push(ev);
 
       // Co-host with a related club now and then.
-      if (!cancelled && def.related.length && rng.chance(def.key === "robotics" ? 0.35 : 0.12)) {
+      if (!cancelled && def.related.length && rng.chance(def.key === "robotics" ? 0.35 : def.story ? 0.12 : 0.08)) {
         const partner = ctx.clubByKey.get(rng.pick(def.related));
-        if (partner && partner.status === "APPROVED" && partner.approvedAt! < ev.createdAt && partner.end > startsAt && partner.type !== "COLLEGE_AMBASSADORS") {
+        if (partner && partner.status === "APPROVED" && !isQuiet(partner.def.life) && partner.approvedAt! < ev.createdAt && partner.end > startsAt && partner.type !== "COLLEGE_AMBASSADORS") {
           approvedCohost(ctx, ev, club, partner);
         }
       }
     }
   }
 
-  // Wildcat Robotics always co-hosts with ACM and SWE at least once a term.
+  // RC Wrecker Bots (robotics) always co-hosts with CSWS (acm) and SWE at least once a term.
   if (def.key === "robotics") {
     for (const term of EVENT_TERMS(ctx)) {
       for (const partnerKey of ["acm", "swe"]) {
@@ -389,7 +396,7 @@ function liveEvents(ctx: Ctx) {
   const build = newEvent(ctx, {
     clubId: robotics.id,
     title: "Open Build Night (extra session)",
-    descriptionHtml: "<p>Extra shop time before the Lunabotics design review. Drivetrain and electronics teams especially — come finish your subsystem.</p>",
+    descriptionHtml: "<p>Extra shop time before the spring competition's design review. Drivetrain, weapon and electronics teams especially — come finish your subsystem.</p>",
     kind: "OTHER",
     visibility: "MEMBERS",
     startsAt: buildStart,
@@ -448,22 +455,22 @@ function upcomingCohosts(ctx: Ctx) {
   ctx.refs.pendingCohostSwe = a.cohost.id;
   ctx.refs.pendingCohostSweEvent = a.ev.id;
   const b = make("premed", "nursing", "Health Careers Night", "WORKSHOP", 15, 18, "PENDING",
-    "<p>Meet professionals from medicine, nursing, PA and dental programs. Pre-Med Society invited the Nursing Student Association to co-host.</p>");
+    `<p>Meet professionals from medicine, nursing, PA and dental programs. ${ctx.club("premed").name} invited ${ctx.club("nursing").name} to co-host.</p>`);
   ctx.refs.pendingCohostNursing = b.cohost.id;
   const c = make("bsu", "lia", "Unity Week Kickoff", "SOCIAL", 12, 18, "PENDING",
     "<p>Kick off Unity Week with music, food and student performances in the Shepherd Union.</p>", ["Catering", 1, 400]);
   ctx.refs.pendingCohostLia = c.cohost.id;
-  make("robotics", "acm", "Robotics × ACM: Intro to ROS Workshop", "WORKSHOP", 6, 18, "APPROVED",
-    "<p>Get started with the Robot Operating System. ACM brings the software folks, Wildcat Robotics brings the robots.</p>", ["Pizza", 10, 14]);
+  make("robotics", "acm", "Wrecker Bots × CSWS: Intro to Embedded Programming", "WORKSHOP", 6, 18, "APPROVED",
+    "<p>Program a motor controller from scratch. CSWS brings the software folks, the RC Wrecker Bots Club brings the robots.</p>", ["Pizza", 10, 14]);
   make("robotics", "swe", "Girls in STEM Robot Day", "SERVICE", 20, 10, "APPROVED",
-    "<p>Middle-school girls from Ogden build and drive their first robots with Wildcat Robotics and SWE mentors.</p>", ["Robot kits and supplies", 1, 320]);
+    "<p>Middle-school girls from Ogden build and drive their first robots with RC Wrecker Bots and SWE mentors.</p>", ["Robot kits and supplies", 1, 320]);
 }
 
 function draftIdeas(ctx: Ctx) {
   const { rng, NOW } = ctx;
   for (const club of ctx.clubs) {
-    if (club.status !== "APPROVED" || club.def.life === "inactive") continue;
-    const ideas = rng.sample(DRAFT_IDEAS[club.def.category], club.def.life === "pilot" ? rng.int(1, 2) : rng.int(1, 3));
+    if (club.status !== "APPROVED" || isQuiet(club.def.life)) continue;
+    const ideas = rng.sample(DRAFT_IDEAS[club.def.topic], club.def.life === "pilot" ? rng.int(1, 2) : club.def.life === "small" ? rng.int(0, 1) : club.def.story ? rng.int(1, 3) : rng.int(0, 2));
     for (const title of ideas) {
       const createdAt = addDays(NOW, -rng.float(2, 45));
       club.events.push(

@@ -1,4 +1,5 @@
 import type { Ctx, ClubM } from "../ctx";
+import { isQuiet } from "../data/clubs";
 import { ANNOUNCEMENTS, BOMBING_REVIEWS, CHAT, REVIEWS } from "../data/text";
 import { addDays, addHours, addMin, minDate } from "../lib/dates";
 import { attendanceCounts } from "./attendance";
@@ -23,8 +24,9 @@ export function buildSubscriptions(ctx: Ctx) {
   const current = ctx.people.filter((p) => p.kind === "STUDENT" && p.status === "ACTIVE" && p.id !== sam);
   for (const club of ctx.clubs.filter((c) => c.status === "APPROVED")) {
     for (const m of club.members) if (m.status === "ACTIVE" && m.joinedAt) sub(m.userId, club.id, m.joinedAt);
-    // Some students follow a club's calendar without joining.
-    const extra = Math.round(current.length * rng.float(0.02, club.def.size > 50 ? 0.08 : 0.04));
+    // Some students follow a club's calendar without joining (a few dozen for a big club, a handful for a small one).
+    const d = club.def;
+    const extra = d.life === "dormant" ? rng.int(0, 2) : d.story ? Math.round(360 * rng.float(0.02, d.size > 50 ? 0.08 : 0.04)) : Math.round(Math.max(1, d.size) * rng.float(0.15, 0.6));
     for (const p of rng.sample(current.filter((s) => !club.byUser.has(s.id) && s.persona !== "maya"), extra)) {
       sub(p.id, club.id, addDays(NOW, -rng.float(1, 300)));
     }
@@ -47,19 +49,20 @@ export function buildReviews(ctx: Ctx) {
 
   // Maya already reviewed the climbing club.
   const climbing = ctx.club("climbing");
-  add(climbing, maya, 5, "Wall nights are the highlight of my week. The officers teach every new climber how to belay safely and nobody makes you feel slow. Go to a trip if you can!", addDays(NOW, -21.3));
+  add(climbing, maya, 5, "Saturday hikes are the highlight of my week. The trip leaders go over the route and safety plan with every new hiker and nobody makes you feel slow. Go on a trip if you can!", addDays(NOW, -21.3));
 
   for (const club of ctx.clubs.filter((c) => c.status === "APPROVED" && c.type !== "COLLEGE_AMBASSADORS" && c.def.life !== "pilot")) {
     const byUser = counts.get(club.id)!;
     const eligible = [...byUser.entries()].filter(([u, c]) => c.count >= 3 && ctx.person(u).kind === "STUDENT" && !ctx.person(u).persona && club.byUser.has(u));
-    const target = club.def.life === "inactive" ? rng.int(0, 2) : Math.min(25, Math.round(Math.min(eligible.length * 0.35, 4 + club.def.size / 4)));
-    const mean = club.def.key === "polisci" ? 4.0 : rng.float(3.6, 4.7);
+    const target = isQuiet(club.def.life) ? rng.int(0, 2) : Math.min(25, Math.round(Math.min(eligible.length * 0.35, 4 + club.def.size / 4)));
+    const mean = club.def.key === "discgolf" ? 4.0 : rng.float(3.6, 4.7);
     for (const [userId, c] of rng.sample(eligible, target)) {
       const lo = addDays(c.third!, 1);
       const hi = minDate(addDays(NOW, -3), addDays(c.last ?? NOW, 60));
       if (hi <= lo) continue;
       const createdAt = new Date(lo.getTime() + rng.next() * (hi.getTime() - lo.getTime()));
-      const rating = Math.max(1, Math.min(5, Math.round(rng.normal(mean, 0.85))));
+      // Low ratings only on the fictional demo clubs: nothing negative is invented about a real club.
+      const rating = Math.max(club.def.dir ? 3 : 1, Math.min(5, Math.round(rng.normal(mean, 0.85))));
       const bank = REVIEWS[rating as 1 | 2 | 3 | 4 | 5];
       const body = rng.chance(0.78) ? rng.pick(bank).replace("{club}", club.name) : null;
       const edited = rng.chance(0.1) ? minDate(addDays(createdAt, rng.float(2, 40)), addDays(NOW, -3)) : createdAt;
@@ -67,8 +70,8 @@ export function buildReviews(ctx: Ctx) {
     }
   }
 
-  // Political Science Society: four 1★ reviews within the last 36 hours.
-  const polisci = ctx.club("polisci");
+  // Ogden Valley Disc Golf Club (fictional demo club): four 1★ reviews within the last 36 hours.
+  const polisci = ctx.club("discgolf");
   const pcounts = counts.get(polisci.id)!;
   const bombers = rng.sample(
     [...pcounts.entries()].filter(([u, c]) => c.count >= 3 && !reviewed.has(`${polisci.id}:${u}`) && !ctx.person(u).persona && ctx.person(u).kind === "STUDENT").map(([u]) => u),
@@ -81,7 +84,7 @@ export function buildReviews(ctx: Ctx) {
     for (const u of rng.sample(flaggers, rng.int(2, 3))) {
       ctx.rows.reviewFlags.push({
         id: ctx.id(), reviewId, userId: u,
-        reason: rng.pick(["Looks coordinated — four 1-star reviews in a day from people who barely come.", "This isn't what meetings are like. Seems like a pile-on.", "Brand-new reviews, all the same complaint, all within hours."]),
+        reason: rng.pick(["Looks coordinated — four 1-star reviews in a day from people who barely come.", "This isn't what rounds are like. Seems like a pile-on.", "Brand-new reviews, all the same complaint, all within hours."]),
         createdAt: minDate(addHours(times[i], rng.float(1, 6)), addMin(NOW, -5)),
       });
     }
@@ -103,7 +106,8 @@ export function buildReviews(ctx: Ctx) {
   }
 
   // One review hidden by an admin for a personal attack.
-  const anime = ctx.club("anime");
+  // On the fictional Wildcat Paintball Club.
+  const anime = ctx.club("paintball");
   const acounts = counts.get(anime.id)!;
   const hiddenBy = [...acounts.entries()].find(([u, c]) => c.count >= 3 && !reviewed.has(`${anime.id}:${u}`) && !ctx.person(u).persona && ctx.person(u).kind === "STUDENT");
   if (hiddenBy) {
@@ -127,8 +131,8 @@ export function buildReviews(ctx: Ctx) {
 
 export function buildAnnouncements(ctx: Ctx) {
   const { rng, NOW } = ctx;
-  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED")) {
-    const n = club.def.life === "inactive" ? rng.int(0, 1) : rng.int(2, 6);
+  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED" && c.def.life !== "dormant")) {
+    const n = club.def.life === "inactive" ? rng.int(0, 1) : club.def.life === "small" ? rng.int(0, 2) : rng.int(2, 6);
     const picks = rng.sample(ANNOUNCEMENTS, n);
     picks.forEach((a, i) => {
       const createdAt = club.def.life === "inactive" ? addDays(NOW, -rng.float(120, 300)) : addDays(NOW, -rng.float(1, 58));
@@ -162,13 +166,13 @@ export function buildAnnouncements(ctx: Ctx) {
 export function buildMessaging(ctx: Ctx) {
   const { rng, NOW } = ctx;
   const personaIds = new Set(["maya", "oscar", "vanessa", "priya", "amir", "frank", "elena"].map((k) => ctx.p(k).id));
-  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED")) {
+  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED" && c.def.life !== "dormant")) {
     const convoId = ctx.id();
     const active = club.members.filter((m) => m.status === "ACTIVE" && m.joinedAt && m.joinedAt < addDays(NOW, -1));
     if (!active.length) continue;
-    const n = club.def.life === "inactive" ? rng.int(3, 8) : rng.int(10, 40);
+    const n = club.def.life === "inactive" ? rng.int(3, 8) : club.def.life === "small" ? rng.int(2, 8) : rng.int(10, 40);
     const leaders = club.assignments.filter((a) => !a.endedAt).map((a) => a.userId);
-    const bank = [...CHAT.general, ...CHAT[club.def.category]];
+    const bank = [...CHAT.general, ...CHAT[club.def.topic]];
     const msgs: { at: Date; author: string; body: string }[] = [];
     const span = club.def.life === "inactive" ? 200 : 21;
     for (let i = 0; i < n; i++) {
@@ -180,7 +184,7 @@ export function buildMessaging(ctx: Ctx) {
     msgs.sort((a, b) => a.at.getTime() - b.at.getTime());
     ctx.rows.conversations.push({ id: convoId, type: "CLUB", clubId: club.id, title: null, createdAt: club.approvedAt!, lastMessageAt: msgs.at(-1)?.at ?? club.approvedAt! });
     for (const m of msgs) ctx.rows.messages.push({ id: ctx.id(), conversationId: convoId, authorId: m.author, body: m.body, createdAt: m.at });
-    // Read markers: personas (Maya has a few unread in Psychology Club) and some regulars.
+    // Read markers: personas (Maya has a few unread in Psi Chi) and some regulars.
     const readers = new Set([...active.filter((m) => personaIds.has(m.userId)).map((m) => m.userId), ...rng.sample(active, 8).map((m) => m.userId)]);
     for (const u of readers) {
       const unread = u === ctx.p("maya").id && club.def.key === "psych" ? 3 : rng.int(0, 4);
@@ -207,15 +211,15 @@ export function buildMessaging(ctx: Ctx) {
   const priya = ctx.p("priya").id;
   const vanessa = ctx.p("vanessa").id;
   ctx.refs.dmMayaPriya = thread("DIRECT", null, [maya, priya], [
-    [1, "Hey! Are you going on the Ogden Canyon trip Saturday?"],
+    [1, "Hey! Are you going on the Waterfall Canyon hike Saturday?"],
     [0, "Yes!! Do you still have room in your car?"],
     [1, "One seat left, it's yours. Leaving the Stromberg lot at 8"],
-    [0, "Perfect, I'll bring my own harness this time 😅"],
-    [1, "Also random q — do you know anyone in Psych Club who'd want to help with our robot outreach day? We need people good with kids"],
+    [0, "Perfect, I'll wear actual hiking boots this time 😅"],
+    [1, "Also random q — do you know anyone in Psi Chi who'd want to help with our robot outreach day? We need people good with kids"],
     [0, "Totally, I'll ask at our meeting Wednesday"],
     [1, "You're the best. It's on the calendar as Girls in STEM Robot Day"],
     [0, "Saw it! Sharing it in our club chat"],
-    [1, "Thanks! See you Saturday 🧗"],
+    [1, "Thanks! See you Saturday 🥾"],
   ], 9, { userId: maya, count: 1 });
   ctx.refs.dmPriyaVanessa = thread("DIRECT", null, [priya, vanessa], [
     [0, "Hi Vanessa! Want to co-host the Girls in STEM Robot Day again this year?"],
@@ -226,20 +230,20 @@ export function buildMessaging(ctx: Ctx) {
     [1, "Leadership vote just closed — results are up, waiting on her to apply them"],
     [0, "Nice. Also Cyber Club asked if SWE wants to co-host their women in cyber panel, did you see it?"],
     [1, "Just saw the request in my tasks. Going to say yes after I check the date"],
-    [0, "Let me know if you need Robotics folks there too"],
+    [0, "Let me know if you need Wrecker Bots folks there too"],
     [1, "Will do, thanks Priya!"],
   ], 14);
   const pres = (key: string) => ctx.clubByKey.get(key)!.assignments.find((a) => a.role === "PRESIDENT" && !a.endedAt)?.userId;
-  // Fixed slots (Priya, SWE, ACM, Cyber, Motorsports, EAST Ambassadors); a slot without a distinct president falls back to Priya.
+  // Fixed slots (Priya, SWE, CSWS, Cyber Security Club, Weber Racing, EAST Ambassadors); a slot without a distinct president falls back to Priya.
   const slots = [priya, pres("swe"), pres("acm"), pres("cyber"), pres("motorsports"), pres("east-amb")].map((x) => x ?? priya);
   const members = [...new Set(slots)];
   const lines: [number, string][] = [
     [0, "Hi all — starting this so EAST club presidents can coordinate dates. Please post big events here before you book."],
     [1, "Great idea. SWE's outreach day is Nov 7 at Noorda."],
-    [2, "ACM hackathon planning starts next month, probably late February."],
-    [3, "Cyber Club's women in cyber panel is next week — co-host request is out to SWE."],
-    [0, "Robotics has the makerspace Tuesdays and the Lunabotics review Thursday night."],
-    [4, "Motorsports is mostly at Davis, but we'd love to borrow a few Robotics people for wiring."],
+    [2, "CSWS hackathon planning starts next month, probably late February."],
+    [3, "CSC's women in cyber panel is next week — co-host request is out to SWE."],
+    [0, "Wrecker Bots has the makerspace Tuesdays and our competition design review Thursday night."],
+    [4, "Weber Racing is mostly at the Davis shop, but we'd love to borrow a few Wrecker Bots people for wiring."],
     [5, "EAST Ambassadors can promote anything you post here in the college newsletter."],
     [0, "Perfect, thanks everyone 🙌"],
     [2, "Can someone share the room booking contact for Noorda 308?"],
@@ -269,7 +273,7 @@ export function buildElections(ctx: Ctx) {
   };
   const current = (club: ClubM, seatName: string) => club.assignments.find((a) => a.seatName === seatName && !a.endedAt)?.userId ?? null;
 
-  // Psychology Club: President, member vote, voting open now (Maya hasn't voted).
+  // Psi Chi (psych): President, member vote, voting open now (Maya hasn't voted).
   {
     const club = ctx.club("psych");
     const id = ctx.id();

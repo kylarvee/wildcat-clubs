@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { campusDate } from "@/lib/time";
-import { blockMessage, checkinWindow, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, windowMessage, windowState } from "./rules";
+import { allowsTapCheckIn, blockMessage, checkinWindow, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, windowMessage, windowState } from "./rules";
 
 const cfg = { opensMinutesBefore: 30, closesMinutesAfter: 30 };
 // Fri Oct 16 2026, 6:00–7:30 PM campus time.
@@ -44,14 +44,13 @@ describe("check-in window", () => {
 });
 
 describe("check-in method", () => {
-  const base = { scanValid: false, scanPresented: false, allowSelfCheckIn: true, isParticipatingMember: false };
+  const base = { scanValid: false, scanPresented: false, isParticipatingMember: false };
 
   it("a live scan is always a QR check-in, member or not", () => {
     expect(decideMethod({ ...base, scanValid: true, scanPresented: true })).toEqual({ ok: true, method: "QR" });
-    expect(decideMethod({ ...base, scanValid: true, scanPresented: true, allowSelfCheckIn: false })).toEqual({ ok: true, method: "QR" });
   });
 
-  it("members may check themselves in when the event allows it", () => {
+  it("members may check in with the event's code", () => {
     expect(decideMethod({ ...base, isParticipatingMember: true })).toEqual({ ok: true, method: "SELF" });
   });
 
@@ -63,8 +62,10 @@ describe("check-in method", () => {
     expect(decideMethod(base)).toEqual({ ok: false, reason: "NOT_MEMBER" });
   });
 
-  it("QR-only events refuse code-only check-ins, even from members", () => {
-    expect(decideMethod({ ...base, allowSelfCheckIn: false, isParticipatingMember: true })).toEqual({ ok: false, reason: "SELF_OFF" });
+  it("only online events get a one-tap check-in", () => {
+    expect(allowsTapCheckIn({ locationType: "VIRTUAL" })).toBe(true);
+    expect(allowsTapCheckIn({ locationType: "CAMPUS" })).toBe(false);
+    expect(allowsTapCheckIn({ locationType: "ADDRESS" })).toBe(false);
   });
 
   it("an expired scan by a non-member asks for a fresh scan", () => {

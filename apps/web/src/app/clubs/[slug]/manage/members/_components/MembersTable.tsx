@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ClipboardCheck, MoreHorizontal, Search, UserMinus, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, ClipboardCheck, LifeBuoy, MoreHorizontal, Search, UserMinus, Users } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,10 @@ import { EmptyState } from "@/components/ui/layout";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
 import { toast } from "@/components/ui/misc";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { removeFromClub } from "../actions";
+
 import { TitleCell } from "./TitleCell";
+import { EmergencyContactDialog } from "@/components/details/EmergencyContactDialog";
+import { removeFromClub, revealEmergencyContactAction } from "../actions";
 import type { MemberRow } from "./types";
 
 type Filter = "current" | "active" | "inactive" | "leaders" | "alumni" | "former";
@@ -38,12 +40,14 @@ const STATUS_BADGE: Partial<Record<MemberRow["status"], { label: string; tone: "
 /** The roster: search, filters, sortable columns, inline titles and removal. Table on desktop, cards on phones. */
 export function MembersTable({
   slug,
+  clubId,
   clubName,
   rows,
   canEditTitles,
   activeRule,
 }: {
   slug: string;
+  clubId: string;
   clubName: string;
   rows: MemberRow[];
   canEditTitles: boolean;
@@ -51,6 +55,7 @@ export function MembersTable({
   activeRule: { windowDays: number; recentEvents: number };
 }) {
   const [filter, setFilter] = useState<Filter>("current");
+  const [emergencyFor, setEmergencyFor] = useState<MemberRow | null>(null);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const [removing, setRemoving] = useState<MemberRow | null>(null);
@@ -112,6 +117,9 @@ export function MembersTable({
       <span className="text-sm text-ink-3">Member</span>
     );
 
+  // Year in school and phone come from their member details; a personal email only if they added one.
+  const contactLine = (r: MemberRow) => [r.yearLabel, r.phone, r.contactEmail].filter(Boolean).join(" · ");
+
   const menu = (r: MemberRow) => (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -130,6 +138,11 @@ export function MembersTable({
             <Users className="h-4 w-4" aria-hidden /> Profile
           </Link>
         </DropdownMenuItem>
+        {r.status === "ACTIVE" && r.hasEmergency && !r.isSelf ? (
+          <DropdownMenuItem onSelect={() => setEmergencyFor(r)}>
+            <LifeBuoy className="h-4 w-4" aria-hidden /> Emergency contact
+          </DropdownMenuItem>
+        ) : null}
         {r.status === "ACTIVE" && !r.isSelf ? (
           <>
             <DropdownMenuSeparator />
@@ -195,6 +208,7 @@ export function MembersTable({
                       {r.name}
                     </Link>
                     <p className="truncate text-xs text-ink-3">{r.email}</p>
+                    {contactLine(r) ? <p className="truncate text-xs text-ink-3">{contactLine(r)}</p> : null}
                   </div>
                   {statusCell(r)}
                   {menu(r)}
@@ -241,6 +255,7 @@ export function MembersTable({
                             {r.name}
                           </Link>
                           <p className="truncate text-xs text-ink-3">{r.email}</p>
+                          {contactLine(r) ? <p className="truncate text-xs text-ink-3">{contactLine(r)}</p> : null}
                         </div>
                       </div>
                     </TD>
@@ -267,6 +282,8 @@ export function MembersTable({
           </p>
         </>
       )}
+
+      <EmergencyContactDialog member={emergencyFor} onClose={() => setEmergencyFor(null)} reveal={(userId) => revealEmergencyContactAction(clubId, userId)} />
 
       <ConfirmDialog
         open={Boolean(removing)}

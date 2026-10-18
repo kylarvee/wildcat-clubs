@@ -21,6 +21,11 @@ export type MemberRow = {
   canRemove: boolean;
   removeBlocked?: string;
   isSelf: boolean;
+  /** From their member details (lib/authz/details: roster holders and advisors see these). */
+  yearLabel: string | null;
+  phone: string | null;
+  contactEmail: string | null;
+  hasEmergency: boolean;
 };
 
 export type PendingRow = {

@@ -8,6 +8,9 @@ import { visibleEventsWhere } from "@/lib/authz/events";
 import { canViewFile } from "@/lib/domain/files";
 import { clubListMetrics, type ClubListMetrics } from "@/lib/metrics";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL } from "@/components/clubs/labels";
+import { shortLocationText } from "@/lib/events/labels";
+import { describeRepeat } from "@/lib/events/summary";
+import { fmtTime } from "@/lib/time";
 import type { ClubListParams } from "@/components/clubs/list-params";
 
 /**
@@ -24,6 +27,7 @@ const clubCardSelect = {
   slug: true,
   name: true,
   type: true,
+  category: true,
   status: true,
   scope: true,
   shortDescription: true,
@@ -46,6 +50,7 @@ export type ClubListItem = {
   slug: string;
   name: string;
   type: ClubCardRow["type"];
+  category: ClubCardRow["category"];
   status: ClubCardRow["status"];
   scope: ClubCardRow["scope"];
   shortDescription: string;
@@ -83,6 +88,7 @@ function toItem(c: ClubCardRow, m: ClubListMetrics | undefined): ClubListItem {
     slug: c.slug,
     name: c.name,
     type: c.type,
+    category: c.category,
     status: c.status,
     scope: c.scope,
     shortDescription: c.shortDescription,
@@ -228,6 +234,7 @@ export async function listClubs(params: ClubListParams, viewer: Actor | null): P
 
   const filtered = all.filter((c) => {
     if (params.type && c.type !== params.type) return false;
+    if (params.category && c.category !== params.category) return false;
     if (params.scope && c.scope !== params.scope) return false;
     if (params.college && c.college?.slug !== params.college) return false;
     if (params.status === "active" && !c.metrics.isActive) return false;
@@ -368,6 +375,34 @@ export async function clubUpcomingEvents(clubId: string, viewer: Actor | null, l
     select: occurrenceSelect,
   });
   return rows.map((o) => toUpcoming(o, now));
+}
+
+/**
+ * How often a club meets, from its regular meetings in the Events Builder
+ * ("Every Wednesday · 6:00 PM · NB 150"), so nobody types a meeting schedule
+ * twice. Only repeating MEETING events still running, that the viewer may see.
+ */
+export async function clubMeetingPattern(clubId: string, viewer: Actor | null): Promise<string[]> {
+  const now = new Date();
+  const rows = await db.event.findMany({
+    where: {
+      AND: [
+        { clubId, kind: "MEETING", status: "SCHEDULED", recurrence: { not: "NONE" }, OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gt: now } }] },
+        // Still has a meeting ahead (a series with a count can end without an until date).
+        { occurrences: { some: { startsAt: { gt: now }, status: "SCHEDULED" } } },
+        await visibleEventsWhere(viewer),
+      ],
+    },
+    orderBy: { startsAt: "asc" },
+    take: 3,
+    select: { startsAt: true, allDay: true, recurrence: true, recurrenceInterval: true, recurrenceWeekdays: true, locationType: true, room: true, address: true, virtualUrl: true, building: { select: { name: true, code: true } } },
+  });
+  return rows.flatMap((e) => {
+    if (!e.startsAt) return [];
+    const when = e.allDay ? "all day" : fmtTime(e.startsAt);
+    const where = shortLocationText(e);
+    return [[describeRepeat({ startsAt: e.startsAt, recurrence: e.recurrence, interval: e.recurrenceInterval, weekdays: e.recurrenceWeekdays }), when, where].filter(Boolean).join(" · ")];
+  });
 }
 
 // ─── Club page: resources and announcements ──────────────────────────────────

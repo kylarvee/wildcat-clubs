@@ -144,6 +144,8 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       links,
       visibility: event.visibility,
       allowSelfCheckIn: event.allowSelfCheckIn,
+      setupMinutes: event.setupMinutes,
+      cleanupMinutes: event.cleanupMinutes,
       startsAt: event.startsAt?.toISOString() ?? null,
       durationMinutes: event.durationMinutes,
       allDay: event.allDay,

@@ -44,7 +44,7 @@ import { campusDate } from "@/lib/time";
 
 // ─── Input schemas ───────────────────────────────────────────────────────────
 
-const KIND = z.enum(["MEETING", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"]);
+const KIND = z.enum(["MEETING", "PRACTICE", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"]);
 const VISIBILITY = z.enum(["PUBLIC", "UNIVERSITY", "MEMBERS"]);
 const RECURRENCE = z.enum(["NONE", "DAILY", "WEEKLY", "MONTHLY", "SEMESTERLY", "ACADEMIC_YEARLY", "YEARLY"]);
 const LOCATION = z.enum(["CAMPUS", "ADDRESS", "VIRTUAL", "TBD"]);
@@ -101,6 +101,9 @@ const DetailsShape = {
   links: z.array(z.object({ label: z.string().trim().max(120).default(""), url: httpUrl })).max(20).default([]),
   visibility: VISIBILITY.default("PUBLIC"),
   allowSelfCheckIn: z.boolean().default(true),
+  /** Room time before and after (for reservations); not part of the listed time. */
+  setupMinutes: z.coerce.number().int().min(0, "Setup can't be negative.").max(480, "Setup can be up to 8 hours.").default(0),
+  cleanupMinutes: z.coerce.number().int().min(0, "Cleanup can't be negative.").max(480, "Cleanup can be up to 8 hours.").default(0),
   attachmentFileIds: z.array(z.string()).max(30, "Attach up to 30 files.").default([]),
   cohostClubIds: z.array(z.string()).max(500).default([]),
   cohostAllClubs: z.boolean().default(false),
@@ -629,6 +632,8 @@ type EventFields = {
   kind: Event["kind"];
   visibility: Event["visibility"];
   allowSelfCheckIn: boolean;
+  setupMinutes: number;
+  cleanupMinutes: number;
   descriptionHtml: string | null;
   schedule: NormalizedSchedule;
   location: NormalizedLocation;
@@ -678,6 +683,8 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
           kind: f.kind,
           visibility,
           allowSelfCheckIn: f.allowSelfCheckIn,
+          setupMinutes: f.setupMinutes,
+          cleanupMinutes: f.cleanupMinutes,
           descriptionHtml: f.descriptionHtml,
           status,
           ...f.schedule,
@@ -762,6 +769,8 @@ function fieldsFromInput(d: z.output<typeof EventSchema>, schedule: NormalizedSc
     kind: d.kind,
     visibility: d.visibility,
     allowSelfCheckIn: d.allowSelfCheckIn,
+    setupMinutes: d.setupMinutes,
+    cleanupMinutes: d.cleanupMinutes,
     descriptionHtml: buildDescription(d.descriptionHtml, d.links),
     schedule,
     location,
@@ -778,6 +787,8 @@ function fieldsFromEvent(e: Event, schedule: NormalizedSchedule): EventFields {
     kind: e.kind,
     visibility: e.visibility,
     allowSelfCheckIn: e.allowSelfCheckIn,
+    setupMinutes: e.setupMinutes,
+    cleanupMinutes: e.cleanupMinutes,
     descriptionHtml: e.descriptionHtml,
     schedule,
     location: { locationType: e.locationType, buildingId: e.buildingId, room: e.room, address: e.address, lat: e.lat, lng: e.lng, virtualUrl: e.virtualUrl },

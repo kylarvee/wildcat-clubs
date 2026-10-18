@@ -1,9 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import type { Assignment, ClubM, Ctx } from "../ctx";
 import { POLICIES } from "../data/policies";
-import { CONDUCT_FORM_INTRO, CONDUCT_QUESTIONS, FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
+import { AGREEMENT_QUESTIONS, AGREEMENTS_FORM_INTRO, FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, REREGISTRATION_FORM_INTRO, REREGISTRATION_QUESTIONS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
 import { addDays, addMin, DAY, maxDate, minDate } from "../lib/dates";
 import { addFolder, addPdf } from "./filehelp";
+import { missingDetails, type DetailsLike } from "@/lib/details/rules";
 import { fallStartDate } from "./reference";
 
 /**
@@ -221,6 +222,10 @@ export function buildGovernance(ctx: Ctx) {
   let recentFails = 0;
   const recentOfficers: string[] = [];
 
+  // Leaders right now (a current OFFICER/VP/PRESIDENT seat in an approved club, students only).
+  const currentLeaders = new Set(
+    ctx.clubs.flatMap((c) => (c.status === "APPROVED" ? c.assignments.filter((a) => LEAD.has(a.role) && (!a.endedAt || a.endedAt > NOW) && ctx.person(a.userId).kind === "STUDENT").map((a) => a.userId) : [])),
+  );
   for (const ay of ays) {
     const isCurrent = ay.label === currentAy.label;
     const grader = isCurrent ? alex : rng.pick([jordan, alex]);
@@ -280,11 +285,13 @@ export function buildGovernance(ctx: Ctx) {
         [testReqId, "Pass: Club Officer Policy Test", "Pass WSUSA's officer policy test (80% or higher) once each academic year.", due, passedAt, `/tests/${officerTestId}`],
         [trainingReqId, "Attend: Club Officer Training", "Attend one Club Officer Training session each academic year and check in at the door.", addDays(clock, 45), trainedAt, `/events/${ctx.refs.trainingEventId}`],
       ];
+      // Someone who no longer leads anywhere doesn't owe it: an unmet task is cancelled (as syncUserRequirements does).
+      const stillLeads = currentLeaders.has(userId);
       for (const [reqId, title, description, dueAt, metAt, href] of tasks) {
         ctx.rows.tasks.push({
           id: ctx.id(), kind: "REQUIREMENT", title, description, assigneeType: "USER", assigneeId: userId, clubId: club.id, href, dueAt, required: true,
-          status: metAt ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock,
-          completedAt: metAt, completedById: metAt ? userId : null,
+          status: metAt ? "DONE" : stillLeads ? "OPEN" : "CANCELLED", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock,
+          completedAt: metAt ?? (stillLeads ? null : NOW), completedById: metAt ? userId : null,
         });
       }
       if (recent || userId === oscar) {
@@ -323,9 +330,22 @@ export function buildGovernance(ctx: Ctx) {
     });
   }
 
-  memberConductForm(ctx, currentAy);
+  // The yearly WSUSA forms: every member's agreements, and each president's re-registration.
+  requiredForm(ctx, currentAy, {
+    ref: "agreements", title: "Club Member Agreements", intro: AGREEMENTS_FORM_INTRO, questions: AGREEMENT_QUESTIONS, audience: "MEMBER", rate: 0.64,
+    description: "Sign WSUSA's waiver and release, anti-hazing and non-discrimination agreements once each academic year. They cover every club you're in.",
+    // Vanessa hasn't signed (her dashboard demo); Maya, Priya and Oscar have.
+    unsigned: new Set([ctx.p("vanessa").id]), signed: new Set([ctx.p("maya").id, ctx.p("priya").id, ctx.p("oscar").id]),
+  });
+  requiredForm(ctx, currentAy, {
+    ref: "reregistration", title: "Annual Club Re-registration", intro: REREGISTRATION_FORM_INTRO, questions: REREGISTRATION_QUESTIONS, audience: "PRESIDENT", rate: 0.78,
+    description: "Club presidents confirm each academic year that their club is active and its profile, advisor and meetings are current.",
+    // Priya hasn't re-registered yet, so a president's required task shows.
+    unsigned: new Set([ctx.p("priya").id]), signed: new Set(),
+  });
+  memberDetailsRequirement(ctx, currentAy);
 
-  // ─── Event Safety Quiz (Wildcat Robotics) ──────────────────────────────────
+  // ─── Event Safety Quiz (RC Wrecker Bots Club, key "robotics") ──────────────
   const robotics = ctx.club("robotics");
   const quizId = ctx.id();
   const quizCreated = addDays(NOW, -25.3);
@@ -389,51 +409,66 @@ export function buildGovernance(ctx: Ctx) {
   }
 }
 
+type RequiredFormDef = {
+  ref: string;
+  title: string;
+  intro: string;
+  questions: QuestionDef[];
+  description: string;
+  /** MEMBER: every student in an approved club. PRESIDENT: current presidents, and their task names the club (it gates). */
+  audience: "MEMBER" | "PRESIDENT";
+  /** Never signed / always signed (persona demos). */
+  unsigned: Set<string>;
+  signed: Set<string>;
+  rate: number;
+};
+
 /**
- * Club Member Code of Conduct: a WSUSA form every student in an approved
- * club fills out once a year (a MEMBER requirement). It was added this fall,
- * so each person's clock is the latest of joining, the club's approval, the
- * year's start and the day it was added (requirementStatus's rule). About two
- * thirds have signed. Vanessa hasn't, so her dashboard shows a required task;
- * Oscar has, so his officer-requirement story is unchanged.
+ * A WSUSA form required through a requirement, signed once a year: the test
+ * row (isForm), the requirement, and per person a TestAssignment and a
+ * required REQUIREMENT task (DONE with a graded, passed attempt for those who
+ * signed). Both forms were added this fall, so each person's clock is the
+ * latest of joining or taking the role, the club's approval, the year's start
+ * and the day the form was added (requirementStatus's rule).
  */
-function memberConductForm(ctx: Ctx, ay: { label: string; start: Date }) {
+function requiredForm(ctx: Ctx, ay: { label: string; start: Date }, def: RequiredFormDef) {
   const { rng, NOW } = ctx;
   const formId = ctx.id();
-  ctx.refs.conductFormId = formId;
+  ctx.refs[`${def.ref}FormId`] = formId;
   const created = addDays(NOW, -17.2);
   ctx.rows.tests.push({
-    id: formId, clubId: null, title: "Club Member Code of Conduct", isForm: true, introHtml: CONDUCT_FORM_INTRO, timeLimitMinutes: null, passingPercent: 0, maxAttempts: 1,
+    id: formId, clubId: null, title: def.title, isForm: true, introHtml: def.intro, timeLimitMinutes: null, passingPercent: 0, maxAttempts: 1,
     status: "PUBLISHED", audience: "ROLE_REQUIREMENT", recurrence: "ACADEMIC_YEAR", dueDays: 30, closesAt: null,
     automations: [], createdById: ctx.p("alex").id, createdAt: created, updatedAt: created,
   });
-  const qs = questionRows(ctx, formId, CONDUCT_QUESTIONS);
+  const qs = questionRows(ctx, formId, def.questions);
   const reqId = ctx.id();
-  ctx.refs.conductRequirementId = reqId;
-  const description = "Read WSUSA's code of conduct and confirm it once each academic year.";
+  ctx.refs[`${def.ref}RequirementId`] = reqId;
   ctx.rows.requirements.push({
-    id: reqId, name: "Club Member Code of Conduct", description, appliesTo: ["MEMBER"], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created,
+    id: reqId, name: def.title, description: def.description, appliesTo: [def.audience], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created,
   });
 
-  // Each student's earliest-clock membership in an approved club decides their due date.
-  const firsts = new Map<string, { clock: Date }>();
+  // Whoever it reaches, with their earliest clock (and, for presidents, the club whose permissions it gates).
+  const firsts = new Map<string, { clock: Date; clubId: string | null }>();
+  const consider = (userId: string, since: Date, club: ClubM) => {
+    const person = ctx.person(userId);
+    if (person.kind !== "STUDENT" || person.status !== "ACTIVE") return;
+    const clock = maxDate(maxDate(since, club.approvedAt!), maxDate(ay.start, created));
+    const cur = firsts.get(userId);
+    if (!cur || clock < cur.clock) firsts.set(userId, { clock, clubId: def.audience === "PRESIDENT" ? club.id : null });
+  };
   for (const club of ctx.clubs) {
     if (club.status !== "APPROVED" || !club.approvedAt) continue;
-    for (const m of club.members) {
-      if (m.status !== "ACTIVE" || !m.joinedAt) continue;
-      const person = ctx.person(m.userId);
-      if (person.kind !== "STUDENT" || person.status !== "ACTIVE") continue;
-      const clock = maxDate(maxDate(m.joinedAt, club.approvedAt), maxDate(ay.start, created));
-      const cur = firsts.get(m.userId);
-      if (!cur || clock < cur.clock) firsts.set(m.userId, { clock });
+    if (def.audience === "MEMBER") {
+      for (const m of club.members) if (m.status === "ACTIVE" && m.joinedAt) consider(m.userId, m.joinedAt, club);
+    } else {
+      for (const a of club.assignments) if (a.role === "PRESIDENT" && !a.endedAt) consider(a.userId, a.startedAt, club);
     }
   }
-  const vanessa = ctx.p("vanessa").id;
-  const signedAlready = new Set([ctx.p("maya").id, ctx.p("priya").id, ctx.p("oscar").id]);
   const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" });
-  for (const [userId, { clock }] of firsts) {
+  for (const [userId, { clock, clubId }] of firsts) {
     const dueAt = addDays(clock, 30);
-    const signed = userId !== vanessa && clock < addDays(NOW, -1) && (signedAlready.has(userId) || rng.chance(0.64));
+    const signed = !def.unsigned.has(userId) && clock < addDays(NOW, -1) && (def.signed.has(userId) || rng.chance(def.rate));
     let submittedAt: Date | null = null;
     if (signed) {
       submittedAt = new Date(clock.getTime() + rng.next() * (NOW.getTime() - clock.getTime() - DAY / 2));
@@ -449,17 +484,56 @@ function memberConductForm(ctx: Ctx, ay: { label: string; start: Date }) {
       }
     }
     ctx.rows.testAssignments.push({ id: ctx.id(), testId: formId, userId, cycleKey: ay.label, dueAt, status: signed ? "COMPLETED" : "ASSIGNED", createdAt: clock, resolvedAt: submittedAt });
+    // Member-wide requirements are WSUSA's, so their task isn't about one club (requirements.syncUserRequirements).
     ctx.rows.tasks.push({
-      // Member-wide requirements are WSUSA's, so the task isn't about any one club (requirements.syncUserRequirements).
-      id: ctx.id(), kind: "REQUIREMENT", title: "Fill out: Club Member Code of Conduct", description, assigneeType: "USER", assigneeId: userId, clubId: null, href: `/tests/${formId}`, dueAt, required: true,
+      id: ctx.id(), kind: "REQUIREMENT", title: `Fill out: ${def.title}`, description: def.description, assigneeType: "USER", assigneeId: userId, clubId, href: `/tests/${formId}`, dueAt, required: true,
       status: signed ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt: submittedAt, completedById: signed ? userId : null,
     });
-    if (!signed && (userId === vanessa || rng.chance(0.3))) {
+    if (!signed && (def.unsigned.has(userId) || rng.chance(0.3))) {
       ctx.rows.notifications.push({
-        id: ctx.id(), userId, kind: "requirement.assigned", title: "Required by WSUSA", body: `WSUSA asks every club member to finish Club Member Code of Conduct by ${shortDate(dueAt)}.`,
-        href: "/tasks", createdAt: addMin(clock, 3), readAt: userId === vanessa ? null : rng.chance(0.5) ? addDays(clock, 1) : null,
+        id: ctx.id(), userId, kind: "requirement.assigned", title: def.audience === "MEMBER" ? "Required by WSUSA" : "Officer requirement to finish",
+        body: def.audience === "MEMBER" ? `WSUSA asks every club member to finish ${def.title} by ${shortDate(dueAt)}.` : `Finish ${def.title} by ${shortDate(dueAt)} to keep your leadership permissions active.`,
+        href: "/tasks", createdAt: addMin(clock, 3), readAt: def.unsigned.has(userId) ? null : rng.chance(0.5) ? addDays(clock, 1) : null,
       });
     }
+  }
+}
+
+/**
+ * "Member details": every student in an approved club confirms their details
+ * (Settings → Member details) once a year — a PROFILE requirement. Met exactly
+ * as requirementStatus decides: the people step's PersonalDetails row is
+ * complete and confirmed since the year started. Added this fall, like the forms.
+ */
+function memberDetailsRequirement(ctx: Ctx, ay: { label: string; start: Date }) {
+  const { NOW } = ctx;
+  const created = addDays(NOW, -17.2);
+  const reqId = ctx.id();
+  ctx.refs.detailsRequirementId = reqId;
+  const description = "Confirm your student ID, contact details, address and emergency contact once each academic year. Every club uses them.";
+  ctx.rows.requirements.push({ id: reqId, name: "Member details", description, appliesTo: ["MEMBER"], kind: "PROFILE", renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created });
+  const details = new Map(ctx.rows.personalDetails.map((d) => [d.userId as string, d]));
+  const firsts = new Map<string, Date>();
+  for (const club of ctx.clubs) {
+    if (club.status !== "APPROVED" || !club.approvedAt) continue;
+    for (const m of club.members) {
+      if (m.status !== "ACTIVE" || !m.joinedAt) continue;
+      const person = ctx.person(m.userId);
+      if (person.kind !== "STUDENT" || person.status !== "ACTIVE") continue;
+      const clock = maxDate(maxDate(m.joinedAt, club.approvedAt), maxDate(ay.start, created));
+      const cur = firsts.get(m.userId);
+      if (!cur || clock < cur) firsts.set(m.userId, clock);
+    }
+  }
+  for (const [userId, clock] of firsts) {
+    const d = details.get(userId);
+    const confirmedAt = d?.confirmedAt ? new Date(d.confirmedAt as Date) : null;
+    const met = Boolean(d && confirmedAt && confirmedAt >= ay.start && missingDetails(d as DetailsLike, "STUDENT").length === 0);
+    const completedAt = met ? maxDate(confirmedAt!, clock) : null;
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "REQUIREMENT", title: "Confirm: Member details", description, assigneeType: "USER", assigneeId: userId, clubId: null, href: "/settings/details",
+      dueAt: addDays(clock, 30), required: true, status: met ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt, completedById: met ? userId : null,
+    });
   }
 }
 

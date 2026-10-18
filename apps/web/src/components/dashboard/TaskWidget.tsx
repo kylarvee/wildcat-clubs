@@ -17,15 +17,12 @@ export function TaskWidget({ tasks, viewerId, now, title = "Tasks", note }: { ta
   const items = groupJoinRequests(tasks, viewerId, now);
   const shown = items.slice(0, SHOW);
   const overdue = tasks.filter((t) => t.dueAt && t.dueAt < now).length;
-  const required = tasks.filter((t) => t.required).length;
   return (
     <Panel
       id="dash-tasks"
       title={
         <>
           {title}
-          {tasks.length ? <Badge tone="brand">{tasks.length} open</Badge> : null}
-          {required ? <Badge tone="danger">{required} required</Badge> : null}
           {overdue ? <Badge tone="danger">{overdue} overdue</Badge> : null}
         </>
       }

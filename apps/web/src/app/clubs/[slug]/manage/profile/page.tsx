@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
 import { ProfileForm } from "@/components/founding/ProfileForm";
 import { ClubDocumentsCard, type ProfileDocRow } from "@/components/founding/ClubDocumentsCard";
+import { readSocialLinks } from "@/components/clubs/labels";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   return workspaceTitle((await params).slug, "Profile");
@@ -62,6 +63,9 @@ export default async function ClubProfilePage({ params }: { params: Promise<{ sl
           logoUrl: club.logoUrl,
           logoColor: club.logoColor,
           contactEmail: club.contactEmail,
+          category: club.category,
+          websiteUrl: club.websiteUrl,
+          socialLinks: readSocialLinks(club.socialLinks),
         }}
         departments={departments.map((d) => ({ value: d.id, label: d.name, hint: d.college?.shortName ?? null }))}
         colleges={colleges}

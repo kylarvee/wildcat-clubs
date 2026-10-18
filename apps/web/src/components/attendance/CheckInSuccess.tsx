@@ -15,7 +15,7 @@ import { cn } from "@/components/ui/cn";
  * with their membership, how close they are to leaving a review, and (for
  * people without the app yet) where to get it.
  */
-const METHOD_PHRASE: Record<CheckInMethod, string> = { QR: "QR scan", SELF: "self check-in", MANUAL: "added by a leader" };
+const METHOD_PHRASE: Record<CheckInMethod, string> = { QR: "QR scan", SELF: "event code", MANUAL: "added by a leader" };
 
 export function CheckInSuccess({
   result,

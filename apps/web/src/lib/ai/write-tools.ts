@@ -345,7 +345,7 @@ const createEventTool = writeTool({
     date: z.string().regex(DATE).describe("Date of the first meeting, YYYY-MM-DD"),
     start_time: z.string().regex(TIME).optional().describe("24-hour HH:MM start; leave out for an all-day event"),
     duration_minutes: z.number().int().min(5).max(1440).optional().describe("Default 60"),
-    kind: z.enum(["MEETING", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"]).optional().describe("Default MEETING"),
+    kind: z.enum(["MEETING", "PRACTICE", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"]).optional().describe("Default MEETING"),
     description: z.string().max(4000).optional().describe("Plain text; a blank line starts a new paragraph"),
     repeat: z
       .object({
@@ -369,7 +369,6 @@ const createEventTool = writeTool({
       .optional()
       .describe("Default: to be decided"),
     visibility: z.enum(["public", "university", "members"]).optional().describe("public = anyone (default); university = signed-in Weber State accounts; members = members of the host and co-host clubs"),
-    self_check_in: z.boolean().optional().describe("Let members check themselves in with the code (default true)"),
   }),
   async prepare(ctx, input) {
     const { actor, now } = ctx;
@@ -423,7 +422,6 @@ const createEventTool = writeTool({
 
     const visibility: Visibility = input.visibility === "university" ? "UNIVERSITY" : input.visibility === "members" ? "MEMBERS" : "PUBLIC";
     const kind: EventKind = input.kind ?? "MEETING";
-    const allowSelfCheckIn = input.self_check_in ?? true;
     const title = input.title.trim();
 
     const meetings = expandOccurrences({ startsAt, durationMinutes, allDay, recurrence, interval, weekdays, until, count }, await getTerms());
@@ -442,7 +440,6 @@ const createEventTool = writeTool({
       kind,
       descriptionHtml: textToHtml(input.description),
       visibility,
-      allowSelfCheckIn,
       startsAt,
       durationMinutes,
       allDay,
@@ -462,7 +459,7 @@ const createEventTool = writeTool({
           `Where: ${where}.`,
           ...(meetNote ? [meetNote] : []),
           `Who can see it: ${VISIBILITY_LABEL[visibility]} — ${VISIBILITY_HINT[visibility]}`,
-          `Type: ${KIND_LABEL[kind]}. Self check-in: ${allowSelfCheckIn ? "on for members" : "off (QR code or leaders only)"}.`,
+          `Type: ${KIND_LABEL[kind]}.`,
           ...(input.description?.trim() ? ["Includes the description you gave."] : []),
           "You can change anything later in the Events Builder.",
         ],

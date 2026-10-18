@@ -1,5 +1,5 @@
-import type { ClubScope, ClubType } from "@prisma/client";
-import { CLUB_SCOPES, CLUB_TYPES } from "@/components/clubs/labels";
+import type { ClubCategory, ClubScope, ClubType } from "@prisma/client";
+import { CLUB_CATEGORIES, CLUB_SCOPES, CLUB_TYPES } from "@/components/clubs/labels";
 
 /**
  * The clubs list lives in the URL (?q=&type=&sort=…), so every view is a
@@ -43,6 +43,7 @@ export const STATUS_FILTER_LABEL: Record<StatusFilter, string> = {
 export type ClubListParams = {
   q: string;
   type: ClubType | null;
+  category: ClubCategory | null;
   college: string | null; // college slug
   scope: ClubScope | null;
   status: StatusFilter | null;
@@ -72,6 +73,7 @@ export function parseClubListParams(raw: Raw): ClubListParams {
   return {
     q: (get(raw, "q") ?? "").trim().slice(0, 100),
     type: oneOf(get(raw, "type"), CLUB_TYPES),
+    category: oneOf(get(raw, "category"), CLUB_CATEGORIES),
     college: college && /^[a-z0-9-]{1,80}$/.test(college) ? college : null,
     scope: oneOf(get(raw, "scope"), CLUB_SCOPES),
     status: oneOf(get(raw, "status"), STATUS_FILTERS),
@@ -91,6 +93,7 @@ export function clubListHref(p: ClubListParams, patch: Partial<ClubListParams> =
   const s = new URLSearchParams();
   if (n.q) s.set("q", n.q);
   if (n.type) s.set("type", n.type);
+  if (n.category) s.set("category", n.category);
   if (n.college) s.set("college", n.college);
   if (n.scope) s.set("scope", n.scope);
   if (n.status) s.set("status", n.status);
@@ -104,5 +107,5 @@ export function clubListHref(p: ClubListParams, patch: Partial<ClubListParams> =
 }
 
 export function hasActiveFilters(p: ClubListParams) {
-  return Boolean(p.q || p.type || p.college || p.scope || p.status || p.mine);
+  return Boolean(p.q || p.type || p.category || p.college || p.scope || p.status || p.mine);
 }

@@ -55,6 +55,7 @@ type Want = {
 type Seat = { role: ClubRole; startedAt: Date; clubId: string; clubApprovedAt: Date | null };
 
 function requirementHref(r: Want["requirement"]) {
+  if (r.kind === "PROFILE") return "/settings/details";
   if (r.kind === "TEST" && r.testId) return `/tests/${r.testId}`;
   if (r.trainingEventId) return `/events/${r.trainingEventId}`;
   return "/tasks";
@@ -62,11 +63,12 @@ function requirementHref(r: Want["requirement"]) {
 
 function requirementTitle(r: Want["requirement"], isForm: boolean) {
   if (r.kind === "TRAINING") return `Attend: ${r.name}`;
+  if (r.kind === "PROFILE") return `Confirm: ${r.name}`;
   return isForm ? `Fill out: ${r.name}` : `Pass: ${r.name}`;
 }
 
 /** Task titles start with what to do; notifications drop it. */
-const ACTION_PREFIX = /^(Pass|Attend|Fill out): /;
+const ACTION_PREFIX = /^(Pass|Attend|Fill out|Confirm): /;
 
 /** A person's current seats a requirement can reach: leader roles, plus memberships (students only). */
 async function seatsFor(userId: string): Promise<Seat[]> {
@@ -299,7 +301,7 @@ const RequirementInput = z
       .max(1000, "Keep the description under 1,000 characters.")
       .nullish()
       .transform((v) => v || null),
-    kind: z.enum(["TEST", "TRAINING"]),
+    kind: z.enum(["TEST", "TRAINING", "PROFILE"]),
     testId: z.string().nullish(),
     trainingEventId: z.string().nullish(),
     appliesTo: z.array(z.enum(["MEMBER", "AMBASSADOR", "OFFICER", "VP", "PRESIDENT"])).min(1, "Choose who this applies to: members, one or more leader roles, or both."),
@@ -318,7 +320,9 @@ export type RequirementInput = z.input<typeof RequirementInput>;
 export async function saveRequirement(actor: Actor | null, id: string | null, input: unknown): Promise<{ id: string }> {
   assertRequirementAdmin(actor);
   const v = parse(RequirementInput, input);
-  if (v.kind === "TEST") {
+  if (v.kind === "PROFILE") {
+    // Met from Settings → Member details; nothing to point at.
+  } else if (v.kind === "TEST") {
     const test = await db.test.findUnique({ where: { id: v.testId! }, select: { clubId: true, status: true, audience: true } });
     if (!test || test.clubId !== null) throw invalid("Choose a university test or form (club tests and forms can't be WSUSA requirements).");
     if (test.status !== "PUBLISHED") throw invalid("That test or form isn't published yet. Publish it in Admin → Tests first.");
@@ -487,7 +491,7 @@ export async function requirementCompliance(now: Date = new Date(), opts: { club
 export type RequirementOverviewRow = {
   id: string;
   name: string;
-  kind: "TEST" | "FORM" | "TRAINING";
+  kind: "TEST" | "FORM" | "TRAINING" | "PROFILE";
   appliesTo: ClubRole[];
   /** Finished this renewal period. */
   done: number;
@@ -531,7 +535,7 @@ export async function requirementsOverview(actor: Actor | null, now: Date = new 
     rows.push({
       id: r.id,
       name: r.name,
-      kind: r.kind === "TRAINING" ? "TRAINING" : r.test?.isForm ? "FORM" : "TEST",
+      kind: r.kind === "TRAINING" ? "TRAINING" : r.kind === "PROFILE" ? "PROFILE" : r.test?.isForm ? "FORM" : "TEST",
       appliesTo: r.appliesTo,
       done: mine.filter((t) => t.status === "DONE" && t.completedAt && t.completedAt >= start).length,
       open: open.length,

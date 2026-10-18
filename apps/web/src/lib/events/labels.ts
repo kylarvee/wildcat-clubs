@@ -2,10 +2,11 @@ import type { EventKind, FundingSource, LocationType, Visibility } from "@prisma
 
 /** Words people see for event enums. Client-safe (no server imports). */
 
-export const EVENT_KINDS: EventKind[] = ["MEETING", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"];
+export const EVENT_KINDS: EventKind[] = ["MEETING", "PRACTICE", "SOCIAL", "WORKSHOP", "SERVICE", "COMPETITION", "FUNDRAISER", "TRAINING", "OTHER"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   MEETING: "Meeting",
+  PRACTICE: "Practice",
   SOCIAL: "Social",
   WORKSHOP: "Workshop",
   SERVICE: "Service project",

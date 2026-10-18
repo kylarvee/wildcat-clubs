@@ -15,7 +15,7 @@ import { Ctx } from "./ctx";
 import { insertAll } from "./insert";
 import { resetSeedStorage } from "./lib/assets";
 import { buildReference } from "./steps/reference";
-import { buildPeople } from "./steps/people";
+import { buildPeople, markConcurrentEnrollment } from "./steps/people";
 import { buildClubs, buildMemberships } from "./steps/clubs";
 import { buildRoles } from "./steps/roles";
 import { buildEvents } from "./steps/events";
@@ -49,6 +49,7 @@ async function main() {
     const users = buildPeople(ctx);
     buildClubs(ctx);
     buildMemberships(ctx);
+    markConcurrentEnrollment(ctx);
     buildRoles(ctx);
     buildEvents(ctx);
     choosePastGrace(ctx);

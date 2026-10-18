@@ -12,6 +12,7 @@ import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyAdmins } from "@/lib/domain/notify";
 import { guessMime, MAX_UPLOAD_BYTES, putBytes } from "@/lib/files/storage";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
+import { SOCIAL_PLATFORMS } from "@/components/clubs/labels";
 
 /**
  * Clubs — founding, the profile, WSUSA review, retirement. The create wizard,
@@ -125,7 +126,7 @@ async function assertNameFree(name: string, exceptClubId?: string) {
 
 // ─── Profile rules (shared by create, edit and the founding checklist) ──────
 
-type ProfileShape = Pick<Club, "name" | "shortDescription" | "descriptionHtml" | "scope" | "collegeId" | "type" | "departmentId" | "requestedDepartmentName">;
+type ProfileShape = Pick<Club, "name" | "shortDescription" | "descriptionHtml" | "scope" | "collegeId" | "type" | "departmentId" | "requestedDepartmentName"> & Partial<Pick<Club, "category">>;
 
 /** What's still missing from a club's profile, in plain words. Empty = complete. */
 export function profileGaps(club: ProfileShape): string[] {
@@ -136,6 +137,8 @@ export function profileGaps(club: ProfileShape): string[] {
   if (longText.length < 40) gaps.push("Full description (a few sentences about what you'll do)");
   if (club.scope === "COLLEGE" && !club.collegeId) gaps.push("College");
   if (club.type === "SPONSORED" && !club.departmentId && !club.requestedDepartmentName) gaps.push("Sponsoring department");
+  // WSUSA's category; the College Ambassadors orgs admins create don't need one.
+  if ("category" in club && !club.category && club.type !== "COLLEGE_AMBASSADORS") gaps.push("Category");
   return gaps;
 }
 
@@ -278,9 +281,28 @@ const ProfileInput = z.object({
     .nullish()
     .transform((v) => v || null),
   logoColor: z.string().regex(HEX, "Choose a color from the palette."),
+  category: z.enum(["ACADEMIC", "CULTURAL", "FSL", "HONOR_SOCIETY", "SERVICE_ADVOCACY", "STUDENT_LIFE", "RELIGIOUS"]).nullish().transform((v) => v ?? null),
+  websiteUrl: z.string().trim().max(300, "Keep the website address under 300 characters.").nullish().transform((v) => v || null),
+  socialLinks: z
+    .array(z.object({ platform: z.enum(SOCIAL_PLATFORMS), url: z.string().trim().max(300, "Keep links under 300 characters.") }))
+    .max(8, "Add up to eight links.")
+    .default([]),
 });
 
 export type ProfileInput = z.input<typeof ProfileInput>;
+
+/** "instagram.com/wsuswe" → "https://instagram.com/wsuswe". Only web links (http/https) are kept. */
+function webUrl(raw: string, what: string): string {
+  const s = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    throw invalid(`Check the ${what} — it should be a web address.`);
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") throw invalid(`Check the ${what} — it should be a web address.`);
+  return u.toString();
+}
 
 export async function updateClubProfile(actor: Actor | null, input: unknown) {
   const v = parseForm(ProfileInput, input);
@@ -319,8 +341,12 @@ export async function updateClubProfile(actor: Actor | null, input: unknown) {
     focusOther: v.focusMajorId ? null : v.focusOther,
     logoUrl: v.logoUrl,
     logoColor: v.logoColor.toLowerCase(),
+    category: v.category,
+    websiteUrl: v.websiteUrl ? webUrl(v.websiteUrl, "website") : null,
+    socialLinks: v.socialLinks.filter((l) => l.url).map((l) => ({ platform: l.platform, url: webUrl(l.url, `${l.platform} link`) })),
   };
-  const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (club[k] ?? null) !== (data[k] ?? null));
+  const same = (k: keyof typeof data) => (k === "socialLinks" ? JSON.stringify(club.socialLinks ?? []) === JSON.stringify(data.socialLinks) : (club[k] ?? null) === (data[k] ?? null));
+  const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => !same(k));
   if (changed.length === 0) return club;
 
   const updated = await db.club.update({ where: { id: club.id }, data });

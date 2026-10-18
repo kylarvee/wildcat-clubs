@@ -18,8 +18,8 @@ const RESOURCE: Record<string, [string, PdfBlock[]]> = {
   robotics: ["Makerspace Safety Checklist", [{ heading: "Before you start", bullets: ["Safety glasses on whenever any tool is running", "Hair tied back, no loose sleeves or jewelry", "Know where the fire extinguisher and first aid kit are (north door)"] }, { heading: "Batteries", bullets: ["Charge LiPos only in the fire-safe bags", "Puffy battery? Stop, bin it, tell an officer"] }, { heading: "Power tools", bullets: ["CNC and lathe need sign-off training", "Never run the CNC alone"] }]],
   premed: ["MCAT Study Plan", [{ heading: "Twelve-week plan", bullets: ["Weeks 1-4: content review (bio/biochem, chem/phys)", "Weeks 5-8: passages and practice sections", "Weeks 9-12: full-length practice tests every Saturday"] }, { heading: "Club resources", text: "The club lends MCAT prep book sets — ask an officer. Study nights are on the calendar." }]],
   theatre: ["Audition Guide", [{ heading: "Preparing", bullets: ["Pick a one-minute contemporary monologue", "Bring a headshot if you have one (not required)", "Check the callboard for callbacks"] }, { heading: "Crew", text: "Not an actor? Every production needs stage managers, designers and run crew. Sign up on the crew sheet." }]],
-  climbing: ["Trip Safety & Waiver Guide", [{ heading: "Before every trip", bullets: ["Campus Rec waiver on file", "Helmet for every outdoor climb", "Trip leader has the emergency plan and a first aid kit"] }]],
-  ski: ["Trip Safety & Waiver Guide", [{ heading: "Before every trip", bullets: ["Waiver on file", "Carpool drivers approved through Campus Rec", "Check UDOT canyon road conditions"] }]],
+  climbing: ["Trip Safety & Waiver Guide", [{ heading: "Before every trip", bullets: ["Campus Rec waiver on file", "The ten essentials in every pack, including water and a headlamp", "Trip leader has the route, the emergency plan and a first aid kit"] }]],
+  ski: ["Road Trip Guide", [{ heading: "Before every away-game trip", bullets: ["Waiver on file", "Carpool drivers approved through Campus Rec", "Check UDOT road conditions before you leave"] }]],
 };
 
 const GENERIC_RESOURCE: [string, PdfBlock[]] = [
@@ -118,6 +118,11 @@ function clubFiles(ctx: Ctx, club: ClubM, drafts: Map<string, string>) {
   const base = addDays(club.approvedAt ?? club.createdAt, 1.5);
   const by = ctx.leaderAt(club, base);
   const f = (name: string, visibility?: "PUBLIC" | "LEADERS") => addFolder(ctx, scope, name, { createdById: by, createdAt: base, visibility });
+  if (club.def.life === "dormant") {
+    // A dormant club still has the constitution and bylaws it was approved with, and little else.
+    clubDocuments(ctx, club, f("Constitution & Bylaws", "PUBLIC"), scope, { draftId: null });
+    return;
+  }
   const minutes = f("Meeting Minutes");
   const flyers = f("Flyers & Photos", "PUBLIC");
   const resources = f("Resources", "PUBLIC");
@@ -126,7 +131,7 @@ function clubFiles(ctx: Ctx, club: ClubM, drafts: Map<string, string>) {
 
   // Minutes from recent meetings with check-ins.
   const meetings = club.events.filter((e) => e.isSeries).flatMap((e) => e.occurrences).filter((o) => o.status === "SCHEDULED" && o.startsAt < NOW && o.attendees.size > 0).sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime());
-  for (const o of meetings.slice(0, club.def.life === "inactive" ? 2 : rng.int(3, 5))) {
+  for (const o of meetings.slice(0, club.def.life === "inactive" ? 2 : club.def.story ? rng.int(3, 5) : rng.int(1, 3))) {
     const secretary = ctx.holderAt(club, "Secretary", o.startsAt) ?? ctx.leaderAt(club, o.startsAt);
     addFile(ctx, scope, `Minutes ${ymd(o.startsAt)}.md`, minutesMd(ctx, club, o.startsAt, o.attendees.size), "text/markdown", {
       parentId: minutes, createdById: secretary, createdAt: minDate(addDays(o.endsAt, rng.float(0.2, 2)), NOW), diskName: `minutes-${ymd(o.startsAt)}.md`,
@@ -135,7 +140,7 @@ function clubFiles(ctx: Ctx, club: ClubM, drafts: Map<string, string>) {
 
   // Flyers for the next or most recent one-off events.
   const oneOffs = club.events.filter((e) => !e.isSeries && e.status === "SCHEDULED" && e.startsAt).sort((a, b) => Math.abs(a.startsAt!.getTime() - NOW.getTime()) - Math.abs(b.startsAt!.getTime() - NOW.getTime()));
-  for (const ev of oneOffs.slice(0, club.def.life === "inactive" ? 1 : 2)) {
+  for (const ev of oneOffs.slice(0, club.def.life === "inactive" || !club.def.story ? 1 : 2)) {
     const where = ev.locationType === "CAMPUS" ? `${ctx.buildings.get(ev.buildingCode ?? "SU")?.name ?? ""} · ${ev.room ?? ""}` : ev.locationType === "VIRTUAL" ? "Online (Google Meet)" : (ev.address ?? "").split(",")[0];
     const svg = makeFlyerSvg({ club: club.name, title: ev.title, when: human(ev.startsAt!), where, color: club.def.color, tagline: club.def.short.split("—")[0].slice(0, 60) });
     const fileId = addFile(ctx, scope, `${ev.title} flyer.svg`, svg, "image/svg+xml", { parentId: flyers, createdById: ev.createdById, createdAt: ev.createdAt });
@@ -270,8 +275,8 @@ export function buildFiles(ctx: Ctx) {
     return id;
   };
   const bg = ctx.club("boardgames");
-  drafts.set("boardgames", draft(frank, "Board Game Guild — constitution & bylaws", "SENIORITY", addDays(bg.createdAt, 2), addDays(NOW, -12.3)));
-  draft(frank, "Wildcat Beekeeping Society — draft", "SENIORITY", addDays(NOW, -8.1), addDays(NOW, -1.4));
+  drafts.set("boardgames", draft(frank, `${bg.name} — constitution & bylaws`, "SENIORITY", addDays(bg.createdAt, 2), addDays(NOW, -12.3)));
+  draft(frank, `${ctx.club("beekeeping").name} — draft`, "SENIORITY", addDays(NOW, -8.1), addDays(NOW, -1.4));
   for (const key of ["datasci", "firstgen", "pickleball", "aviation"]) {
     const club = ctx.club(key);
     drafts.set(key, draft(club.founderId, `${club.name} — constitution & bylaws`, club.def.succession ?? "SENIORITY", addDays(club.createdAt, 1), addDays(club.createdAt, rng.float(2, 5))));
@@ -290,18 +295,18 @@ export function buildFiles(ctx: Ctx) {
       // Adopted recently, right before submitting.
       for (const d of ctx.rows.documents.filter((x) => x.clubId === club.id)) d.createdAt = addDays(NOW, -12.3);
       const res = addFolder(ctx, scope, "Resources", { createdById: frank, createdAt: addDays(club.createdAt, 3), visibility: "PUBLIC" });
-      addFile(ctx, scope, "Game library list.md", "# Board Game Guild library\n\n- Wingspan\n- Catan\n- Ticket to Ride\n- Codenames\n- Azul\n- Pandemic\n- Spirit Island\n- …and 70 more (full list coming)\n", "text/markdown", { parentId: res, createdById: frank, createdAt: addDays(club.createdAt, 4) });
+      addFile(ctx, scope, "Puzzle shelf list.md", `# ${club.name} lending shelf\n\n- 1000-piece jigsaws (14)\n- 500-piece jigsaws (9)\n- Crossword collections (6)\n- Logic puzzle books (5)\n- Mechanical puzzles (8)\n- …and more as members donate (full list coming)\n`, "text/markdown", { parentId: res, createdById: frank, createdAt: addDays(club.createdAt, 4) });
     }
   }
   const bee = ctx.club("beekeeping");
   addFile(ctx, { clubId: bee.id, dir: bee.slug }, "Interest list.md", "# Beekeeping interest list\n\nPeople who signed up at the Involvement Fair:\n\n- (12 names — moving these to the roster once we're approved)\n\nQuestions for Facilities:\n- Can hives go on the Tracy Hall roof garden?\n", "text/markdown", { createdById: frank, createdAt: addDays(NOW, -8.5) });
 
-  // ─── Theatre Guild: custom bylaws waiting on WSUSA ─────────────────────────
+  // ─── AAT (theatre): custom bylaws waiting on WSUSA ─────────────────────────
   const theatre = ctx.club("theatre");
   const tPres = ctx.leaderAt(theatre, NOW);
   const tFolder = ctx.rows.files.find((x) => x.clubId === theatre.id && x.isFolder && x.name === "Constitution & Bylaws")!.id as string;
-  const customFile = addFile(ctx, { clubId: theatre.id, dir: theatre.slug }, "Theatre Guild Bylaws - custom draft (2026).pdf",
-    makePdf("Theatre Guild Bylaws (custom)", "Proposed replacement for the builder bylaws · submitted for WSUSA approval", [
+  const customFile = addFile(ctx, { clubId: theatre.id, dir: theatre.slug }, "AAT Bylaws - custom draft (2026).pdf",
+    makePdf(`${theatre.name} Bylaws (custom)`, "Proposed replacement for the builder bylaws · submitted for WSUSA approval", [
       { heading: "Why a custom version", text: "After four years we need bylaws that fit how productions actually run: a production manager seat, casting rules and crew sign-ups." },
       { heading: "Section 1 - Production Manager", text: "A Production Manager is appointed for each show by the President and Vice President." },
       { heading: "Section 2 - Casting", text: "Casting is done by the show's student director with one officer present. Officers do not cast themselves." },
@@ -311,7 +316,7 @@ export function buildFiles(ctx: Ctx) {
   const customDocId = ctx.id();
   ctx.rows.documents.push({
     // Pending uploads stay unnumbered (version 0) until WSUSA approves them.
-    id: customDocId, clubId: theatre.id, kind: "BYLAWS", title: "Theatre Guild Bylaws (custom, 2026)", version: 0, source: "CUSTOM_UPLOAD", status: "PENDING_APPROVAL",
+    id: customDocId, clubId: theatre.id, kind: "BYLAWS", title: `${theatre.name} Bylaws (custom, 2026)`, version: 0, source: "CUSTOM_UPLOAD", status: "PENDING_APPROVAL",
     statedSuccessionMethod: "MEMBER_VOTE", statedJoinPolicy: "OPEN", note: "Adds a Production Manager seat and member votes for officers.",
     draftId: null, contentHtml: null, fileId: customFile, createdById: tPres, createdAt: addDays(NOW, -4.2), decidedAt: null,
   });
@@ -362,11 +367,11 @@ export function buildFiles(ctx: Ctx) {
   const priya = ctx.p("priya").id;
   const robotics = ctx.club("robotics");
   const priyaVp = robotics.assignments.find((a) => a.userId === priya && a.seatName === "Vice President")!;
-  const review = addPdf(ctx, { ownerId: priya, dir: "users/priya-patel" }, "Lunabotics drivetrain design review.pdf", {
-    title: "Lunabotics Rover — Drivetrain Design Review", subtitle: "Wildcat Robotics · March 2026",
-    blocks: [{ heading: "Design", bullets: ["Four-wheel skid steer with regolith-rated wheels", "Brushless motors with planetary gearboxes", "Target: 30 kg rover under the 80 kg limit"] }],
+  const review = addPdf(ctx, { ownerId: priya, dir: "users/priya-patel" }, "Heavyweight bot drivetrain design review.pdf", {
+    title: "Heavyweight Bot - Drivetrain Design Review", subtitle: `${robotics.name} · March 2026`,
+    blocks: [{ heading: "Design", bullets: ["Four-wheel drive with invertible chassis", "Brushless motors with planetary gearboxes", "Target: 100 kg bot with a 10 kg margin under the weight limit"] }],
   }, { createdById: priya, createdAt: new Date("2026-03-12T18:00:00Z"), visibility: "MEMBERS" });
-  proj(priya, priyaVp.id, robotics.id, "Lunabotics Rover Drivetrain", "<p>Led the drivetrain subteam for Wildcat Robotics' first NASA Lunabotics rover.</p>", new Date("2025-09-02T18:00:00Z"), new Date("2026-04-10T18:00:00Z"), [review]);
+  proj(priya, priyaVp.id, robotics.id, "Heavyweight Bot Drivetrain", "<p>Led the drivetrain subteam for the club's first heavyweight combat robot.</p>", new Date("2025-09-02T18:00:00Z"), new Date("2026-04-10T18:00:00Z"), [review]);
 
   roleContributions(ctx, proj);
 }

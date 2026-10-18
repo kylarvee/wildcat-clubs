@@ -1,5 +1,6 @@
 import type { FundingSource, FundingStatus, Prisma } from "@prisma/client";
 import type { ClubM, Ctx, Ev } from "../ctx";
+import { isQuiet } from "../data/clubs";
 import { addDays, minDate } from "../lib/dates";
 
 /**
@@ -63,9 +64,9 @@ export function buildFunding(ctx: Ctx) {
     ["Conference registration", "Registration", 4, 17500],
     ["Supplies bin restock", "Supplies", 1, 12000],
   ];
-  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED" && c.def.life !== "inactive")) {
+  for (const club of ctx.clubs.filter((c) => c.status === "APPROVED" && !isQuiet(c.def.life))) {
     for (const term of [current, next]) {
-      for (const [desc, cat, q, u] of rng.sample(general, rng.int(0, 2))) {
+      for (const [desc, cat, q, u] of rng.sample(general, club.def.life === "small" ? rng.int(0, 1) : rng.int(0, 2))) {
         addItem(club, term.id, desc, cat, q, u, { at: term === current ? addDays(current.startsOn, rng.float(3, 30)) : addDays(NOW, -rng.float(1, 12)) });
       }
     }
@@ -149,7 +150,7 @@ export function buildFunding(ctx: Ctx) {
   const lastSpring = prevTerms.filter((n) => n.startsWith("Spring")).at(-1)!;
   const lastFall = prevTerms.filter((n) => n.startsWith("Fall")).at(-1)!;
 
-  // Oscar (Finance & Investment Club): one submitted, one draft, plus history.
+  // Oscar (Wildcat Investors): one submitted, one draft, plus history.
   request("fic", lastSpring, "Spring Stock Pitch Competition", "APPROVED", [["Prize gift cards", "Supplies", 3, 5000], ["Judges' lunch", "Food", 8, 1400]], { invoice: "PROCESSED" });
   ctx.refs.oscarSubmitted = request("fic", cur, "Fall speaker series", "SUBMITTED", [["Speaker thank-you gifts", "Supplies", 3, 3500], ["Refreshments for speaker nights", "Food", 3, 9000], ["Flyer printing", "Printing", 150, 15]], {
     submittedDaysAgo: 5.2, by: oscar, useEventItems: true,
@@ -160,15 +161,15 @@ export function buildFunding(ctx: Ctx) {
   });
 
   request("robotics", lastSpring, "Build season materials", "APPROVED", [["Aluminum stock and fasteners", "Supplies", 1, 68000], ["Motor controllers", "Equipment", 6, 8900]], { invoice: "PROCESSED" });
-  ctx.refs.roboticsOpenInvoiceRequest = request("robotics", cur, "Lunabotics competition travel", "APPROVED", [["Van rental (2 vans, 4 days)", "Travel", 2, 48000], ["Hotel rooms", "Travel", 5, 32000], ["Robot shipping crate", "Supplies", 1, 26000]], {
-    submittedDaysAgo: 16.1, decidedDaysAgo: 9.3, invoice: "OPEN", justification: "Eight members compete at NASA's Lunabotics challenge at Kennedy Space Center.",
+  ctx.refs.roboticsOpenInvoiceRequest = request("robotics", cur, "Combat robotics competition travel", "APPROVED", [["Van rental (2 vans, 4 days)", "Travel", 2, 48000], ["Hotel rooms", "Travel", 5, 32000], ["Robot shipping crate", "Supplies", 1, 26000]], {
+    submittedDaysAgo: 16.1, decidedDaysAgo: 9.3, invoice: "OPEN", justification: "Eight members take two bots to an intercollegiate combat robotics competition.",
   });
   request("premed", cur, "MCAT prep books for the lending library", "PARTIALLY_APPROVED", [["MCAT prep book sets", "Supplies", 12, 9500]], {
     submittedDaysAgo: 27.4, decidedDaysAgo: 20.2, approvedShare: 0.5, invoice: "PROCESSED",
     note: "Approved for six sets. WSUSA funds books for a shared lending library; please check them out through the club rather than giving them away.",
   });
-  request("anime", cur, "FanX convention tickets", "DENIED", [["FanX 3-day passes", "Registration", 20, 9000]], {
-    submittedDaysAgo: 22, decidedDaysAgo: 15.1, note: "Convention tickets for members are personal entertainment, which WSUSA funding can't cover. A fundraiser or a club-run screening event would be a good alternative.",
+  request("anime", cur, "Film festival passes", "DENIED", [["Festival day passes", "Registration", 20, 9000]], {
+    submittedDaysAgo: 22, decidedDaysAgo: 15.1, note: "Festival passes for members are personal entertainment, which WSUSA funding can't cover. A fundraiser or a club-run screening event would be a good alternative.",
   });
   request("swe", lastFall, "SWE national conference registration", "APPROVED", [["Conference registration", "Registration", 4, 17500], ["Shared hotel rooms", "Travel", 2, 54000]], { invoice: "PROCESSED" });
   ctx.refs.sweSubmitted = request("swe", cur, "Girls in STEM Robot Day supplies", "SUBMITTED", [["Mentor T-shirts", "Apparel", 20, 1100], ["Lunch for volunteers", "Food", 30, 900]], { submittedDaysAgo: 3.2, useEventItems: true });
@@ -182,8 +183,8 @@ export function buildFunding(ctx: Ctx) {
     ["lia", "Fall 2024", "Día de los Muertos celebration", [["Pan dulce & cocoa", "Food", 1, 20000], ["Decorations", "Supplies", 1, 8000]], "APPROVED"],
     ["isa", "Fall 2024", "International Night", [["Catering", "Food", 1, 90000], ["Sound system rental", "Equipment", 1, 25000]], "PARTIALLY_APPROVED"],
     ["service", "Spring 2025", "Care kit drive", [["Care kit supplies", "Supplies", 150, 600]], "APPROVED"],
-    ["ski", "Spring 2025", "Beginner lesson day", [["Lesson vouchers", "Registration", 15, 4500]], "DENIED"],
-    ["climbing", "Fall 2025", "Belay certification clinic", [["Certification fees", "Registration", 12, 2500]], "APPROVED"],
+    ["ski", "Spring 2025", "Away game bus tickets", [["Bus seats", "Travel", 15, 4500]], "DENIED"],
+    ["climbing", "Fall 2025", "Wilderness first aid clinic", [["Certification fees", "Registration", 12, 2500]], "APPROVED"],
     ["psych", "Fall 2025", "Mental health awareness week", [["Printing", "Printing", 300, 25], ["Refreshments", "Food", 1, 15000]], "APPROVED"],
     ["accounting", "Spring 2026", "Meet the Firms night", [["Refreshments", "Food", 1, 22000]], "APPROVED"],
     ["marketing", "Fall 2025", "Agency tour transportation", [["Van rental", "Travel", 1, 18000]], "APPROVED"],
@@ -195,7 +196,7 @@ export function buildFunding(ctx: Ctx) {
     if (!ctx.terms.some((t) => t.name === term) || ctx.term(term).startsOn > NOW) continue;
     request(key, term, title, status, lines, {
       invoice: status === "APPROVED" || status === "PARTIALLY_APPROVED" ? "PROCESSED" : undefined,
-      note: status === "DENIED" ? "Lesson vouchers for individual members aren't eligible. Club-wide instruction is — resubmit as a group clinic." : status === "PARTIALLY_APPROVED" ? "Approved for catering; please use the Shepherd Union's sound system at no charge." : undefined,
+      note: status === "DENIED" ? "Tickets for individual members to attend games aren't eligible. A club event open to every student is — resubmit it as one." : status === "PARTIALLY_APPROVED" ? "Approved for catering; please use the Shepherd Union's sound system at no charge." : undefined,
     });
   }
 

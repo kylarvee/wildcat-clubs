@@ -8,6 +8,10 @@ import { can, CAPABILITIES, isSysadmin, ROLE_LABEL, type Capability } from "@/li
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/domain/kit";
 import { userDetail } from "@/lib/domain/users";
+import { detailsFor } from "@/lib/domain/details";
+import { GENDER_LABEL, missingDetails, YEAR_LABEL } from "@/lib/details/rules";
+import { EmergencyContactButton } from "@/components/details/EmergencyContactButton";
+import { revealEmergencyContactAdminAction } from "@/app/admin/users/actions";
 import { fmtAgo, fmtDate, fmtLongDate } from "@/lib/time";
 import { END_REASON_LABEL } from "@/lib/roles/labels";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
@@ -53,6 +57,9 @@ export default async function PersonPage({ params }: { params: Params }) {
     throw e;
   }
   const { user: person, roles, pastRoles, pastRoleCount, checkins, activity } = data;
+  const det = await detailsFor(viewer, person.id);
+  const detMissing = missingDetails(det, person.kind);
+  const none = <span className="text-ink-3">Not given</span>;
   const memberships = [...data.memberships].sort((a, b) => MEMBERSHIP_ORDER[a.status] - MEMBERSHIP_ORDER[b.status]);
   const leadRoles = roles.filter((r) => r.role !== "MEMBER");
   const activeClubs = memberships.filter((m) => m.status === "ACTIVE").length;
@@ -278,6 +285,37 @@ export default async function PersonPage({ params }: { params: Params }) {
                   { label: "Last seen", value: person.lastSeenAt ? `${fmtAgo(person.lastSeenAt)} (${fmtLongDate(person.lastSeenAt)})` : "Never" },
                 ]}
               />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Member details"
+              description={
+                det?.confirmedAt && !detMissing.length
+                  ? `Confirmed ${fmtLongDate(det.confirmedAt)}.`
+                  : detMissing.length
+                    ? `Missing: ${detMissing.join(", ")}.`
+                    : "Complete, but not confirmed yet."
+              }
+            />
+            <CardBody className="space-y-3">
+              <KeyValue
+                className="sm:grid-cols-1"
+                items={[
+                  ...(person.kind === "STUDENT" ? [{ label: "Student ID", value: det?.studentId ?? none }] : []),
+                  { label: "Date of birth", value: det?.birthDate ? fmtDate(det.birthDate, "MMM d, yyyy") : none },
+                  { label: "Gender", value: det?.gender ? GENDER_LABEL[det.gender] : none },
+                  ...(person.kind === "STUDENT" ? [{ label: "Year in school", value: det?.yearInSchool ? YEAR_LABEL[det.yearInSchool] : none }] : []),
+                  { label: "Phone", value: det?.phone ?? none },
+                  ...(det?.contactEmail ? [{ label: "Personal email", value: det.contactEmail }] : []),
+                  {
+                    label: "Address",
+                    value: det?.addressLine ? `${det.addressLine}, ${det.addressCity ?? ""}, ${det.addressState ?? ""} ${det.addressZip ?? ""}`.replace(/\s+,/g, ",") : none,
+                  },
+                ]}
+              />
+              {det?.emergencyName ? <EmergencyContactButton userId={person.id} name={person.name} reveal={revealEmergencyContactAdminAction} /> : <p className="text-sm text-ink-3">No emergency contact yet.</p>}
             </CardBody>
           </Card>
 

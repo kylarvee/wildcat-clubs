@@ -10,21 +10,30 @@ import type { UserRows } from "./steps/people";
  */
 
 const BATCH = 4000;
+/** Batches written at once. Tables whose rows point at each other (FileItem folders) go one batch at a time. */
+const PARALLEL = 4;
+const SEQUENTIAL = new Set(["FileItem"]);
 
 export async function insertMany<T>(label: string, rows: T[], write: (batch: T[]) => Promise<unknown>, log: (s: string) => void) {
+  const t0 = Date.now();
   try {
-    for (let i = 0; i < rows.length; i += BATCH) await write(rows.slice(i, i + BATCH));
+    const batches: T[][] = [];
+    for (let i = 0; i < rows.length; i += BATCH) batches.push(rows.slice(i, i + BATCH));
+    const n = SEQUENTIAL.has(label) ? 1 : PARALLEL;
+    for (let i = 0; i < batches.length; i += n) await Promise.all(batches.slice(i, i + n).map((b) => write(b)));
   } catch (e) {
     log(`  ✗ ${label}: ${rows.length} rows failed`);
     throw e;
   }
-  if (process.env.SEED_VERBOSE) log(`  ${label.padEnd(22)} ${String(rows.length).padStart(7)}`);
+  if (process.env.SEED_VERBOSE) log(`  ${label.padEnd(22)} ${String(rows.length).padStart(7)} ${String(Date.now() - t0).padStart(6)} ms`);
 }
 
 const DAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
 
 export function clubDescription(ctx: Ctx, club: ClubM): string | null {
   const d = club.def;
+  // Real clubs: their own purpose statement from the WSU club list, nothing added.
+  if (d.dir) return d.aboutHtml;
   if (d.life === "draft") return `<p>${d.about}</p>`;
   const [H, M] = d.meeting.time;
   const time = `${H % 12 === 0 ? 12 : H % 12}:${String(M).padStart(2, "0")} ${H < 12 ? "AM" : "PM"}`;
@@ -48,6 +57,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
   await insertMany("Building", ref.buildings, (d) => db.building.createMany({ data: d }), log);
   await insertMany("Term", ref.terms, (d) => db.term.createMany({ data: d }), log);
   await insertMany("User", [...users.values()], (d) => db.user.createMany({ data: d }), log);
+  await insertMany("PersonalDetails", r.personalDetails, (d) => db.personalDetails.createMany({ data: d }), log);
   await insertMany("UserMajor", r.userMajors, (d) => db.userMajor.createMany({ data: d }), log);
   await insertMany("Experience", r.experiences, (d) => db.experience.createMany({ data: d }), log);
   await insertMany("Education", r.educations, (d) => db.education.createMany({ data: d }), log);
@@ -67,6 +77,10 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     shortDescription: c.def.short,
     descriptionHtml: clubDescription(ctx, c),
     logoColor: c.def.color,
+    contactEmail: c.def.contactEmail,
+    category: c.def.category,
+    websiteUrl: null,
+    socialLinks: [],
     joinPolicy: c.def.joinPolicy ?? "OPEN",
     successionMethod: c.def.succession ?? "SENIORITY",
     autoApproveCohosts: Boolean(c.def.autoApproveCohosts),

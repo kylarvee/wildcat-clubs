@@ -124,7 +124,7 @@ export const OFFICER_QUESTIONS: QuestionDef[] = [
   },
 ];
 
-export const SAFETY_QUIZ_INTRO = `<p>Before you use the Noorda makerspace with Wildcat Robotics, take this short quiz on shop safety. It takes about five minutes and you need 80% to pass.</p><div data-embed="video" data-src="https://www.youtube.com/watch?v=aqz-KE-bpKQ" data-title="Makerspace safety walkthrough (sample video)"></div>`;
+export const SAFETY_QUIZ_INTRO = `<p>Before you use the Noorda makerspace with the RC Wrecker Bots Club, take this short quiz on shop safety. It takes about five minutes and you need 80% to pass.</p><div data-embed="video" data-src="https://www.youtube.com/watch?v=aqz-KE-bpKQ" data-title="Makerspace safety walkthrough (sample video)"></div>`;
 
 export const SAFETY_QUESTIONS: QuestionDef[] = [
   {
@@ -200,11 +200,25 @@ export const REVIEWER_COMMENTS = [
   "Missing the funding and advisor steps.",
 ];
 
-/** A WSUSA form (nothing graded): every club member confirms it once a year. */
-export const CONDUCT_FORM_INTRO = `<p>WSUSA asks every club member to read and confirm this once each academic year. It takes about a minute.</p><ul><li><strong>No hazing.</strong> Not as a "tradition," not as a joke, and not even if someone agrees to it. See the Hazing Prohibition policy.</li><li><strong>Respect everyone.</strong> Clubs are open to every eligible Weber State student, and members and guests are treated with respect.</li><li><strong>Speak up.</strong> Report harassment, discrimination or safety problems through <em>Report a concern</em>. You can stay anonymous.</li></ul>`;
+/**
+ * WSUSA forms (nothing graded). The member agreements replace the three
+ * agreements the old system asked for inside every club's sign-up: signed
+ * once a year, for every club.
+ */
+export const AGREEMENTS_FORM_INTRO = `<p>WSUSA asks every club member to sign these once each academic year. They cover every club you're in, so no club asks again. Read each policy first; they're linked from the policy library.</p><ul><li><strong>Participant Waiver and Release</strong>: the risks of club activities, emergency care, and photos.</li><li><strong>Anti-Hazing Agreement</strong>: no hazing, ever, and reporting it if you see it.</li><li><strong>Non-Discrimination Agreement</strong>: clubs are open to everyone and treat people fairly.</li></ul><p>Under 18? You need a parent or guardian's signature instead. Contact WSUSA for the guardian version.</p>`;
 
-export const CONDUCT_QUESTIONS: QuestionDef[] = [
-  { type: "SINGLE_CHOICE", prompt: "<p>I've read WSUSA's Hazing Prohibition. I won't take part in hazing in any club, for any reason.</p>", options: [{ id: "agree", text: "I agree" }] },
-  { type: "SINGLE_CHOICE", prompt: "<p>I'll treat every member and guest with respect, and I'll report harassment or discrimination when I see it.</p>", options: [{ id: "agree", text: "I agree" }] },
+export const AGREEMENT_QUESTIONS: QuestionDef[] = [
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Participant Waiver and Release.</strong> I'm 18 or older. I understand that club activities carry some risk, I release the university from claims arising from my participation, I consent to emergency care, and the university may use photos of club activities that include me.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Anti-Hazing Agreement.</strong> I won't take part in hazing in any club, for any reason, and I'll report hazing to Student Involvement &amp; Leadership if I see it. I understand student leaders must keep at least a 2.0 GPA.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Non-Discrimination Agreement.</strong> My clubs won't discriminate when recruiting members, and I'll treat every member and guest fairly and with respect.</p>", options: [{ id: "agree", text: "I agree" }] },
   { type: "SHORT_ANSWER", prompt: "<p>Type your full name to sign.</p>" },
+];
+
+/** Presidents confirm their club for the year (the old system's re-registration). */
+export const REREGISTRATION_FORM_INTRO = `<p>Each academic year, every club president confirms the club is active and its details are current. Check your club profile, advisor and meeting schedule in Wildcat Clubs first. They're what students and WSUSA see, so you don't type them again here.</p>`;
+
+export const REREGISTRATION_QUESTIONS: QuestionDef[] = [
+  { type: "SINGLE_CHOICE", prompt: "<p>The club I lead will be active this academic year.</p>", options: [{ id: "confirm", text: "I confirm" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p>Our club profile is up to date: contact email, social media, category and advisor.</p>", options: [{ id: "confirm", text: "I confirm" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p>Our regular meetings are on the club calendar in the Events Builder.</p>", options: [{ id: "confirm", text: "I confirm" }] },
 ];

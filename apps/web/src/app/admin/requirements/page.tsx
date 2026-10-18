@@ -91,8 +91,8 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
                           {r.name}
                         </Link>
                         <p className="text-sm text-ink-3">
-                          {r.kind === "TRAINING" ? "Attend " : r.test?.isForm ? "Fill out " : "Pass "}
-                          {r.test ? (
+                          {r.kind === "PROFILE" ? "Confirm their member details" : r.kind === "TRAINING" ? "Attend " : r.test?.isForm ? "Fill out " : "Pass "}
+                          {r.kind === "PROFILE" ? null : r.test ? (
                             <Link href={`/admin/tests/${r.test.id}`} className="text-brand-600 hover:underline">
                               {r.test.title}
                             </Link>

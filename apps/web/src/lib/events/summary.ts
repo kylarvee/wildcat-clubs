@@ -39,7 +39,8 @@ function untilText(until: Date | string, startsAt: Date | string) {
   return fmtDate(until, sameYear ? "MMM d" : "MMM d, yyyy");
 }
 
-export function describeRecurrence(r: RecurrenceSummaryInput): string {
+/** Just the repeat pattern, without the end ("Every Tuesday and Thursday", "Every 2 weeks on Mondays"). */
+export function describeRepeat(r: RecurrenceSummaryInput): string {
   const n = Math.max(1, r.interval ?? 1);
   const start = campusParts(r.startsAt);
   let base: string;
@@ -69,6 +70,12 @@ export function describeRecurrence(r: RecurrenceSummaryInput): string {
       base = n === 1 ? "Once every academic year" : `Once every ${n} academic years`;
       break;
   }
+  return base;
+}
+
+export function describeRecurrence(r: RecurrenceSummaryInput): string {
+  if (r.recurrence === "NONE") return "Does not repeat";
+  const base = describeRepeat(r);
   if (r.until) return `${base} until ${untilText(r.until, r.startsAt)}`;
   if (r.count) return `${base}, ${r.count} ${r.count === 1 ? "time" : "times"}`;
   return `${base} for a year`;

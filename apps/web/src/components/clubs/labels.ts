@@ -1,4 +1,4 @@
-import type { ClubScope, ClubType, EventKind, JoinPolicy } from "@prisma/client";
+import type { ClubCategory, ClubScope, ClubType, EventKind, JoinPolicy } from "@prisma/client";
 import type { Tone } from "@/components/ui/badge";
 
 /**
@@ -44,6 +44,7 @@ export const JOIN_POLICY_LABEL: Record<JoinPolicy, string> = {
 
 export const EVENT_KIND_LABEL: Record<EventKind, string> = {
   MEETING: "Meeting",
+  PRACTICE: "Practice",
   SOCIAL: "Social",
   WORKSHOP: "Workshop",
   SERVICE: "Service",
@@ -64,4 +65,40 @@ export function pct(rate: number | null | undefined) {
 
 export function plural(n: number, one: string, many = `${one}s`) {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+}
+
+/** WSUSA's club sub-categories (the type — Sponsored / Registered / Affiliated — is separate). */
+export const CLUB_CATEGORY_LABEL: Record<ClubCategory, string> = {
+  ACADEMIC: "Academic",
+  CULTURAL: "Cultural",
+  FSL: "Fraternity & Sorority Life",
+  HONOR_SOCIETY: "Honor society",
+  SERVICE_ADVOCACY: "Service & advocacy",
+  STUDENT_LIFE: "Student life & special interest",
+  RELIGIOUS: "Religious",
+};
+
+export const CLUB_CATEGORIES = Object.keys(CLUB_CATEGORY_LABEL) as ClubCategory[];
+
+export const SOCIAL_PLATFORMS = ["instagram", "facebook", "x", "tiktok", "discord", "linkedin", "youtube", "other"] as const;
+export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
+export type SocialLink = { platform: SocialPlatform; url: string };
+
+export const SOCIAL_LABEL: Record<SocialPlatform, string> = {
+  instagram: "Instagram",
+  facebook: "Facebook",
+  x: "X (Twitter)",
+  tiktok: "TikTok",
+  discord: "Discord",
+  linkedin: "LinkedIn",
+  youtube: "YouTube",
+  other: "Other link",
+};
+
+/** Social links stored on a club, read defensively (the column is JSON). */
+export function readSocialLinks(raw: unknown): SocialLink[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x): x is SocialLink => Boolean(x) && typeof x === "object" && typeof (x as SocialLink).url === "string" && (SOCIAL_PLATFORMS as readonly string[]).includes((x as SocialLink).platform))
+    .slice(0, 8);
 }

@@ -47,29 +47,34 @@ export function windowMessage(state: WindowState, w: CheckinWindow, now: Date): 
 
 // ─── How someone is checking in ─────────────────────────────────────────────
 
-export type BlockReason = "SELF_OFF" | "NOT_MEMBER" | "EXPIRED_SCAN";
+export type BlockReason = "NOT_MEMBER" | "EXPIRED_SCAN";
 export type MethodDecision = { ok: true; method: Extract<CheckInMethod, "QR" | "SELF"> } | { ok: false; reason: BlockReason };
 
 /**
  * A live scan (rotating token or pass) is always a QR check-in. Without one,
- * a person may check themselves in only when the event allows it AND they're
- * already an active member of the host or an approved co-host club — so the
- * code alone can't be used by strangers who weren't in the room.
+ * the event's code is enough only for active members of the host or an
+ * approved co-host club (method SELF, shown as "Code") — so a code passed
+ * around can't sign in strangers who weren't in the room. In person, the code
+ * is only ever shown at the event (the QR screen); online events, which have
+ * nothing to scan, are the only ones the app offers a one-tap check-in for
+ * (allowsTapCheckIn).
  */
-export function decideMethod(input: { scanValid: boolean; scanPresented: boolean; allowSelfCheckIn: boolean; isParticipatingMember: boolean }): MethodDecision {
+export function decideMethod(input: { scanValid: boolean; scanPresented: boolean; isParticipatingMember: boolean }): MethodDecision {
   if (input.scanValid) return { ok: true, method: "QR" };
-  if (input.allowSelfCheckIn && input.isParticipatingMember) return { ok: true, method: "SELF" };
+  if (input.isParticipatingMember) return { ok: true, method: "SELF" };
   if (input.scanPresented) return { ok: false, reason: "EXPIRED_SCAN" };
-  if (!input.allowSelfCheckIn) return { ok: false, reason: "SELF_OFF" };
   return { ok: false, reason: "NOT_MEMBER" };
+}
+
+/** In-person events need the QR code or the code shown at the event; only online events get a one-tap "Check in". */
+export function allowsTapCheckIn(event: { locationType: string }): boolean {
+  return event.locationType === "VIRTUAL";
 }
 
 export function blockMessage(reason: BlockReason, rotateSeconds: number) {
   switch (reason) {
     case "EXPIRED_SCAN":
       return `That QR code has expired — it changes every ${rotateSeconds} seconds. Scan the code on the screen again.`;
-    case "SELF_OFF":
-      return "This event only takes QR check-ins. Scan the QR code shown at the event.";
     case "NOT_MEMBER":
       return "Scan the QR code shown at the event. Checking in with just the code is for the club's members.";
   }
@@ -109,11 +114,11 @@ export function codeNotFoundMessage(code: string) {
 
 export const METHOD_LABEL: Record<CheckInMethod, string> = {
   QR: "QR scan",
-  SELF: "Self check-in",
+  SELF: "Event code",
   MANUAL: "Added by a leader",
 };
 
-export const METHOD_SHORT: Record<CheckInMethod, string> = { QR: "QR", SELF: "Self", MANUAL: "Manual" };
+export const METHOD_SHORT: Record<CheckInMethod, string> = { QR: "QR", SELF: "Code", MANUAL: "Manual" };
 
 /** "Maya C." — how names show on a projected screen, where the whole room can read them. */
 export function publicShortName(name: string) {

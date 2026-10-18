@@ -112,31 +112,33 @@ enum UserStatus {
 }
 
 model User {
-  id                   String       @id @default(cuid())
-  email                String       @unique
+  id                   String           @id @default(cuid())
+  email                String           @unique
   name                 String
-  handle               String       @unique
+  handle               String           @unique
   pronouns             String?
   avatarUrl            String?
-  avatarColor          String       @default("#4b2e83")
+  avatarColor          String           @default("#4b2e83")
   kind                 UserKind
-  platformRole         PlatformRole @default(USER)
-  status               UserStatus   @default(ACTIVE)
+  platformRole         PlatformRole     @default(USER)
+  status               UserStatus       @default(ACTIVE)
   headline             String? // one-line description on the profile
   aboutHtml            String?
   jobTitle             String? // faculty/staff title
   departmentId         String?
-  department           Department?  @relation("UserDepartment", fields: [departmentId], references: [id])
+  department           Department?      @relation("UserDepartment", fields: [departmentId], references: [id])
   classYear            Int? // expected graduation year (students)
   graduatedAt          DateTime?
   linkedinUrl          String?
-  calendarToken        String       @unique @default(uuid()) // private feed link: 122 random bits
-  subscribeUniversity  Boolean      @default(true) // university-wide events on my calendar
-  emailNotifications   Boolean      @default(true)
+  calendarToken        String           @unique @default(uuid()) // private feed link: 122 random bits
+  subscribeUniversity  Boolean          @default(true) // university-wide events on my calendar
+  emailNotifications   Boolean          @default(true)
   appPromptDismissedAt DateTime?
-  hasMobileApp         Boolean      @default(false)
-  createdAt            DateTime     @default(now())
+  hasMobileApp         Boolean          @default(false)
+  createdAt            DateTime         @default(now())
   lastSeenAt           DateTime?
+  /// Private member details (Settings → Member details), entered once and reused for every club.
+  details              PersonalDetails?
 
   majors              UserMajor[]
   sessions            Session[]
@@ -364,6 +366,11 @@ model Club {
   googleDriveFolderId       String?
   googleCalendarId          String?
   googleChatSpaceId         String?
+  /// WSUSA's sub-category (Academic, Cultural, …). The type (Sponsored / Registered / Affiliated) is `type`.
+  category                  ClubCategory?
+  websiteUrl                String?
+  /// [{ platform: "instagram" | "facebook" | "x" | "tiktok" | "discord" | "linkedin" | "youtube" | "other", url }]
+  socialLinks               Json             @default("[]")
 
   documents            ClubDocument[]
   decisions            ClubDecision[]
@@ -599,6 +606,8 @@ model RoleAssignment {
 enum RequirementKind {
   TEST
   TRAINING
+  /// Met while the person's member details are complete and confirmed this renewal period.
+  PROFILE
 }
 
 enum RenewalPeriod {
@@ -655,6 +664,7 @@ enum LocationType {
 
 enum EventKind {
   MEETING
+  PRACTICE
   SOCIAL
   WORKSHOP
   SERVICE
@@ -683,6 +693,9 @@ model Event {
   visibility         Visibility   @default(PUBLIC)
   startsAt           DateTime? // first occurrence (null while a draft)
   durationMinutes    Int          @default(60)
+  /// Room time before and after the event (for reservations); not part of the event's listed time.
+  setupMinutes       Int          @default(0)
+  cleanupMinutes     Int          @default(0)
   allDay             Boolean      @default(false)
   recurrence         Recurrence   @default(NONE)
   recurrenceInterval Int          @default(1)
@@ -1519,4 +1532,72 @@ model ActivityLog {
   @@index([clubId, at])
   @@index([actorId, at])
   @@index([action, at])
+}
+
+// ─── Member details ──────────────────────────────────────────────────────────
+
+/// What WSUSA needs from every club member, kept once per person (one input
+/// tool: Settings → Member details) instead of in each club's sign-up. Private:
+/// lib/authz/details decides who may see which part (the person and admins see
+/// it all; club roster holders see contact basics; emergency contacts open
+/// only on purpose, and every opening is logged).
+model PersonalDetails {
+  userId                String                 @id
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The Weber State W-number, e.g. W01234567.
+  studentId             String?
+  birthDate             DateTime?              @db.Date
+  gender                Gender?
+  phone                 String?
+  /// Optional personal email for club contact; their Weber email is User.email.
+  contactEmail          String?
+  yearInSchool          YearInSchool?
+  addressLine           String?
+  addressCity           String?
+  addressState          String?
+  addressZip            String?
+  emergencyName         String?
+  emergencyRelationship EmergencyRelationship?
+  emergencyPhone        String?
+  emergencyEmail        String?
+  /// The last time they confirmed everything is current (a PROFILE requirement asks yearly).
+  confirmedAt           DateTime?
+  updatedAt             DateTime               @updatedAt
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum YearInSchool {
+  FRESHMAN
+  SOPHOMORE
+  JUNIOR
+  SENIOR
+  GRADUATE
+  OTHER
+}
+
+enum EmergencyRelationship {
+  PARENT_GUARDIAN
+  SPOUSE_PARTNER
+  CHILD
+  SIBLING
+  RELATIVE
+  FRIEND
+  OTHER
+}
+
+/// WSUSA's club sub-categories.
+enum ClubCategory {
+  ACADEMIC
+  CULTURAL
+  FSL
+  HONOR_SOCIETY
+  SERVICE_ADVOCACY
+  STUDENT_LIFE
+  RELIGIOUS
 }

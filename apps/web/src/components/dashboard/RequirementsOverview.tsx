@@ -10,6 +10,7 @@ const KIND: Record<RequirementOverviewRow["kind"], { label: string; verb: string
   TEST: { label: "Test", verb: "passed" },
   FORM: { label: "Form", verb: "submitted" },
   TRAINING: { label: "Training", verb: "attended" },
+  PROFILE: { label: "Member details", verb: "confirmed" },
 };
 
 /**

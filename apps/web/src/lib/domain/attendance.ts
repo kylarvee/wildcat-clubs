@@ -33,8 +33,9 @@ import {
  * THE ATTENDANCE TOOL — the only way attendance enters the data lake.
  *
  *   QR scan         rotating token on the leader's screen → method QR
- *   Self check-in   code only (typed, or the app's "check in?" pop-up) → SELF,
- *                   allowed for members of the host/co-host clubs when the event allows it
+ *   Event code      the code alone (typed from the event's screen, or for online
+ *                   events the app's "check in?" pop-up) → SELF, for members of
+ *                   the host/co-host clubs. In-person codes are only shown at the event.
  *   Manual add      a leader with "attendance" (admins for university events) → MANUAL
  *
  * Checking in also: auto-enrolls students in the host club (open club →
@@ -220,7 +221,6 @@ export async function checkinPreview(actor: Actor | null, rawCode: string, token
   const decision = decideMethod({
     scanValid: scan === "LIVE",
     scanPresented: scan !== "NONE",
-    allowSelfCheckIn: occ.event.allowSelfCheckIn,
     isParticipatingMember: await isActiveMemberOfAny(actor.id, participatingClubIds(occ)),
   });
   return done(decision.ok ? null : blockMessage(decision.reason, rotate));
@@ -273,7 +273,6 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
   const decision = decideMethod({
     scanValid: token ? verifyScanProof(occ.checkinSecret, token, now.getTime(), rotate) : false,
     scanPresented: Boolean(token),
-    allowSelfCheckIn: occ.event.allowSelfCheckIn,
     isParticipatingMember: await isActiveMemberOfAny(actor.id, participatingClubIds(occ)),
   });
   if (!decision.ok) throw forbidden(blockMessage(decision.reason, rotate));
@@ -454,7 +453,8 @@ export async function liveOccurrencesForUserId(userId: string, opts: { clubId?: 
       attendances: { none: { userId } },
       event: {
         status: "SCHEDULED",
-        allowSelfCheckIn: true,
+        // The one-tap prompt hands over the code, so it's only for online events (rules.allowsTapCheckIn).
+        locationType: "VIRTUAL",
         OR: [{ clubId: { in: scope }, club: { status: "APPROVED" } }, { cohosts: { some: { clubId: { in: scope }, status: "APPROVED" } } }],
       },
     },
@@ -468,7 +468,8 @@ export async function liveOccurrencesForUserId(userId: string, opts: { clubId?: 
 /**
  * Check-ins the signed-in person could make right now: occurrences in their
  * check-in window, at clubs where they're an active member (host or approved
- * co-host), that allow self check-in, and that they haven't checked into.
+ * co-host), that are online (in person needs the QR code or the code shown
+ * there), and that they haven't checked into.
  * Drives the mobile "check in?" pop-up and the web prompt.
  */
 export async function liveOccurrencesForUser(actor: Actor | null, opts: { clubId?: string } = {}): Promise<LiveOccurrence[]> {

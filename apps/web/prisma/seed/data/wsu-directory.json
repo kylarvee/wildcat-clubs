@@ -1,0 +1,2958 @@
+{
+ "source": "weberorgs.dserec.com (public club list and roster sizes), October 2026",
+ "clubs": [
+  {
+   "dseId": 1,
+   "name": "ACC Construction Competition Awareness Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 2,
+   "name": "Actuary Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 3,
+   "name": "Adobe Club",
+   "description": "Built by Adobe Student Ambassadors, the purpose of the Adobe Club is to create a digital fluency space for Weber State University (WSU) community, including but not limited to faculty and students. The club will meet in various locations on WSU campus to provide awareness, information, assistance, and opportunities about Adobe, as WSU is an Adobe Creative Campus. By using the Club Advisor and Adobe Student Ambassadors, this club has resources of use of the Computer Labs and direct Adobe resources.",
+   "email": "adobeclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 5,
+   "name": "African and Caribbean Student Union (ACSU)",
+   "description": "The African Student Club provides learning opportunities for students to expand their knowledge about African culture beyond the classroom. Organize fun activities, especially for African students, that value diversity and unity. To provide a positive place for social interaction to improve the quality of campus life.",
+   "email": "asu@weber.edu",
+   "hasLogo": true,
+   "members": 8,
+   "officers": {
+    "other_officer": 2,
+    "president": 1,
+    "advisor": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 4,
+   "name": "African Drum Society",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 6,
+   "name": "AIBD Student Chapter (Building Design)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 305,
+   "name": "Air Force ROTC at Weber State",
+   "description": "The purpose of the Air Force ROTC is to develop Air and Space Force leaders of character whom we expect to fight and win our Nation’s wars. This club is committed to providing opportunities for leadership growth, building lasting personal and professional relationships, and conducting fundraising efforts to support AFROTC Detachment 850. Through these initiatives, we aim to strengthen and empower the WSU arm of Detachment 850, fostering resilient and capable cadets.",
+   "email": "airforcerotcclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 7,
+   "name": "Allegro!",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 306,
+   "name": "Alternative Student Alliance (ASA)",
+   "description": "The Alternative Student Alliance aims to bring together students of all types of alternative subcultures in order to allow them to express themselves in a space with like minded individuals through means such as art and music. For students who are interested in engaging with these subculture groups for the first time, we provide a safe and inclusive space for them to do so and learn more about them.",
+   "email": "altstudentalliance@weber.edu",
+   "hasLogo": true,
+   "members": 21,
+   "officers": {
+    "president": 1,
+    "other_officer": 2,
+    "vice_president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 8,
+   "name": "American Association of University Women (AAUW)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 9,
+   "name": "American Cancer Society",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 314,
+   "name": "American Conservation Coalition",
+   "description": "",
+   "email": null,
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "other_officer": 2,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 10,
+   "name": "American Democracy Project (ADP)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 12,
+   "name": "American Institute of Aeronautics and Astronautics",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 13,
+   "name": "American Institute of Graphic Arts (AIGA) WSU Chapter",
+   "description": "We are the AIGA (American Institute of Graphic Arts) Weber State Chapter. Being a part of the AIGA Weber State Chapter allows students to connect with fellow designers, get involved in engaging activities, and attend national AIGA competitions and events. If you are interested in learning more about the AIGA\nWeber State Chapter, please contact us at aigawsuchapter@gmail.com.",
+   "email": "aigawsuchapter@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 14,
+   "name": "American Red Cross Club",
+   "description": "Guided by the fundamental principles of the American Red Cross and its mission to prevent and alleviate human suffering in the face of emergencies by mobilizing the power of volunteers and the generosity of donors, the American Red Cross at WSU will learn, practice and exemplify humanitarian values through mission-related service projects.",
+   "email": null,
+   "hasLogo": true,
+   "members": 38,
+   "officers": {
+    "vice_president": 1,
+    "other_officer": 1,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 15,
+   "name": "American Sign Language Club (ASL Club)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 16,
+   "name": "American Society of Heating, Refrigerating and Air-Conditioning Engineers (ASHRAE)",
+   "description": "The objects of the Branch are exclusively scientific and educational and include, but are not limited to: (I) the advancement of the sciences of heating, refrigerating and air- conditioning engineering and related sciences; (II) the\ncontinuing education of the members and other interested persons in said sciences, through lectures, demonstrations and publications; (III) the rendition of career guidance to students of the sciences; and (IV) the encouragement of the\nscientific research.",
+   "email": "wsuashrae@gmail.com",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "president": 1,
+    "other_officer": 2,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 17,
+   "name": "American Society of Mechanical Engineers (ASME)",
+   "description": "The purposes of ASME it to promote the art, science and practice of mechanical and multidisciplinary engineering and allied sciences to diverse communities throughout the world, encourage original research, foster engineering education, advance the standards of engineering, promote the exchange of information among engineers and others, broaden the usefulness of the engineering profession in cooperation with other engineering and technical societies, and promote a high level of ethical practice.",
+   "email": "asme@weber.edu",
+   "hasLogo": true,
+   "members": 6,
+   "officers": {
+    "other_officer": 2,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 18,
+   "name": "American Society of Microbiology Student Chapter @ WSU / Microbiology Club",
+   "description": "The purpose of this club is to promote interest and involvement in the field of Microbiology by enhancing awareness of significant findings and current development in the field, initiating and furthering undergraduate research, and fostering a constructive and encouraging atmosphere for all active members of the club to grow and learn.",
+   "email": "microclub@weber.edu",
+   "hasLogo": true,
+   "members": 42,
+   "officers": {
+    "president": 1,
+    "vice_president": 1,
+    "other_officer": 3
+   }
+  },
+  {
+   "dseId": 19,
+   "name": "American Welding Society (AWS)",
+   "description": "Our mission is to advance the science, technology, and application of welding and allied joining and cutting processes worldwide, including brazing, soldering, and thermal spraying. What does that mean for our members? We provide professional certification, education, and advancement opportunities; access to a network and community of mentors and industry leaders; and the chance to be a part of developing the next generation of welders. Our mission and vision are who we are. The WELDING core values below unite us, allowing all of us to make a global impact. We strive to be the preeminent global resource that enables welding professionals and the industries they serve to protect and improve lives.",
+   "email": null,
+   "hasLogo": true,
+   "members": 4,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 21,
+   "name": "Animal Unanimity",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 22,
+   "name": "Anthropology Club",
+   "description": "The purposes of this club are:\n1. To promote anthropological interests and awareness;\n2. To enhance educational opportunities of the department and provide further enrichment outside the classroom;\n3. To publicly recognize student excellence in anthropology;\n4. To foster ties between the university and community, as well as other anthropological organizations and departments.",
+   "email": "anthropologyclub@weber.edu",
+   "hasLogo": true,
+   "members": 11,
+   "officers": {
+    "other_officer": 2,
+    "vice_president": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 23,
+   "name": "Anything for a Friend",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 315,
+   "name": "Applied AI Lab",
+   "description": "The mission of the Applied AI Lab is to give Weber State students hands-on\nexperience building and applying AI. The Club provides a collaborative,\nbeginner-friendly space where members learn modern AI tools, work\ntogether on real projects, and explore the practical and ethical use of AI\nacross academic and professional fields.",
+   "email": null,
+   "hasLogo": true,
+   "members": 12,
+   "officers": {
+    "advisor": 1,
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 25,
+   "name": "Army ROTC Club at Weber State",
+   "description": "The purpose of the Army ROTC Club is to have a space where ROTC members can come together outside of MILS classes and hang out. The club can also fundraise for new equipment or other things the club deems necessary to help them become better ROTC leaders/provide them with learning experiences.",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 26,
+   "name": "Art and Culture through Movement and Music (ACTMM)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 240,
+   "name": "Art Guild",
+   "description": "The Art Guild seeks to provide a welcoming and informal forum for the study of additional artistic media of interest across disciplines. The Art Guild serves intercollegiate participants, as well as offering a venue for Alumni to continue to feel welcome within our community as teachers, potential employers and friends. At times the Art Guild may also welcome instruction from outside the University to encourage diversity of opinions and options.  The Art guild also promotes community outreach through bi-annual sales, serendipitous events such as rebroadcasts of artistic lectures, and coordinating volunteer opportunities throughout the college and greater Ogden Community. We desire that a sense of unity and support will be cultivated within the club so that all members may be encouraged in their creative direction.",
+   "email": "weberartguild@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 27,
+   "name": "Asian Student Involvement Association (ASIA)",
+   "description": "The purpose of the Asian Student Involvement Association (ASIA) are as follows:\n1. Provide for the general welfare of all students attending Weber State University (WSU) through principles of self and shared governance.\na. Identity\nb. Providing a platform and safe space for all Asian students to express their\nopinions and interests to WSUSA pertaining to academic and extracurricular\nactivities on campus\n2. Engagement with Asian American community outside of campus\na. Education\nb. Connection/Networking\n3. Provide quality opportunities for academic and extracurricular experiences and promote student involvement in university clubs, organizations, events, and activities. (i.e. Asian Awareness week, Mid Autumn Moon Festival, area council meetings, etc.)\na. Promoting student involvement\nb. Identity/cultural celebrations",
+   "email": "asia@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 28,
+   "name": "Associated Actors and Technician",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 29,
+   "name": "Associated Artists of the Theatre (AAT)",
+   "description": "Associated Artists of the Theatre is a student driven organization which encourages the growth and collaboration of students within the Weber State University Theatre ‘Galaxy’. AAT produces and sponsors student original, experimental, as well as established, works. AAT strives to create both an educational and social environment that facilitates experimentation and practice of new theatre for students, while establishing a sense of professionalism within collaborative creative opportunities.",
+   "email": "aat@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 30,
+   "name": "Associated Builder and Contractors Club (ABC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 31,
+   "name": "Associated General Contractors of America Club (AGC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 33,
+   "name": "Association of Environmental & Engineering Geologists (AEG)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 34,
+   "name": "ASTRA",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 35,
+   "name": "Athletes Intervarsity",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 36,
+   "name": "Axis Bible Study",
+   "description": "The purpose of Axis is to see students grow in their relationship with the Lord Jesus Christ through two primary means:\n1. Systematic study of the Bible\n2. Personal mentoring and discipleship",
+   "email": null,
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 37,
+   "name": "Ballroom and Hip Hop Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 38,
+   "name": "Ballroom Dance Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 304,
+   "name": "Best Buddies Chapter at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 41,
+   "name": "Beta Alpha Psi",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 42,
+   "name": "Big Band Swing Club at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 43,
+   "name": "Big Brothers, Big Sisters Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 45,
+   "name": "BITS: Management Information Systems Students",
+   "description": "The purpose of BITS is for MIS majors, or other IS/IT interested individuals to a) build their social and professional network, b) learn and grow within the industry and c) recreate with like-minded peers.",
+   "email": "bits@weber.edu",
+   "hasLogo": true,
+   "members": 13,
+   "officers": {
+    "advisor": 1,
+    "vice_president": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 46,
+   "name": "Black Student Union (BSU)",
+   "description": "The purpose of this organization is to unite the Black Student population in an environment conducive to academic success, positive wellbeing, social belonging; while celebrating and bringing awareness to Black and African cultures and communities.",
+   "email": "bsu@weber.edu",
+   "hasLogo": true,
+   "members": 13,
+   "officers": {
+    "vice_president": 1,
+    "advisor": 1,
+    "other_officer": 2,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 47,
+   "name": "Board Game Club",
+   "description": "The Board Game Club focuses on meeting other individuals that share the same interests. We get together twice a week to have fun, de-stress, socialize, and experience new things. There will never be any membership fees, and anyone is able to come and go as they please.",
+   "email": "weberboardgameclub@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 48,
+   "name": "Botany Club",
+   "description": "We will strive to uplift each other and our community in all we do. We hope to be a resource to our majors and members in learning about Botany in fun and innovative ways together. We will foster an enthusiasm for the science and art of botany; provide opportunities to shape and expand our knowledge of plants, and to develop professional skills and networks. We seek to nurture an appreciation of plants and the environment in the Weber State University community, and the surrounding community through education and outreach.",
+   "email": "botanyclub@weber.edu",
+   "hasLogo": true,
+   "members": 25,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 50,
+   "name": "Bridge to Business",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 321,
+   "name": "Casual Gaming Club",
+   "description": "The purpose of CGC @ WSU is to foster an environment where students can find fellow students with one common interest: To play video games, board games,\nand/or table-top games. Unlike E-Sports, we focus on the non-competitive aspect of gaming. This allows us to focus on games that have little to no competitive scenes. For games that do have a competitive scene, we do not expect competitive level abilities from students. This allows us to focus on our love for games and their respective communities, at all skill levels.",
+   "email": null,
+   "hasLogo": false,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 51,
+   "name": "Cat Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 52,
+   "name": "Chemistry and Biochemistry Club",
+   "description": "The purpose of the Chemistry/Biochemistry Club is to:\n1.\tCreate an environment that supports and encourages students to pursue interests and passions in chemistry. \n2.\tProvide opportunities for growth and development in chemistry.",
+   "email": "chemistryclub@weber.edu",
+   "hasLogo": true,
+   "members": 22,
+   "officers": {
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 53,
+   "name": "Chess Club",
+   "description": "The mission of the Chess club is to promote the world of strategic battle through chess. To the beginner level to the advanced level. This club's goal is to challenge young to old students' minds through complex critical, logical, and analytical reasoning. The purpose behind the challenge is to not only refine your critical, logical, and analytical thinking, but to help one who struggles in school or other personal matters. An example of this is: One might join a chess club because they need mental confidence in the classroom, and attending a chess club can help with this.",
+   "email": "chessclub@weber.edu",
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 54,
+   "name": "Child & Family Studies Student Association (CFSSA)",
+   "description": "The purpose of the Child and Family Studies Student Association are as follows:\n1. Educate and provide practical application for students with an emphasis in Child and Family Studies.\n2. Prepare students to certify as Early Childhood and Family Life Educators, continue their education in graduate programs, and educate the campus and community with respect to family life, relations, and policies.\n3. Enhance community, state, and nationwide recognition of the Child and Family Studies Department and Weber State University.",
+   "email": "cfssa@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 56,
+   "name": "Chinese Student Association",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 57,
+   "name": "Christians United for Israel at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 58,
+   "name": "Citizens' Climate Lobby (CCL)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 310,
+   "name": "Clash Royale Club",
+   "description": "The Clash Royale Club exists to unite students and community members who share a passion for Clash Royale. The club provides a welcoming and competitive online environment that promotes skill development, teamwork, and participation in tournaments while fostering school pride and community engagement through online gaming.",
+   "email": null,
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 59,
+   "name": "College Democrats at Weber State",
+   "description": "Weber State Democrats believe that through various efforts—such as advocacy, helping students register to vote, and providing a safe space for marginalized communities to be heard—we can make Weber State, Weber County, the State of Utah, and the United States a more prosperous and progressive place that champions egalitarian causes.\nWe are committed to ensuring a clean environment, free from the harm inflicted on it for the profit of big business, and to defeating the existential threat of climate change, so that we have a habitable planet for ourselves and future generations. We also strive to create a campus where students feel safe, free from the fear of gun violence in the classroom.\nOur goal is to enact policies that foster peace at home and abroad and to confront price gouging and corporate greed so that workers and families can earn fair wages and live with dignity while achieving the American Dream. We believe in a woman’s fundamental right to make decisions about her own body without government interference, as well as in the freedom of the LGBTQIA+ community to live authentically and access the medical care they need. We also uphold the most essential right of all: the right to a thriving democracy where the power of self-governance reigns supreme.\nWe stand for the promise of America, as espoused by Thomas Jefferson in the Declaration of Independence, that everyone has the right to “life, liberty, and the pursuit of happiness.” Unfortunately, Republicans, especially here in Utah, have different priorities. They are determined to take us backward and are waging an all-out assault on our hard-won freedoms. \nThat is why this group must fight back, just as generations of Americans did before us. We must unite against tyrannical government actions and make it clear that they do not have our consent for their repugnant agenda. We are not going back!",
+   "email": "collegedemocrats@weber.edu",
+   "hasLogo": true,
+   "members": 8,
+   "officers": {
+    "other_officer": 1,
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 60,
+   "name": "College Republicans at Weber State",
+   "description": "The Purpose of WSCR is to be the voice of the party on the WSU campus, to educate the community of Republican values through regular events and socials, and to be a fellowship for conservative students on campus. CRWS creates an educational environment for WSU students and allows ideas and viewpoints to be shared and discussed. The club does not discriminate on the grounds of race, color, sex, religion, marital status, national origin, age, or disability. CRWS consists of leadership roles designed to activate its members in the political process and engage the community, as well as local political entities, through volunteer and networking opportunities.",
+   "email": "collegerepublicans@weber.edu",
+   "hasLogo": true,
+   "members": 4,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 61,
+   "name": "Colleges Against Cancer",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 62,
+   "name": "Comedy Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 63,
+   "name": "Construction Management Club (CMT)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 64,
+   "name": "Cooking Club at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 65,
+   "name": "Cornhole Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 66,
+   "name": "Country Dancing Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 302,
+   "name": "Crime Scene Investigation (CSI) Club",
+   "description": "The purpose of CSI Club is to:\ni. provide education on forensic science topics, including criminal law, policing, and the criminal justice system; and\nii. participate and host community outreach, practical application, educational, and entertainment events and activities that bring awareness of forensic science, WSU forensic science programs and assist the community.",
+   "email": "csiclub@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 67,
+   "name": "Cyber Security Club (CSC)",
+   "description": "The purpose of the Cyber Security Club is to:\n•Foster interest and education in cybersecurity among Weber State University students.\n•Provide members with opportunities to develop hands-on skills in cybersecurity practices.\n•Encourage networking and collaboration among students and industry professionals.\n•Promote ethical cybersecurity practices and awareness on campus and in the community.\n•Participate in cybersecurity competitions and events to enhance practical learning.",
+   "email": "csc@weber.edu",
+   "hasLogo": true,
+   "members": 38,
+   "officers": {
+    "vice_president": 1,
+    "advisor": 2,
+    "president": 1,
+    "other_officer": 1
+   }
+  },
+  {
+   "dseId": 68,
+   "name": "Data Analytics Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 69,
+   "name": "Delta Chi Nu",
+   "description": "The purpose of Delta Chi Nu is to promote harmony, which is the cooperation and togetherness of the sisters; to provide wisdom, which is the sharing of our diversity and education; and to encourage truth, which relates to our high standards and honesty. The purpose shall also include acceptance of all others and the establishment of friendships within and without of the sorority.\n\n*PLEDGE PROCESS REQUIRED TO JOIN*",
+   "email": "deltachinu@weber.edu",
+   "hasLogo": true,
+   "members": 10,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 70,
+   "name": "Disabilities Club",
+   "description": "The three pillars of our mission are:\nCommunity\noWe will provide a safe space and community for those with mental and/or physical disabilities of all kinds and durations.\nEducation\noWe aim to educate as many people as possible about disabilities, accessibility, and accommodation.\nAdvocacy\noWe will advocate for accessibility and accommodation on campus and in other spaces in the community.",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 72,
+   "name": "Educators Rising",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 73,
+   "name": "Electroneurodiagnostics (END) Club",
+   "description": "The purpose of this club is to inform, mentor, and provide resources to ensure the success of future Electroneurodiagnosticians.",
+   "email": "end@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 74,
+   "name": "Engineering Honor Society / Tau Beta Pi",
+   "description": "The purpose of this society is to mark in a fitting manner those who have conferred honor upon Weber State University by distinguished scholarship and exemplary character as students in engineering, or by their attainments as alumni in the field of engineering.",
+   "email": "taubetapi@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "other_officer": 1,
+    "advisor": 1,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 75,
+   "name": "Environmental Ambassadors",
+   "description": "WSU Environmental Ambassadors aim to build a campus culture where sustainability is integrated into every aspect of daily life, where recycling and energy efficiency are second-nature, and where living a green lifestyle is a central aspect of what it means to be a part of the WSU community. As an organization our purpose is to train a core group of students as environmental educators and activists, to increase overall student awareness of environmental actions and ways to effect individual change on campus, to create community partnerships and preserve the natural landscapes surrounding WSU, and finally to institutionalize environmental stewardship within the student body and beyond. Environmental Ambassadors are also responsible for educating the WSU community about the University’s goal to become carbon neutral by 2050 and expand upon the projects and investments WSU has made towards sustainability thus far.\nEnvironmental: Promote a healthy environment through green initiatives.\n•\tDirect and indirect influences \nSocial: Focus on fostering a campus culture of sustainability that is inclusive and environmentally conscious.\n•\tCommunity engagement, collaboration, and promotion of environmental justice.\nEconomic: Efficient allocation of funds and resources that support the wellbeing of the environment and campus community. \n•\tRecognizing our own financial impacts.\n•\tBeing fiscally responsible, reducing waste.\n•\tPurchase from local or sustainable sources (fair trade, etc.).",
+   "email": "eaclub@weber.edu",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "vice_president": 1,
+    "other_officer": 1,
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 77,
+   "name": "Envision Pre-Optometry Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 308,
+   "name": "European Student Club",
+   "description": "The European Student Club (ESC) is dedicated to fostering cultural exchange, academic collaboration, and social networking opportunities for students with an interest in European culture, languages, history, and geography.",
+   "email": "europeanclub@weber.edu",
+   "hasLogo": true,
+   "members": 4,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 78,
+   "name": "Exercise & Nutrition Sciences Club (ENS Club)",
+   "description": "The principal purpose of this club is to support and educate individuals in both the student body, and the broader community, in the fields of Nutrition and Exercise Science. This goal will be achieved through:\n•Educational opportunities, including presentations by the following:\n  -Student members of the ENS club\n  -Faculty and Staff in the Exercise and Nutrition Sciences department\n  -Guest speakers, from both Weber State and the community\n•Activities geared towards campus and community involvement\n•Service projects, focused on education and outreach\n•Promotional events and outreach, including partnering with other clubs and\norganizations on campus and in the community\n•Research in the fields of Nutrition, Exercise Science, and other health and\nwellness fields",
+   "email": "ensclub@weber.edu",
+   "hasLogo": true,
+   "members": 13,
+   "officers": {
+    "other_officer": 3,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 79,
+   "name": "Facilities Management (FM) Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 80,
+   "name": "FANBOYS",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 81,
+   "name": "Fellowship of Christian Athletes (FCA)",
+   "description": "Because “Fellowship of Christian Athletes” is a national entity, this student organization will seek to faithfully adhere to the mission (purpose) and vision of FCA nationally. The mission of FCA nationally is “To lead every coach and athlete into a growing relationship with Jesus Christ and His church.” As a Christian group on campus, the purpose of FCA includes a common calling shared by other Christian students and groups on campus to proclaim, bear witness to, and live the Christian faith, helping others to know and follow Jesus as their personal Lord and Savior.",
+   "email": null,
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 82,
+   "name": "Feminists United Network (FUN)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 84,
+   "name": "Fight the New Drug at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 85,
+   "name": "Filipino Club",
+   "description": "The Filipino Chapter aims to provide a sense of purpose and belonging to all those who will become a part of our pamilya (family), by cultivating within them the seeds of core Filipino values such as service, hard work, and a cheerful disposition and then nurturing them with meaningful events and activities that will help contribute to their further development as a leader not just within themselves, but within their communities as well.",
+   "email": "filipinoclub@weber.edu",
+   "hasLogo": true,
+   "members": 6,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 87,
+   "name": "Financial Foundations",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 88,
+   "name": "First Generation Club at WSU",
+   "description": "The purpose of the First Generation Club:\n -Facilitate the transition to college for first-generation students through initiatives such as programs and events that stimulate involvement at Weber State University and in the Ogden community.\n-Provide a community of support and building a community between first-generation college students.\n-Being a support group and resource for first-generation students to help them understand and utilize their academic and community resources.",
+   "email": "firstgenclub@weber.edu",
+   "hasLogo": true,
+   "members": 16,
+   "officers": {
+    "advisor": 1,
+    "other_officer": 3,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 89,
+   "name": "First Nations Society",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 90,
+   "name": "Food Recovery Network (FRN)",
+   "description": "Food Recovery Network, Inc. (FRN or FRN National) unites students at colleges and universities to fight food waste and hunger by recovering surplus perishable food that would otherwise go to waste and donating it to people in need.",
+   "email": "foodrecoverynetwork@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 91,
+   "name": "Foreign Language and International Student Partnership (FLISP)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 92,
+   "name": "Freedom Riders",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 93,
+   "name": "French Club",
+   "description": "WSU French Club is an educational and cultural organization with the purpose of promoting the French language and French and Francophone cultures at the university and in the community at large. We host several social/culture meetings each semester as well as small-group learning activities each semester. We invite students, staff and faculty from the university to contribute to the International presence on campus by sharing their knowledge and appreciation of francophone cultures. We also welcome the students from participating concurrent enrollment schools to our social/cultural meetings with the purpose of preparing them and encouraging them to attend Weber State after high school graduation.",
+   "email": "frenchclub@weber.edu",
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 94,
+   "name": "Freshman/Sophomore Business Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 317,
+   "name": "Friends and Flowers at Weber State",
+   "description": "The mission of Friends and Flowers is to make a meaningful difference in the lives of our communities by helping individuals see the impact they can have on others through kindness. The Chapter fulfills this mission by designing meaningful experiences, service opportunities, and community activities that inspire individuals to turn outward, strengthen relationships, and make a lasting difference in the lives of those around them — Groups that might receive service include, but are not limited to, widows, seniors, the chronically ill, students,\nand teachers. Each activity should be focused on connection, kindness, and wholesome fun.",
+   "email": null,
+   "hasLogo": true,
+   "members": 3,
+   "officers": {
+    "other_officer": 2,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 95,
+   "name": "FUEL Campus Ministries",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 96,
+   "name": "Fusion Winter Guard",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 97,
+   "name": "Future Healthcare Leaders Association (Future Health Leaders Association - FHLA)",
+   "description": "The purpose of FHLA is to provide programs and venues where students at\nWSU may network and affiliate with WSU alumni and those employed in\nhealthcare administration or other healthcare leadership positions. The FHLA is\nalso organized to sponsor activities that will generate funding to assist member\nof FHLA to participate in career-enhancing programs, such asas a guest lecture\nseries or professional association meetings, both at state and national levels.\nExamples of professional associations include, but are not limited to, the\nAmerican College of Healthcare Executives, the Medical Group Management\nAssociation, the American Healthcare Association, the Healthcare Financial\nManagement Association, the Utah Hospital Association, and any local\nsubsidiary of such association, such as Utah Healthcare Executives.",
+   "email": "fhlaclub@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 99,
+   "name": "Garden Club",
+   "description": "The Weber State University (WSU) Community Garden is a student-managed and operated garden that is focused on providing fresh, organic fruit and vegetables to students and the local community. The local, sustainably sourced, organic food grown in the garden is primarily donated to the Weber Cares Food Pantry, as well as to the local community (e.g., Lantern House). The garden events aim to offer education on home gardening, composting, general advice for plant care, permaculture, and gain a sense of community. Volunteers can gain practical experience working in a horticultural setting (getting first pick of produce), generate positive impacts in the community by working with local collaborators, and gain awareness of local food waste and sustainability efforts at WSU and around Ogden.",
+   "email": "gardenclub@weber.edu",
+   "hasLogo": true,
+   "members": 16,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 101,
+   "name": "GEAR UP Alumni Chapter",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 102,
+   "name": "Gen UN",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 103,
+   "name": "Gender and Sexuality Alliance (GSA)",
+   "description": "The Gender and Sexuality Alliance is dedicated to promoting and advancing causes related to the LGBTQIAP+ community. Through service, advocacy, activism, education, and outreach for students who wish to understand and learn more about the LGBTQIAP+ community we seek to create a safe and empowering space for students of all identities to come together, socialize, grow, and support each other at Weber State University.",
+   "email": "gsaclub@weber.edu",
+   "hasLogo": true,
+   "members": 23,
+   "officers": {
+    "president": 1,
+    "advisor": 1,
+    "other_officer": 1
+   }
+  },
+  {
+   "dseId": 104,
+   "name": "Geography Club / GTU / Geography Environment and Sustainability Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 105,
+   "name": "Geology/Geosciences Club",
+   "description": "The purpose of the Geology/Geosciences Club is to foster an enthusiasm for the geosciences; provide opportunities to shape and expand our knowledge of the Earth and all things related, including rocks, minerals, fossils, landscapes, and to develop professional skills and networks. We seek to nurture an appreciation of our amazing planet and the environment in the Weber State University community, and the surrounding community through education and outreach.",
+   "email": "geologyclub@weber.edu",
+   "hasLogo": true,
+   "members": 14,
+   "officers": {
+    "president": 1,
+    "other_officer": 2
+   }
+  },
+  {
+   "dseId": 106,
+   "name": "Golden Key Honour Society WSU Chapter",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 107,
+   "name": "Graduate Athletic Training Student Organization (GATSO)",
+   "description": "The primary purpose of the Graduate Athletic Training Student Organization is to stimulate educational ideals in the field of athletic training to provide recognition for Weber State University (WSU) Masters’ Athletic Training Program at regional and national levels. We shall 1) endorse service to the University/local community, 2) host social events with current students and faculty, 3) promote members equal opportunities to continue education and professional networking, 4) enhance strong teamwork achieving the same goals, 5) advance educational ideals, 6) strive to advance the interests in field of athletic training, and 7) encourage growth and prosperity of the athletic training by recruiting future athletic training students.",
+   "email": "gatso@weber.edu",
+   "hasLogo": true,
+   "members": 15,
+   "officers": {
+    "president": 1,
+    "other_officer": 2,
+    "advisor": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 108,
+   "name": "Hammock Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 109,
+   "name": "Health Promotion and Wellness Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 300,
+   "name": "Health Scholar Club",
+   "description": "Purpose of the HSC is to expose the Health Scholars to events and opportunities\non campus to improve their recruiting ability. Health Scholars recruit for the Dumke College of Health Professions by performing dissections at high schools. Participation in clubs and organizations would enhance their ability to share the fun opportunities on campus that Weber State has to offer.",
+   "email": "healthscholarsclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 110,
+   "name": "Health Sciences Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 111,
+   "name": "Hiking and Outdoors Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 112,
+   "name": "Hispanic Area Council (HAC)",
+   "description": "To create a sense of awareness of all Hispanic and Latino cultures, help retain the Hispanic and Latino population in a university setting, provide opportunities for community service and involvement, and establish the success of the Council as a whole through the development of individual excellence.",
+   "email": "hac@weber.edu",
+   "hasLogo": true,
+   "members": 9,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 113,
+   "name": "History Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 114,
+   "name": "Honors Student Advisory Board",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 115,
+   "name": "Hope Alliance",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 318,
+   "name": "Hope Squad at Weber State",
+   "description": "The mission of Hope Squad at Weber State University is to foster human connection, belonging, community, and hope; promote mental wellbeing; reduce stigma surrounding mental health and help-seeking; and support suicide-prevention education throughout the Weber State University\ncommunity.",
+   "email": null,
+   "hasLogo": true,
+   "members": 8,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 116,
+   "name": "HOSA - Future Health Professionals",
+   "description": "The purpose of the Weber State University HOSA: Future Health Professionals\nChapter is to provide more opportunities for Weber State students on the State, National, and international level that local organizations can’t offer. We hope to provide students a head start on their career by gaining leadership, networking, service, and many more opportunities through our chapter events and state and international competitions. We will reflect the purpose and mission of HOSA: Future Health Professionals as shown on hosa.org.",
+   "email": "hosaweberstate@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 20,
+   "name": "Human Rights Club",
+   "description": "Our purpose within the Human Rights Club is to engage and uplift all groups through diversified methods in our community. We strive to maintain an inclusive atmosphere in order to make change in current political turmoil. The club provides a platform for students to engage in activism, campaigns, and educational events aimed at addressing injustices, promoting social\njustice, and supporting this club's mission to ensure that every person enjoys the rights enshrined in the Universal Declaration of Human Rights. By addressing a multitude of various human rights concerns, we plan to make positive change in future societal events.",
+   "email": "humanrightsclub@weber.edu",
+   "hasLogo": true,
+   "members": 26,
+   "officers": {
+    "other_officer": 3,
+    "president": 1,
+    "vice_president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 117,
+   "name": "IGNITE National Weber State University Chapter",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 118,
+   "name": "Incredibly Strange Movie Night (ISMN)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 119,
+   "name": "Independent Color Guard at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 120,
+   "name": "Indivisible at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 121,
+   "name": "Indoor Drumline at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 122,
+   "name": "Innovators Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 123,
+   "name": "Institute of Electrical and Electronics Engineers (IEEE)",
+   "description": "The purpose of IEE is to foster technological innovation, excellence, and learning for the benefit of all people, especially students who major in Electrical, Computer, and similar engineering fields.",
+   "email": "ieeeclub@weber.edu",
+   "hasLogo": true,
+   "members": 12,
+   "officers": {
+    "president": 1,
+    "vice_president": 3,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 289,
+   "name": "Interior Design Chapter",
+   "description": "The Interior Design Student Chapter promotes the profession of interior design, professional practice and examination through activities, events, lectures, and community engagement. Student leaders and members uphold the highest ethical standards and professional behavior to promote practice and licensure of interior design.",
+   "email": "interiordesignclub@weber.edu",
+   "hasLogo": true,
+   "members": 2,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 124,
+   "name": "International Students Committee (ISC)",
+   "description": "The International Student Club provides learning opportunities for students to expand their knowledge beyond the classroom. Organize fun activities, especially for international students, that value accessibility and unity. To provide a positive place for social interaction to improve the quality of campus life.",
+   "email": null,
+   "hasLogo": true,
+   "members": 10,
+   "officers": {
+    "advisor": 1,
+    "president": 1,
+    "other_officer": 2,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 125,
+   "name": "Intervarsity Christian Fellowship",
+   "description": "In response to God's love, grace and truth: The Purpose of the Chapter is to establish and advance at Weber State University, witnessing communities of students and faculty who follow Jesus as Savior and Lord: growing in love for God, God's Word, God's people of every ethnicity and culture and God's purposes in the world.",
+   "email": "intervarsity@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 126,
+   "name": "Japan Club",
+   "description": "The purpose of the Japan Club is to give students an opportunity to learn about Japanese culture and language by working with various groups and organizations such as the Foreign Language Department, Study Abroad Office, Juntendo University, etc., and providing a friendly and educational environment where members can interact with other members who share a common interest.",
+   "email": "japanclub@weber.edu",
+   "hasLogo": true,
+   "members": 17,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 127,
+   "name": "Japanese Cultural Association",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 128,
+   "name": "Kappa Omega Eta",
+   "description": "It is the purpose of the Kappa Omega Eta Sorority to provide young women with the opportunity to strive academically, personally, and within the sisterhood. They will be given the opportunity to strengthen their greatest attributes. As a sisterhood of balanced, well-rounded women, Kappa Omega Eta will encourage each other to grow individually in order to contribute to the Sorority as a whole. Giving back to the community, Kappa Omega Eta will encompass philanthropic activities into their daily lives.\n\n*PLEDGE PROCESS REQUIRED TO JOIN*",
+   "email": "kappaomegaeta@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 129,
+   "name": "Korean Club",
+   "description": "The purpose of the Korean Club is to have a place and group to learn and appreciate the Korean language, culture and food.",
+   "email": "koreanclub@weber.edu",
+   "hasLogo": true,
+   "members": 10,
+   "officers": {
+    "vice_president": 1,
+    "advisor": 1,
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 130,
+   "name": "KWCR Wildcat Radio",
+   "description": "KWCR is a student-run radio station that offers experiential learning in the day-to-day operations of a professional studio. The organization includes majors across the campus, allowing students to hone their skills in public speaking, research, marketing, sales, promotion and business management.",
+   "email": "kwcr@weber.edu",
+   "hasLogo": true,
+   "members": 3,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 131,
+   "name": "Latinos in Action (LIA) Club",
+   "description": "LIA shall exist for the following purposes:\nA. Strengthen personal assets of its members through cultural affirmation and\nincreasing networks and access\nB. Recruit Latino students to (college name), retain students, and provide career\nguidance/support through corporate and community partnerships\nC. Provide service and mentorship in our communities\nD. Build Latino leadership at various levels\nE. Support new students in their transition to college life",
+   "email": "latinosinactionclub@weber.edu",
+   "hasLogo": true,
+   "members": 8,
+   "officers": {
+    "advisor": 1,
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 132,
+   "name": "Latter-day Saint Student Association (LDSSA)",
+   "description": "The purpose of LDSSA is to encourage and support members of the LDSSA in achieving their academic goals and maintaining a balanced life while on campus. To encourage members of the LDSSA to become an influence for good by participating in activities and service on campus and in the community. To provide students with meaningful service opportunities and social and religious activities that are consistent with the LDSSA standards. To promote traditional moral values. The LDSSA is affiliated with The Church of Jesus Christ of Latter-day Saints and Weber State University.",
+   "email": "ldssa@weber.edu",
+   "hasLogo": true,
+   "members": 92,
+   "officers": {
+    "other_officer": 6,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 133,
+   "name": "Leukemia & Lymphoma Society (LLS on Campus)",
+   "description": "The purpose of The Leukemia & Lymphoma Society (LLS)@WSU shall be:\nA. To provide a means for students at Weber State University to meet and fulfill the mission of LLS. a. The official mission of our national affiliate, The Leukemia & Lymphoma Society (LLS) is “to cure leukemia, lymphoma, Hodgkin’s disease and myeloma, and improve the quality of life of patients and their families.”\nB. To provide a forum for discussion, education, awareness, funding, and support of our shared interest in making an impact in the fight against blood cancer.\nC. To provide a place to participate in various interactions such as; service, advocacy efforts, education, fundraising and facilitate events tailored to our organizational interests.",
+   "email": "llsweberstateut@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 134,
+   "name": "Lions Club at Weber State",
+   "description": "The purposes of this district shall be:\n(a) To provide an administrative structure with which to advance the Purposes of Lions Clubs International in this district.\n(b) To create and foster a spirit of understanding among the peoples of the world.\n(c) To promote the principles of good government and good citizenship.\n(d) To take an active interest in the civic, cultural, social and moral welfare of the community.\n(e) To unite the members in the bonds of friendship, good fellowship and mutual\nunderstanding.\n(f) To provide a forum for the open discussion of all matters of public interest; provided,\nhowever, that partisan politics and sectarian religion shall not be debated by club\nmembers.\n(g) To encourage service-minded people to serve their community without personal financial reward, and to encourage efficiency and promote high ethical standards in commerce, industry, professions, public works and private endeavors.",
+   "email": null,
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 135,
+   "name": "Magic Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 136,
+   "name": "Mariachi Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 137,
+   "name": "Marketing Association at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 138,
+   "name": "Marksmanship Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 141,
+   "name": "Math Factor Club",
+   "description": "The purposes and mission of the Math Factor are as follows:\nA. Bring together people with a love for mathematics and subjects that utilize mathematics.\nB Encourage student collaboration and participation.\nC. Increase communication via meeting, fliers, posters, and classroom announcements.\nD. Provide exposure to further education and career opportunities.\nE. Organize presentations on math related topics.\nF. Provide Mathematical Challenges for students seeking math related degrees.",
+   "email": "mathfactor@weber.edu",
+   "hasLogo": true,
+   "members": 34,
+   "officers": {
+    "advisor": 1,
+    "other_officer": 1,
+    "vice_president": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 142,
+   "name": "Medical Laboratory Sciences (MLS) Club at WSU",
+   "description": "The mission of the Medical Laboratory Sciences (MLS) Club is to promote the Medical Laboratory Technician and Medical Laboratory Scientist professions through campus outreach and professional networking with similar clubs across the state. To provide members with opportunities for involvement in professional societies and continuing education. Club members will organize, promote, and participate in community and service activities. The Weber State University MLS Club will provide mentoring for prospective and enrolled students to provide academic and career planning in order to reach success in the AAS and BS programs, as well as in the workplace.",
+   "email": "mls@weber.edu",
+   "hasLogo": true,
+   "members": 34,
+   "officers": {
+    "advisor": 1,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 143,
+   "name": "Medieval History Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 144,
+   "name": "Men of Color (MOC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 145,
+   "name": "Metaphor Undergraduate Literary Journal",
+   "description": "The mission of Metaphor Undergraduate Literary Journal at Weber State is to publish and celebrate the myriad creative voices within the undergraduate student body. Additionally, we aim to grow and encourage the current and next generation of artists and writers in the larger Ogden community. The 2024-2025 print publication marks our 44th volume, and the incoming editorial staff (comprised entirely of undergraduate students) strives to put their own unique stamp upon a long tradition of celebrating poetry, prose, and the literary value of art in its many forms.",
+   "email": "metaphor@weber.edu",
+   "hasLogo": true,
+   "members": 13,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 146,
+   "name": "Microbiology Book Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 228,
+   "name": "Military-Affiliated Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 147,
+   "name": "Model United Nations Organization",
+   "description": "The purpose of the MUN Club shall be to promote awareness and understanding of international affairs, diplomacy, and the United Nations system among students through participation in Model United Nations conferences, simulations, and related activities.",
+   "email": null,
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 149,
+   "name": "More Accessibility in Science Club (MAS)",
+   "description": "The purpose of MAS is to encourage science engagement and outreach to high school students. We strive to build meaningful relationships with our community and Weber State Students. We want to emphasize that students belong in college and make positive outcomes.",
+   "email": "mas@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 148,
+   "name": "Movimiento Estudantil Chicanx de Aztlan (MEChA)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 150,
+   "name": "Music Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 303,
+   "name": "Music Student Advisory Council (MSAC)",
+   "description": "The Music Student Advisory Council (MSAC) consists of representatives from within the current music student body. We work to amplify the voice of and empower the music students through collaboration with professors and administrators to ensure the quality of education and influence positive change within the program. The MSAC strives to increase self-confidence, creativity,\ncommunication, create equal opportunities, and foster a culture of an interdepartmental community.",
+   "email": "msac@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 151,
+   "name": "Music Teachers National Association (MTNA) / Treblemakers",
+   "description": "The purpose of MTNA is to:\nA. Develop in prospective members an understanding of the organization\nB. Provide for the members a voice in matters affecting them.\nC. Improve members current and/or future teaching abilities.\nD. Become involved with the community by providing an annual Piano Festival",
+   "email": "mtna@weber.edu",
+   "hasLogo": true,
+   "members": 4,
+   "officers": {
+    "advisor": 1,
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 313,
+   "name": "Muslim Student Association (MSA)",
+   "description": "The Muslim Association Club (MSA) is a Muslim-centered organization dedicated to creating awareness and understanding about Islam on campus. While the club is rooted in Islamic values and serves the Muslim student community, it is open to everyone regardless of religion, background, or beliefs. The MSA welcomes and encourages students of all faiths and perspectives to attend meetings, participate in events, and engage in dialogue.\nThe purpose of the organization is to:\n1.\tCreate awareness and education about Islam.\n2.\tBuild a supportive Muslim community on campus.\n3.\tEncourage interfaith dialogue and collaboration.\n4.\tFoster spiritual, academic, and social growth among members.",
+   "email": null,
+   "hasLogo": true,
+   "members": 3,
+   "officers": {
+    "other_officer": 2,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 152,
+   "name": "NAACP Student Chapter at Weber State",
+   "description": "The purpose of the NAACP WSU Student Chapter shall be to:\n1.\tAdvocate for the civil rights and social justice of all people, with an emphasis on marginalized communities.\n2.\tPromote political, educational, social, and economic equality.\n3.\tAdvocate and act against racial prejudice and ensure equal rights for all individuals.\n4.\tEngage students, faculty, and staff in activism and advocacy through education, events, and community outreach.",
+   "email": "wsunaacpinfo@gmail.com",
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 153,
+   "name": "National Association of Hispanic Journalists",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 154,
+   "name": "National Science Teachers Association, Student Chapter at Weber State University",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 155,
+   "name": "National Society of Collegiate Scholars at WSU (NSCS)",
+   "description": "The purpose of this organization shall be as follows:\nA. To recognize and celebrate high achievement among first and second year students in all academic disciplines. \nB. To encourage and promote high standards throughout the collegiate experience.\nC. To provide opportunities for personal growth and leadership development for members.\nD. To provide scholarships, such as the Merit Award, Scholar Abroad, Scholar at Sea, and Graduate to member(s) who successfully apply and compete for these awards.\nE. To organize and encourage learning opportunities through community service.\nF. To foster an overall appreciation for the value of the higher education experience.\nG. To continue to uphold the standards determined by the Association of College Honor Societies as part of the organization’s membership.",
+   "email": "nscs@weber.edu",
+   "hasLogo": true,
+   "members": 3,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 156,
+   "name": "National Student Nurses Association (NSNA) Ogden Campus",
+   "description": "The mission of NSNA is to organize, represent, and mentor students preparing for initial licensure as registered nurses. NSNA conveys the standards and ethics of the nursing profession, promotes development of nursing skills, and prepares students to be responsible members and leaders in the nursing profession. NSNA is an advocate of high-quality health care, community service, and advances in nursing education.",
+   "email": "nsna@weber.edu",
+   "hasLogo": true,
+   "members": 22,
+   "officers": {
+    "advisor": 2,
+    "vice_president": 1,
+    "other_officer": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 157,
+   "name": "Native American Student Association (NASA)",
+   "description": "The purposes of the Native American Student Association are as follows:\n-Plan and implement programs to improve the quality of the University, the educational experience of all students in general, and American Indian/Native American students in particular. Plan and implement NASA or Native American activities and programming; as NASA or in partnership with other campus and off campus entities (Indigenous Voice Radio Show, Native Heritage Month, NASA Pow-Wow, Native Symposium).\n-Provide a cultural resource regarding American Indians/Native Americans for the University and the community.\n-Provide a mechanism to facilitate solutions to American Indian/Native American student issues and challenges and to be open to ideas and suggestions.\n-Work with high school relations, university organizations and clubs, and other recruiting entities on campus in the recruitment of new American Indian/Native American students.",
+   "email": "nativewildcats@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 158,
+   "name": "Nepalese Student Association (NSA)",
+   "description": "The NSA serves as a unifying body for Nepalese students at Weber State University, highlighting and promoting the rich cultural, academic, and social heritage of Nepal.",
+   "email": "nepaleseclub@weber.edu",
+   "hasLogo": true,
+   "members": 2,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 159,
+   "name": "Nontraditional Student Association at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 160,
+   "name": "Nu Rho Psi / Neuroscience Club",
+   "description": "Nu Rho Psi aims to bring students with a shared interest in the field of neuroscience together to participate in research, community outreach and extracurricular activities. We seek to educate and attract potential college students within local schools through community outreach and service events. We provide opportunities for undergraduate students to build academic resumes in preparation for graduate school education. We promote academic discourse between students, faculty and professionals in neuroscience and related fields.",
+   "email": "wsuneuro@weber.edu",
+   "hasLogo": true,
+   "members": 22,
+   "officers": {
+    "other_officer": 3,
+    "advisor": 2,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 161,
+   "name": "Nurture the Creative Mind",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 162,
+   "name": "Ogden Utah Young Single Adult Stake",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 163,
+   "name": "Omicron Delta Kappa",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 311,
+   "name": "Paleontology Club",
+   "description": "The purpose of the Paleontology Club at Weber State University is to help students prepare for a future career in paleontological science or a related field and to educate and raise awareness among students at Weber State about the rich paleontological history of Utah and the world.",
+   "email": "paleontologyclub@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 166,
+   "name": "Phi Beta Lambda",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 167,
+   "name": "Phi Gamma Lambda",
+   "description": "Phi Gamma Lambda is a social fraternity on Weber State University's campus.\n\n*PLEDGE PROCESS REQUIRED TO JOIN*",
+   "email": "phigammalambda@weber.edu",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "other_officer": 2,
+    "president": 1,
+    "vice_president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 168,
+   "name": "Philosophy Club",
+   "description": "The Philosophy Club’s  mission is to create a safe and pluralistic space for philosophical learning, discussion, and mutual enjoyment for any and all who are interested; to foster open-minded attitudes for furthering personal and collective perspectives through upholding a considerate environment to engage in discourse that challenges old and creates new ideas, enacted in reciprocity, good faith, and mutual respect.",
+   "email": "philosophyclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 169,
+   "name": "Photographic Society",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 170,
+   "name": "Physical Education (PE) & Sport Coaching Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 171,
+   "name": "Physician Assistants (PA) Student Society",
+   "description": "The mission of the Student Society shall be to support the development of resilient, patient-centered providers who excel in delivering comprehensive, individualized care. We are committed to enhancing the health of our communities and advocating for our profession at both state and national levels, all while upholding our program's core values and remembering the P.U.R.P.O.S.E.\n\n*APPROVAL TO JOIN NEEDED FROM ORG PRESIDENT*",
+   "email": "wsupaadmissions@weber.edu",
+   "hasLogo": true,
+   "members": 6,
+   "officers": {
+    "advisor": 1,
+    "president": 1,
+    "other_officer": 1
+   }
+  },
+  {
+   "dseId": 173,
+   "name": "Pi Phi Alpha",
+   "description": "We, the sisters of Pi Phi Alpha, are joined together in order to create powerful women to better ourselves, our sisterhood, and our community. We strive to be altruistic, ambitious, and uphold integrity within all aspects of our lives. Through service, we aim to educate and promote awareness of the causes we support to create well-rounded and open-minded women.\n\n*PLEDGE PROCESS REQUIRED TO JOIN*",
+   "email": "piphialpha@weber.edu",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "president": 1,
+    "other_officer": 3,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 174,
+   "name": "Pi Sigma Alpha",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 307,
+   "name": "Pokémon League Headquarters: Weber State Region",
+   "description": "The purpose of the Pokémon League Headquarters: Weber State Region, is to create a fun, welcoming environment for people to engage in Pokémon related hobbies and to have a positive impact on Weber State University and the wider community.",
+   "email": "pokemon@weber.edu",
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 176,
+   "name": "Portuguese Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 177,
+   "name": "Pre-Dental Club",
+   "description": "The purpose of the Pre-Dental Club is to support, organize, and advise Pre-Dental students by giving opportunities for leadership, chances to meet with practicing dentists, and group interaction with other Pre-Dental students in a variety of planned settings.",
+   "email": "predentalclub@weber.edu",
+   "hasLogo": true,
+   "members": 21,
+   "officers": {
+    "president": 1,
+    "other_officer": 1,
+    "vice_president": 2
+   }
+  },
+  {
+   "dseId": 178,
+   "name": "Pre-Healthcare Club",
+   "description": "The primary purposes of the Pre-Healthcare club is to stimulate educational ideals in the field of athletic training and athletic therapy and to provide recognition for Weber State University (WSU) Undergraduate Athletic Therapy Programs at regional and national levels. We shall 1) endorse service to the University/local community, 2) host social events with current students and faculty/staff, 3) promote members’ equal opportunities to continue education and professional networking, 4) enhance strong teamwork achieving the same goals, 5) advance educational ideals, 6) strive to advance the interests in field of healthcare professions, and 7) encourage growth and prosperity of the athletic therapy program by recruiting future students.",
+   "email": "prehealthcareclub@weber.edu",
+   "hasLogo": true,
+   "members": 4,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 179,
+   "name": "Pre-Law Association at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 180,
+   "name": "Pre-Med Club",
+   "description": "The purpose of the Pre-Med Club is to prepare future medical students by connecting them with one another, resources, and current physicians to help them succeed in their journey towards compassionately serving and healing others. An additional purpose is to cultivate a culture of collaboration (as opposed to competition) among fellow students and faculty.",
+   "email": "premed@weber.edu",
+   "hasLogo": true,
+   "members": 93,
+   "officers": {
+    "vice_president": 2,
+    "other_officer": 2,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 181,
+   "name": "Pre-Med Mentorship Club",
+   "description": "The purpose of the Pre-Med Mentorship Club is guide, and advise younger premed students along their pathway to medical school while fostering a constructive and encouraging atmosphere for all active members of the club to grow and learn.",
+   "email": "premedmentor@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 182,
+   "name": "Pre-Occupational Therapy Student Association",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 183,
+   "name": "Pre-Pharmacy Club",
+   "description": "The purpose of the Pre-Pharmacy Club is to prepare students of Weber State University for the application process to help them gain admittance to a college of pharmacy.  The club will help facilitate this preparation by organizing a lecture series each academic year, organizing volunteer opportunities, providing peer support, and academic advisement.",
+   "email": "prepharmacyclub@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 184,
+   "name": "Pre-Physical Therapy Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 185,
+   "name": "Pre-Physicians Assistant (Pre-PA) Club",
+   "description": "The purpose of the Pre-Physician Assistant Club is to:\n1. Provide information and resources for students interested in pursuing a career as a physician assistant.\n2. Offer networking opportunities with professionals and peers in the field.\n3. Facilitate educational and professional development activities related to the physician assistant profession.\n4. Foster a supportive community for students interested in healthcare careers.",
+   "email": "prepa@weber.edu",
+   "hasLogo": true,
+   "members": 14,
+   "officers": {
+    "other_officer": 2,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 186,
+   "name": "Pre-SOMA",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 187,
+   "name": "Pre-Vet Club",
+   "description": "The purpose of the WSU Pre-Vet Club is to assist its members on their path to vet school. The club will accomplish this goal by providing assistance and opportunities that include, but are not limited to, experience in the field of veterinary medicine, exposure to the various disciplines and realities of veterinary medicine, networking opportunities with local veterinarians, leadership opportunities, and community service.",
+   "email": "prevet@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 188,
+   "name": "Professional Sales Student Association (PSSA)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 316,
+   "name": "Project Runway at Weber State",
+   "description": "The purpose of this organization is to foster an inclusive creative community for Weber State University students interested in fashion, personal styling, photography, modeling, creative direction, and event production. The club provides hands-on collaborative experience through photo shoots, styling workshops, campus fashion showcases, and creative networking.",
+   "email": null,
+   "hasLogo": true,
+   "members": 19,
+   "officers": {
+    "other_officer": 3,
+    "vice_president": 1,
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 189,
+   "name": "Psi Chi Honors Club / Psi Cho (Psychology Club)",
+   "description": "Psi Chi is an international honor society whose purpose shall be to encourage, stimulate, and maintain excellence in scholarship of the individual members in all fields, particularly in psychology, and to advance the science of psychology.",
+   "email": "wsupsichi@weber.edu",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "president": 1,
+    "other_officer": 1,
+    "vice_president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 190,
+   "name": "Psi Phi Psi",
+   "description": "The object of Psi Phi Psi shall be to advance the educational interests of its members, to promote leadership development, diversity, and to make, maintain and uphold a high standard of life, happiness and integrity for its members by uniting them in closer bonds of friendship and brotherly union.\n\n*PLEDGE PROCESS REQUIRED TO JOIN*",
+   "email": "psiphipsi@weber.edu",
+   "hasLogo": true,
+   "members": 10,
+   "officers": {
+    "vice_president": 1,
+    "other_officer": 4,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 191,
+   "name": "Public Relations Student Society of America (PRSSA) / Ogden Peak Communications",
+   "description": "We provide strategic public relations and communication services that enable our clients to build strong relationships with their audiences. We add value to their organizations.",
+   "email": "prssaclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 192,
+   "name": "Ratio Christi",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 40,
+   "name": "RC Wrecker Bots Club",
+   "description": "Our purpose is to have teams of students build Battle bots and compete amongst each other and against other schools and in the process gain skills in designing, and understanding the manufacturing process, electronics, sportsmanship, 3D printing, and documentation.",
+   "email": null,
+   "hasLogo": true,
+   "members": 17,
+   "officers": {
+    "vice_president": 1,
+    "other_officer": 2,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 193,
+   "name": "Redemption College Ministry",
+   "description": "The purpose of Redemption College Ministry is to provide a ministry to individuals in the campus community who have a need for redemption and Christian growth. To lead students to commitment to Jesus Christ as Savior and Lord. To encourage students' to be involved in a local church through church membership and participation in its activities. To provide activities on and off campus for worship, discussion, Bible study, social life, witness, and missions. To lead students to give of themselves in service on campus and in the community. As a ministry of Redemption Church, Redemption College Ministry will provide a safe place for students to talk about their beliefs, as well as hear and learn about the beliefs of Redemption Church.",
+   "email": "rcm@weber.edu",
+   "hasLogo": true,
+   "members": 2,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 194,
+   "name": "Represent Us at Weber State University",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 195,
+   "name": "Research Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 196,
+   "name": "RISE Campus Ministries",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 197,
+   "name": "Rotaract Club of Ogden",
+   "description": "The purposes of Rotaract are for young adults to:\n(a) take action through community and international service,\n(b) learn leadership skills,\n(c) participate in professional development, and\n(d) embrace cultural diversity and gain global perspective.",
+   "email": "ogdenrotaract@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 198,
+   "name": "Saudi Arabia Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 199,
+   "name": "Scary Politics",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 202,
+   "name": "Secular Students at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 298,
+   "name": "Semper Veritas",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 203,
+   "name": "Sigma Delta Pi Hispanic Honor Society",
+   "description": "",
+   "email": null,
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 204,
+   "name": "Sigma Gamma Epsilon: Etta Gamma Chapter (SGE) (Geology Honor Society)",
+   "description": "The Society shall have for its objectives the scholastic and scientific advancement of its members and the extension of the relations of friendship and assistance among colleges, universities, and scientific schools with recognized standing, which are devoted to the advancement of the Earth Sciences. Furthermore, the Society shall encourage research and publication--both at the undergraduate and graduate level.",
+   "email": "sigmagammaepsilon@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "president": 1,
+    "other_officer": 1
+   }
+  },
+  {
+   "dseId": 205,
+   "name": "Sigma Tau Delta",
+   "description": "The Society shall recognize and encourage excellence, among undergraduate and graduate students, in all aspects of English language, literature, and the many closely-related fields, including literacy initiatives.",
+   "email": "sigmataudelta@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 207,
+   "name": "Social Advocacy Council (SAC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 208,
+   "name": "Social Work Club and One Campus Chapter",
+   "description": "The Social Work Club was created to promote a bond among students of social work, service to the community, advocacy, and identification with the values and ideals of the social work profession. ONE is a global movement campaigning to end extreme poverty and preventable disease by 2030, so that everyone, everywhere can lead a life of dignity and opportunity. We believe the fight against poverty isn’t about charity but about justice and equality. Whether lobbying political leaders in world capitals or running cutting-edge grassroots campaigns, ONE pressures governments to do more to fight extreme poverty and preventable disease, particularly in Africa, and empowers citizens to hold their governments to account. ONE is strictly non-partisan.",
+   "email": "socialworkclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 209,
+   "name": "Societa Italiana (Italian Club)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 210,
+   "name": "Society for Human Resource Management (SHRM)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 211,
+   "name": "Society for the Advancement of Material and Process Engineering (SAMPE)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 212,
+   "name": "Society of Automotive Professionals",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 213,
+   "name": "Society of Hispanic Engineers (SHPE)",
+   "description": "The mission of SHPE  is to ensure a continuing atmosphere of spirit, service, and traditions to Weber State University by organizing events and programs that directly lead members towards their post-graduation success.",
+   "email": "shpe@mail.weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 214,
+   "name": "Society of Manufacturing Engineers SME",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 215,
+   "name": "Society of Physics Students",
+   "description": "The purpose of the Society of Physics Students it to inspire passion, ignite curiosity, and support community through science outreach.",
+   "email": "societyofphysicsstudents@weber.edu",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 216,
+   "name": "Society of Women Engineers (SWE)",
+   "description": "The mission of SWE is to empower women to achieve their full potential in careers as engineers and leaders; expand the image of the engineering and technology professions as a positive force in improving the quality of life, and demonstrate the value of diversity and inclusion.",
+   "email": "swe@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "president": 1,
+    "advisor": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 217,
+   "name": "Sociology Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 218,
+   "name": "Spanish Club",
+   "description": "The purpose of the Spanish Club is to cultivate an appreciation for the different cultures and ways of speaking and living in the Spanish-speaking world. Our members value respect and empathy. We do not exclude anyone, we support as many people as we can, and we invite everyone to do the same.",
+   "email": "spanishclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 219,
+   "name": "Spectrum Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 220,
+   "name": "Spiritual Sciences",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 221,
+   "name": "STAND at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 222,
+   "name": "Student Alumni Association",
+   "description": "The Student Alumni Association (SAA) is an open association (club) for students (no fees). All WSU students are encouraged to be engaged by attending SAA and campus events, and participating in the WSU Traditions Keeper program. SAA club members who complete 25 out of 50 WSU Traditions will be honored by receiving the WSU Traditions Keeper stole from the WSU Alumni Association to wear at graduation. \nStudent Alumni Mission: Make meaningful memories. \nWSUAA Mission: To foster spirited and lasting ties among alumni and friends.",
+   "email": "alumni@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 223,
+   "name": "Student American Dental Hygienists Association (SADHA)",
+   "description": "The objectives of this Organization shall be to cultivate, promote, and sustain the art and science of dental hygiene. to represent and safeguard the common interest of the members of the dental hygiene profession, and to contribute toward the improvement of the health of the public. Furthermore, this Organization shall be structured for and by its student members so that each member has a specific role which assists in meeting the objectives of this Organization. This Organization shall also provide its members with an effective liaison with professional dental hygiene associations on the local and state levels. A final objective of this Organization is to enrich the personal development of its members by providing social activities conducted in an atmosphere of mutual trust and respect, mutual helpfulness, freedom of expression, and acceptance of differences.",
+   "email": "sadha@weber.edu",
+   "hasLogo": true,
+   "members": 2,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 224,
+   "name": "Student Athlete Advisory Committee (SAAC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 225,
+   "name": "Student Council for Exceptional Children (CEC/SCEC)",
+   "description": "The purpose of this chapter shall be to advance the education of individuals with\nexceptionalities and to promote related educational, scientific, and charitable\npurposes. Specifically, the chapter intends to assist and provide support to Utah\nCEC in all its efforts on behalf of persons with exceptionalities, and to participate in all appropriate governance activities of Utah CEC subject to the general supervision and control of Utah CEC.",
+   "email": "studentcec@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 226,
+   "name": "Student Economic Association (SEA)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 227,
+   "name": "Student National Association of Teachers of Singing (SNATS) at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 229,
+   "name": "Students Against Trafficking",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 230,
+   "name": "Students for Ethical Government",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 231,
+   "name": "Students for Life at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 232,
+   "name": "Students in Free Enterprise (SIFE)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 233,
+   "name": "Students United for Reproductive Freedom (SURF)",
+   "description": "Reproductive Freedom is a person’s ability to control their bodies, their lives, and their futures.  Fighting for Reproductive Freedom means fighting for Racial Justice, Queer Justice, Immigrant Justice, Trans Justice, Economic Justice, Environmental Justice… and Justice for all.",
+   "email": "surfclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 234,
+   "name": "Supply Chain Catalysts (SC Cats) / Student Association of Supply Chain Management (SASCM)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 235,
+   "name": "SWIFT (Secular Weber Inquirers and Free Thinkers)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 236,
+   "name": "Swing Dance/ Social Dance Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 237,
+   "name": "Synthetic Biology Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 238,
+   "name": "Task Force Wildcat",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 241,
+   "name": "The Blox Club (Minecraft & Roblox Club)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 32,
+   "name": "The Computing Society at Weber State (CSWS) (Formerly known as: Association for Computing Machinery)",
+   "description": "The chapter is organized and will be operated exclusively for educational and scientific purposes and in furtherance thereof to A) promote an increased knowledge of the science, design, development, construction, languages, and applications of modern computing machinery. B) promote a greater interest in computing machinery and its applications. C) provide a means of communication between persons having interest in computing machinery.",
+   "email": "csws@weber.edu",
+   "hasLogo": true,
+   "members": 15,
+   "officers": {
+    "other_officer": 2,
+    "president": 1,
+    "vice_president": 1
+   }
+  },
+  {
+   "dseId": 319,
+   "name": "The HAM Radio Club",
+   "description": "The purpose of this organization is to promote interest in amateur radio and related areas of electronics and communication. The club shall provide opportunities for members to learn about amateur radio, prepare for amateur radio licensing, operate amateur radio equipment, participate in amateur radio activities, and develop technical knowledge and skills.",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 243,
+   "name": "The Improv Club at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 244,
+   "name": "The League of Women Voters at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 245,
+   "name": "The Literacy Association at Weber State",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 246,
+   "name": "The National Society of Leadership and Success (NSLS)",
+   "description": "NSLS has been established to create a support group that will help college students achieve their goals and better their lives, in the process building leaders who make a better world.",
+   "email": "nsls@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 247,
+   "name": "The Ohana Association (TOA)",
+   "description": "Weber State University’s Pacific Islander Club, The Ohana Association (TOA) is organized to address issues concerning those of Pacific Island backgrounds, educate people about the diverse Pacific heritages and traditions, as well as recruit, retain, and graduate fellow students. Advised by the Center of Belonging and Cultural Engagement’s Multicultural Program Manager, Lulu S. Faumui-Latu-Peters, TOA subcommittees, and members make great efforts implementing meaningful programming to increase and improve avenues of communication and interaction between the university and Pacific Islander community. TOA will also organize cultural and social events to enhance the campus experience and education of WSU with a more focused lens on the university’s Pacific Islander constituency. TOA strives to welcome new PI students to Weber State and provide a forum where they can openly express their experiences and thoughts while offering them moral\nsupport and peer guidance. Although, TOA is primarily composed of students from the Pacific Islands, they strongly encourage everyone around to participate. TOA pushes to provide a safe space that fosters a sense of belonging and promotes valuable relationships. While enrolled, TOA is a homebase for students at WSU to harness and develop a passion to become active ambassadors for Pacific Islander peoples that carry further than the institution and out to a variety of communities and society as a whole.",
+   "email": "toa@weber.edu",
+   "hasLogo": true,
+   "members": 14,
+   "officers": {
+    "advisor": 2,
+    "other_officer": 2,
+    "vice_president": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 248,
+   "name": "The Pop-up Gallery at Weber State (Ogden Gallery of Contemporary Arts)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 301,
+   "name": "The PRESS",
+   "description": "The PRESS is a Zine-Making and Independent Publishing Club dedicated to fostering a creative space for students to express themselves, share their voices, and connect with their community. We believe in the power of independent publishing as a tool for education, resistance, and solidarity.",
+   "email": null,
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 249,
+   "name": "The Scientista Foundation Chapter at Weber State",
+   "description": "The mission of this organization is to empower women majoring in science, technology, engineering, mathematics, and medicine (STEMM) by providing a strong campus community, online resources, and visible role models. In order to achieve these goals, Scientista will provide programs and create online content on our blog, including student spotlights, networking opportunities with successful women STEMM, and socials and study groups.",
+   "email": "weberstatescientista@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 250,
+   "name": "The Signpost",
+   "description": "The Signpost believes the duty of an independent student newspaper is to act as a carrier of information and a forum for discussion for the university community. We believe the duty of student journalists, as agents of independent student newspapers and as American journalists, is to serve the truth. We believe those responsibilities carry obligations requiring student journalists to perform with intelligence, objectivity, accuracy and fairness.",
+   "email": "thesignpost@weber.edu",
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 251,
+   "name": "The Study Abroad Club (SAC)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 252,
+   "name": "The Ubiquitous Voice Society, Student Chapter, Weber State University (UVS)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 242,
+   "name": "The Wild",
+   "description": "Our purpose is to bring energy, pride, and school spirit to every game, and to make the student section a place where every student feels welcome.",
+   "email": "wild@weber.edu",
+   "hasLogo": true,
+   "members": 36,
+   "officers": {
+    "other_officer": 1,
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 253,
+   "name": "The Wildlife Society (TWS) at Weber State University",
+   "description": "TWS is an educational and scientific society established for the following Purposes:\nA. Establish professional solidarity and seek the highest standards in all activities of the wildlife profession;\nB. Develop and promote sound stewardship of wildlife resources and the environments upon which wildlife and humans depend based on the best available science;\nC. Gather and disseminate scientific, technical, and other information about wildlife, wildlife management, and wildlife management stakeholdersto TWS members, public policy makers, and the general public, through peer-reviewed publications, meetings, and other forms of communications; and\nD. Protect the interest of its members.",
+   "email": "wsu.tws@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 254,
+   "name": "Tomorrow's Educators Advocating for Mathematics and Science (TEAMS)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 256,
+   "name": "Turning Point USA  (TPUSA)",
+   "description": "TPUSA is an organization whose mission is to identify, educate, train, and organize students to promote freedom.",
+   "email": "turningpointusa@weber.edu",
+   "hasLogo": true,
+   "members": 3,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 258,
+   "name": "United Nations Association (UNA)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 259,
+   "name": "USGBC Student Group at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 260,
+   "name": "Utah Education Technology Consortium (Utah Technology Education Coalition)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 320,
+   "name": "UV Crew",
+   "description": "Our Mission is to educate our community about the risks of excessive UV exposure and encourage healthy habits to protect skin and prevent melanoma. Through outreach events, research, and educational resources we strive to make sun safety simple, accessible, and relevant to people of all ages. Our goal is to connect students with the community, and provide evidence-based research to the public, to be a voice in advocating for safer sun exposure, and public health.",
+   "email": null,
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 261,
+   "name": "Veg & Animal Rights Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 262,
+   "name": "Vegetarian Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 1,
+   "officers": {}
+  },
+  {
+   "dseId": 263,
+   "name": "Venture Capital/Private Equity Club (VC/PE Club)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 265,
+   "name": "VOX Initiative",
+   "description": "VOX Initiative proves that leadership isn’t a title but a choice — giving every student the chance to use their voice to grow personally and shape Weber’s future.",
+   "email": "voxinitiative2025@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 309,
+   "name": "Waldo's Rocketry Club",
+   "description": "The purpose of Waldo’s Rocketry Club is to bring together students at Weber State University who are passionate about model rocketry and aerospace, to develop hands-on skills in designing, building, launching and recovering model rockets, and to promote interest in STEM (Science, Technology, Engineering, and Mathematics) through rocketry activities, outreach, and collaboration.",
+   "email": null,
+   "hasLogo": true,
+   "members": 1,
+   "officers": {
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 268,
+   "name": "Weber Association of Marketing (WAM) / Marketing Club",
+   "description": "The purpose of the club is to create a bridge between students and marketing companies, providing opportunities for professional growth and networking within the marketing industry.",
+   "email": "marketingclub@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 269,
+   "name": "Weber Entrepreneurs Association (WEA)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 270,
+   "name": "Weber Film Society",
+   "description": "Weber Film Society is dedicated to creating and fostering a diverse community centered around all parts of film, both on and off Weber State University Campus.",
+   "email": "weberfilmsociety@gmail.com",
+   "hasLogo": true,
+   "members": 7,
+   "officers": {
+    "president": 1
+   }
+  },
+  {
+   "dseId": 271,
+   "name": "Weber Racing",
+   "description": "Weber Racing is a dedicated group of students committed to expanding upon the theories learned through traditional education by forming a team that will plan, design, fund, build, test, and race an off-road vehicle.\nThe club aims to take the team from conception to competing for the Baja SAE Midwest Regional title. Through this process, Weber Racing seeks to build a strong tradition of motorsports competition and engineering within the automotive program.\nThe organization also strives to provide hands-on learning opportunities for students, connect students with career opportunities in the automotive and motorsports industries, foster a strong sense of community within the automotive department, and encourage teamwork, leadership, and professional\ndevelopment.",
+   "email": "weberracing@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 272,
+   "name": "Weber State Ballet Folklorico",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 273,
+   "name": "Weber State Debate",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 274,
+   "name": "Weber State News (Studio 76)",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 276,
+   "name": "Wildcat Catholics",
+   "description": "The purpose of the Wildcat Catholics is to:\n Provide spiritual service and learning opportunities.\n Worship as a community, particularly at Mass.\n Educate students about their Catholic faith according to the teachings of the Church.\n Organize and unify the Catholic community at Weber State University.\n Support students in expressing and living their faith during their college years.",
+   "email": "wildcatcatholicsclub@weber.edu",
+   "hasLogo": true,
+   "members": 11,
+   "officers": {
+    "other_officer": 1,
+    "vice_president": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 277,
+   "name": "Wildcat Investors",
+   "description": "The purposes and mission of the Wildcat Investors are as follows:\nA. Bring together people with interest in finance and investing.\nB Encourage student collaboration and participation.\nC. Promote education in personal finance available to all majors.\nD. Provide exposure to further education and career opportunities in business\nrelated fields.\nE. Organize presentations on finance and investing related topics.\nF. Provide Investment Challenges for students seeking business related degrees.",
+   "email": "investors@weber.edu",
+   "hasLogo": true,
+   "members": 5,
+   "officers": {
+    "advisor": 1,
+    "president": 1
+   }
+  },
+  {
+   "dseId": 278,
+   "name": "Wildcat Printmaking Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 280,
+   "name": "Wildcat Scholars",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 281,
+   "name": "Wildcat Service Club",
+   "description": "The Wildcat Service Club at Weber State University is dedicated to helping the community by facilitating meaningful service and volunteer opportunities. WSC strives to create an environment that encourages involvement, personal growth, and connection among students who are committed to making a positive impact.",
+   "email": null,
+   "hasLogo": true,
+   "members": 21,
+   "officers": {
+    "other_officer": 3,
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 282,
+   "name": "Wildcat Yo-Yo & Juggle Club",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 312,
+   "name": "Wildcats Care Club",
+   "description": "Our mission is to create a supportive community for students specifically pre-professionals students by promoting service, leadership, and hands on experience. We strive to connect members with meaningful volunteer opportunities that strengthen community impact and engagement.",
+   "email": null,
+   "hasLogo": true,
+   "members": 13,
+   "officers": {
+    "vice_president": 4,
+    "president": 1,
+    "advisor": 1
+   }
+  },
+  {
+   "dseId": 283,
+   "name": "Wildcats of the Coast (WCOTC)",
+   "description": "The purpose of WCOTC is to provide a social network for students enthusiastic about or interested in Magic: The Gathering as a hobby, in order to generate an increased sense of belonging at Weber State. To also provide a safe and fulfilling recreational outlet for students.",
+   "email": null,
+   "hasLogo": true,
+   "members": 15,
+   "officers": {
+    "advisor": 1,
+    "president": 1,
+    "other_officer": 1
+   }
+  },
+  {
+   "dseId": 284,
+   "name": "Women and Gender Studies Club at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 285,
+   "name": "Women in Construction at WSU",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 286,
+   "name": "Writers Ink",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 287,
+   "name": "Writing About Faith",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 288,
+   "name": "WSU German Club / German Foreign Language Club",
+   "description": "The German Club is an organization that supports Weber State’s German program by offering German language students a space for extracurricular cultural and language immersion.",
+   "email": "webergermanclub@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 290,
+   "name": "WSU Letters Collective",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 291,
+   "name": "Young Americans for Freedom (YAF)",
+   "description": "The purpose of YAF is to provide an organizational framework to promote the general principles of Young Americans for Freedom which were adopted in Sharon, Connecticut on September 11, 1960, as follows:\nIn this time of moral and political crises, it is the responsibility of the youth of America to affirm certain eternal truths. We, as young conservatives, believe: \n-That foremost among the transcendent values is the individual's use of his God-given free will, whence derives his right to be free from the restrictions of arbitrary force; \n-That liberty is indivisible, and that political freedom cannot long exist without economic freedom; \n-That the purpose of government is to protect those freedoms through the preservation of internal order, the provision of national defense, and the administration of justice; \n-That when government ventures beyond these rightful functions, it accumulates power, which tends to diminish order and liberty; \n-That the Constitution of the United States is the best arrangement yet devised for empowering government to fulfill its proper role, while restraining it from the concentration and abuse of power; \n-That the genius of the Constitution- the division of powers- is summed up in the clause that reserves primacy to the several states, or to the people, in those spheres not specifically delegated to the Federal government; \n-That the market economy, allocating resources by the free play of supply and demand, is the single economic system compatible with the requirements of personal freedom and constitutional government, and that it is at the same time the most productive supplier of human needs; \n-That when government interferes with the work of the market economy, it tends to reduce the moral and physical strength of the nation; that when it takes from one man to bestow on another, it diminishes the incentive of the first, the integrity of the second, and the moral autonomy of both; \n-That we will be free only so long as the national sovereignty of the United States is secure; that history shows periods of freedom are rare, and can exist only when free citizens concertedly defend their rights against all enemies; \nThat the forces of international Communism are, at present, the greatest single threat to these liberties; \n-That the United States should stress victory over, rather than coexistence with, this menace; and \n-That American foreign policy must be judged by this criterion: does it serve the just interests of the United States?",
+   "email": "yaf@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 292,
+   "name": "Young Americans for Liberty",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 293,
+   "name": "Young Democratic Socialists of America (YDSA) at WSU",
+   "description": "The purpose of this chapter is to organize and empower workers and students to transfer power to working people to create a more inclusive, equitable, and free community for all people.",
+   "email": "ydsa@weber.edu",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 294,
+   "name": "Young Greens",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 295,
+   "name": "Young Life College",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 296,
+   "name": "Zeta Gamma Eta",
+   "description": "",
+   "email": null,
+   "hasLogo": false,
+   "members": 0,
+   "officers": {}
+  },
+  {
+   "dseId": 55,
+   "name": "Zi Ye Mao (Chinese Language and Culture Club)",
+   "description": "The purpose of the Club is to:\n1. Promote understanding and appreciation of Chinese language, culture, and traditions among students at Weber State University.\n2. Provide opportunities for members to practice Chinese language skills in a social and educational setting.\n3. Organize cultural, educational, and community events that foster cross-cultural exchange.\n4. Support members in pursuing academic and professional interests related to China or Chinese studies.",
+   "email": null,
+   "hasLogo": true,
+   "members": 16,
+   "officers": {
+    "president": 1,
+    "vice_president": 1,
+    "advisor": 1,
+    "other_officer": 2
+   }
+  },
+  {
+   "dseId": 297,
+   "name": "Zoology Club",
+   "description": "The mission of the Zoology Club is to provide learning experiences and activities related to the field of zoology.  The club will also provide service to the community and will provide a social network through which students can get to know each other.",
+   "email": "wsuzoologyclub@gmail.com",
+   "hasLogo": true,
+   "members": 0,
+   "officers": {}
+  }
+ ]
+}

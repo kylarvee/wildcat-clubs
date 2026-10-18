@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
 import { deactivateUser, markUserCurrentByAdmin, markUserGraduatedByAdmin, reactivateUser } from "@/lib/domain/users";
+import * as details from "@/lib/domain/details";
 
 /** Status changes end roles and memberships, which show across club pages too. */
 function refresh(userId: string) {
@@ -33,4 +34,9 @@ export async function reactivateAction(userId: string) {
   const r = await act((actor) => reactivateUser(actor, userId));
   if (r.ok) refresh(userId);
   return r;
+}
+
+/** Admins open anyone's emergency contact; lib/domain/details logs it. */
+export async function revealEmergencyContactAdminAction(userId: string) {
+  return act((actor) => details.revealEmergencyContact(actor, null, userId));
 }

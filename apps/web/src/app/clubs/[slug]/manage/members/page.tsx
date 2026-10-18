@@ -3,6 +3,8 @@ import { loadClubWorkspace } from "@/lib/clubs/context";
 import { getConfig } from "@/lib/config";
 import { activeMemberIdsFor, clubMemberAttendanceCounts, registeredMemberCount } from "@/lib/metrics";
 import { rosterData } from "@/lib/roles/queries";
+import { memberContacts } from "@/lib/domain/details";
+import { YEAR_LABEL } from "@/lib/details/rules";
 import { fmtAgo, fmtLongDate } from "@/lib/time";
 import { buttonClasses } from "@/components/ui/button";
 import { Callout, PageHeader, Stat } from "@/components/ui/layout";
@@ -35,6 +37,8 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
     getConfig(),
   ]);
   const activeRule = { windowDays: cfg["activity.studentWindowDays"], recentEvents: cfg["activity.studentRecentEvents"] };
+  // Contact basics from member details (lib/authz/details: this page needs the roster capability, which is enough).
+  const contacts = await memberContacts(user, club.id, roster.map((r) => r.person.id));
   const full = access.viaPlatform !== null || access.isAdvisor;
 
   const rows: MemberRow[] = roster
@@ -64,6 +68,10 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
         canRemove: !removeBlocked && club.status !== "RETIRED",
         removeBlocked,
         isSelf: r.person.id === user.id,
+        yearLabel: contacts.get(r.person.id)?.yearInSchool ? YEAR_LABEL[contacts.get(r.person.id)!.yearInSchool!] : null,
+        phone: contacts.get(r.person.id)?.phone ?? null,
+        contactEmail: contacts.get(r.person.id)?.contactEmail ?? null,
+        hasEmergency: Boolean(contacts.get(r.person.id)?.hasEmergency),
       };
     });
 
@@ -113,7 +121,7 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
         <Stat label="Alumni" value={rows.filter((r) => r.status === "ALUMNI").length} />
       </div>
 
-      <MembersTable slug={club.slug} clubName={club.name} rows={rows} canEditTitles={club.status !== "RETIRED"} activeRule={activeRule} />
+      <MembersTable slug={club.slug} clubId={club.id} clubName={club.name} rows={rows} canEditTitles={club.status !== "RETIRED"} activeRule={activeRule} />
 
       <PolicyNotices placement="MEMBERSHIP" />
     </div>

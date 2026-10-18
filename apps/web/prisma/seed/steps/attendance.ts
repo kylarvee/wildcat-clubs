@@ -11,7 +11,7 @@ import { addDays, addMin, DAY, MIN, WEEK } from "../lib/dates";
  * map its cross-club edges and natural college clusters.
  */
 
-const KIND_FACTOR: Record<EventKind, number> = { MEETING: 1, SOCIAL: 1.1, WORKSHOP: 0.85, SERVICE: 0.62, COMPETITION: 0.6, FUNDRAISER: 0.5, TRAINING: 0.8, OTHER: 0.8 };
+const KIND_FACTOR: Record<EventKind, number> = { MEETING: 1, PRACTICE: 0.9, SOCIAL: 1.1, WORKSHOP: 0.85, SERVICE: 0.62, COMPETITION: 0.6, FUNDRAISER: 0.5, TRAINING: 0.8, OTHER: 0.8 };
 const LEAD_ROLES = new Set(["OFFICER", "VP", "PRESIDENT"]);
 
 function checkinAt(ctx: Ctx, occ: Occ): Date {
@@ -180,11 +180,11 @@ export function buildAttendance(ctx: Ctx) {
       count++;
     }
   }
-  // Active in Psychology Club: at one of the last two meetings.
+  // Active in Psi Chi (psych): at one of the last two meetings.
   const psych = ctx.club("psych");
   const lastTwo = hostOccs(psych, addDays(NOW, -60)).sort((a, b) => b.o.startsAt.getTime() - a.o.startsAt.getTime()).slice(0, 2);
   if (lastTwo.length && !lastTwo.some((x) => x.o.attendees.has(maya))) record(ctx, psych, lastTwo[0].e, lastTwo[0].o, maya);
-  // Service & Volunteer: joined two weeks ago — at most one check-in so far (not review-eligible yet).
+  // Wildcat Service Club (service): joined two weeks ago — at most one check-in so far (not review-eligible yet).
   const service = ctx.club("service");
   const svc = hostOccs(service, service.byUser.get(maya)!.joinedAt!);
   const mine = svc.filter((x) => x.o.attendees.has(maya));

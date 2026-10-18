@@ -74,6 +74,7 @@ const searchClubs = readTool({
   schema: z.object({
     query: z.string().max(100).optional().describe("Keywords matched against names, descriptions, majors, colleges and departments, e.g. \"AI\", \"chess\", \"nursing\". Leave out to browse."),
     type: z.enum(["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"]).optional(),
+    category: z.enum(["ACADEMIC", "CULTURAL", "FSL", "HONOR_SOCIETY", "SERVICE_ADVOCACY", "STUDENT_LIFE", "RELIGIOUS"]).optional().describe("WSUSA's club category: academic, cultural, fraternity & sorority life, honor society, service & advocacy, student life & special interest, or religious"),
     status: z.enum(["active", "pilot", "inactive"]).optional().describe("active = counts as active (includes pilot clubs); pilot = new clubs in their pilot period; inactive = not active right now"),
     college: z.string().max(120).optional().describe("Only clubs in this college (name or short name)"),
     sort: z.enum(["name", "rating", "members", "retention", "activity"]).optional().describe("Default: name"),
@@ -86,6 +87,7 @@ const searchClubs = readTool({
     const params: ClubListParams = {
       q: "",
       type: input.type ?? null,
+      category: input.category ?? null,
       college: college?.slug ?? null,
       scope: null,
       status: input.status ?? null,
@@ -659,7 +661,7 @@ const eventDetails = readTool({
         where: locationText(event),
         online_link: event.virtualUrl ?? undefined,
         who_can_see_it: VISIBILITY_LABEL[event.visibility],
-        self_check_in: event.allowSelfCheckIn ? "allowed for members of the host and co-host clubs" : "QR code or leader only",
+        check_in: event.locationType === "VIRTUAL" ? "members tap Check in while it's happening" : "at the event: scan the QR code or type the code on the screen; leaders can add people",
         description: richToText(event.descriptionHtml, 1500) || null,
         expected_costs: summary && summary.totalCents > 0 ? { total: fmtMoney(summary.totalCents), per_meeting: fmtMoney(summary.perOccurrenceCents), one_time: fmtMoney(summary.oneTimeCents) } : undefined,
         link: `/events/${event.id}`,

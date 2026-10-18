@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { ClubScope } from "@prisma/client";
-import { Loader2, Save } from "lucide-react";
+import type { ClubCategory, ClubScope } from "@prisma/client";
+import { Loader2, Plus, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import { ClubLogo } from "@/components/ui/avatar";
@@ -17,6 +17,7 @@ import { SearchSelect, type SearchOption } from "@/components/founding/SearchSel
 import { LogoField } from "@/components/founding/LogoField";
 import { CLUB_TYPES, SCOPES, TYPE_LABEL, type FoundingType } from "@/components/founding/copy";
 import { saveProfileAction } from "@/app/clubs/[slug]/manage/profile/actions";
+import { CLUB_CATEGORIES, CLUB_CATEGORY_LABEL, SOCIAL_LABEL, SOCIAL_PLATFORMS, type SocialLink } from "@/components/clubs/labels";
 
 const OTHER = "__other__";
 
@@ -35,6 +36,9 @@ export type ProfileFormClub = {
   logoUrl: string | null;
   logoColor: string;
   contactEmail: string | null;
+  category: ClubCategory | null;
+  websiteUrl: string | null;
+  socialLinks: SocialLink[];
 };
 
 /** The Club Profile editor — the one input tool for a club's profile (ARCHITECTURE §4). */
@@ -66,6 +70,9 @@ export function ProfileForm({
   const [focusOther, setFocusOther] = useState(club.focusOther ?? "");
   const [logoUrl, setLogoUrl] = useState<string | null>(club.logoUrl);
   const [logoColor, setLogoColor] = useState(club.logoColor);
+  const [category, setCategory] = useState<ClubCategory | "">(club.category ?? "");
+  const [website, setWebsite] = useState(club.websiteUrl ?? "");
+  const [links, setLinks] = useState<SocialLink[]>(club.socialLinks);
 
   const deptRule = type === "SPONSORED" ? "required" : type === "AFFILIATE" ? "optional" : "none";
   const [pending, start] = useTransition();
@@ -93,6 +100,9 @@ export function ProfileForm({
       focusOther: focus === OTHER ? focusOther : null,
       logoUrl,
       logoColor,
+      category: category || null,
+      websiteUrl: website || null,
+      socialLinks: links.filter((l) => l.url.trim()),
     });
     if (!r.ok) {
       setError(r.error);
@@ -191,6 +201,19 @@ export function ProfileForm({
               </Field>
             ) : null}
 
+            <Field label="Category" required hint="WSUSA's grouping on the clubs list.">
+              {(id) => (
+                <Select id={id} value={category} onChange={(e) => setCategory(e.target.value as ClubCategory | "")}>
+                  <option value="">Choose a category…</option>
+                  {CLUB_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {CLUB_CATEGORY_LABEL[c]}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+
             <Field label="Focus major or discipline" hint="Optional. Helps students filter the clubs list.">
               {(id) => <SearchSelect id={id} options={majors} value={focus} onChange={setFocus} placeholder="Search majors…" extraOption={{ value: OTHER, label: "Another discipline — not a WSU major" }} />}
             </Field>
@@ -199,6 +222,56 @@ export function ProfileForm({
                 {(id) => <Input id={id} value={focusOther} onChange={(e) => setFocusOther(e.target.value)} maxLength={120} />}
               </Field>
             ) : null}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="Website & social media" description="Shown on your club page. Paste each link; we add https:// if it's missing." />
+          <CardBody className="space-y-4">
+            <Field label="Website">
+              {(id) => <Input id={id} type="url" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" maxLength={300} />}
+            </Field>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-ink">Social media</legend>
+              {links.map((l, i) => (
+                <div key={i} className="flex flex-wrap gap-2 sm:flex-nowrap">
+                  <label className="sr-only" htmlFor={`social-${i}-platform`}>
+                    Platform
+                  </label>
+                  <Select
+                    id={`social-${i}-platform`}
+                    value={l.platform}
+                    onChange={(e) => setLinks((cur) => cur.map((x, j) => (j === i ? { ...x, platform: e.target.value as SocialLink["platform"] } : x)))}
+                    className="sm:w-44"
+                  >
+                    {SOCIAL_PLATFORMS.map((p) => (
+                      <option key={p} value={p}>
+                        {SOCIAL_LABEL[p]}
+                      </option>
+                    ))}
+                  </Select>
+                  <label className="sr-only" htmlFor={`social-${i}-url`}>
+                    {SOCIAL_LABEL[l.platform]} link
+                  </label>
+                  <Input
+                    id={`social-${i}-url`}
+                    value={l.url}
+                    onChange={(e) => setLinks((cur) => cur.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
+                    placeholder="instagram.com/yourclub"
+                    maxLength={300}
+                    className="min-w-0 flex-1"
+                  />
+                  <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${SOCIAL_LABEL[l.platform]} link`} onClick={() => setLinks((cur) => cur.filter((_, j) => j !== i))}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              {links.length < 8 ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => setLinks((cur) => [...cur, { platform: cur.length ? "other" : "instagram", url: "" }])}>
+                  <Plus className="h-4 w-4" aria-hidden /> Add a link
+                </Button>
+              ) : null}
+            </fieldset>
           </CardBody>
         </Card>
 

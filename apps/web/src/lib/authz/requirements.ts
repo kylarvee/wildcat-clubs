@@ -4,6 +4,7 @@ import type { ClubRole, RenewalPeriod, RoleRequirement } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getTerms, currentOrLastTerm, academicYearAt } from "@/lib/terms";
 import { TZ } from "@/lib/time";
+import { detailsCurrent } from "@/lib/details/rules";
 import { TZDate } from "@date-fns/tz";
 
 /**
@@ -56,6 +57,10 @@ export async function requirementStatus(
         (await db.attendance.count({
           where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId } },
         })) > 0;
+    } else if (r.kind === "PROFILE") {
+      // Member details: complete and confirmed this period (Settings → Member details).
+      const u = await db.user.findUnique({ where: { id: userId }, select: { kind: true, details: true } });
+      met = Boolean(u && detailsCurrent(u.details, u.kind, periodStart));
     }
     const clock = Math.max(ctx.assignmentStartedAt.getTime(), ctx.clubApprovedAt?.getTime() ?? 0, periodStart.getTime(), r.createdAt.getTime());
     const dueAt = new Date(clock + r.graceDays * 86_400_000);

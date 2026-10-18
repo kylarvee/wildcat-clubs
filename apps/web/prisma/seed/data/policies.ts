@@ -83,6 +83,16 @@ export const POLICIES: PolicyDef[] = [
     bodyHtml: `${notice}<h2>Funding sources</h2><ul><li><strong>WSUSA</strong> — the default for Registered clubs.</li><li><strong>Department</strong> — the default for Sponsored and Affiliate clubs.</li><li><strong>College</strong> and <strong>University</strong> funds for specific programs.</li></ul><h2>Request before you buy</h2><ol><li>Add costs to your events in the Events Builder, or general costs in the Budget tool.</li><li>Submit a funding request from the Budget tool at least two weeks before the purchase.</li><li>After approval, WSUSA creates an invoice and processes payment in the university's financial system.</li></ol><h2>Not eligible</h2><ul><li>Alcohol, gift cards for officers, personal entertainment, and gifts to individuals.</li><li>Purchases made before the request was approved.</li></ul><p>Keep receipts and submit them within 30 days of purchase.</p>`,
   },
   {
+    slug: "participant-waiver-and-release",
+    title: "Participant Waiver and Release",
+    summary: "Each academic year, club members accept the risks of club activities, release the university from claims, consent to emergency care and allow photos of club activities.",
+    placements: ["MEMBERSHIP", "EVENTS"],
+    status: "PUBLISHED",
+    version: 1,
+    daysAgo: 120,
+    bodyHtml: `${notice}<h2>What you're agreeing to</h2><p>Club activities — social, educational, recreational and athletic, sometimes with travel — carry some risk of injury, illness or damage to property. By signing, you confirm that you understand those risks and choose to take part.</p><ul><li><strong>Release.</strong> You release the State of Utah and Weber State University, and their employees and volunteers, from claims arising from your participation.</li><li><strong>Emergency care.</strong> You consent to emergency treatment if a physician decides it's necessary.</li><li><strong>Photos.</strong> The university may use photos or video of club activities that include you, without payment.</li></ul><h2>Who can sign</h2><p>You must be 18 or older. Students under 18 need a parent or guardian to sign the guardian version; contact WSUSA.</p><h2>How long it lasts</h2><p>One academic year, for every club you belong to. You sign once, not once per club.</p>`,
+  },
+  {
     slug: "hazing-prohibition",
     title: "Hazing Prohibition",
     summary: "Hazing of any kind — as a condition of joining or staying in a club — is prohibited, even if the person agrees to it.",

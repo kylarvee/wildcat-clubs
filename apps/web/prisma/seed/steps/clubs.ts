@@ -1,7 +1,7 @@
 import type { MembershipSource, MembershipStatus } from "@prisma/client";
 import { seatsFor } from "@/lib/roles/defaults";
 import type { ClubM, Ctx, Engagement, Member, Person } from "../ctx";
-import { CLUBS, type ClubDef } from "../data/clubs";
+import { CLUBS, type ClubDef, type Topic } from "../data/clubs";
 import { addDays, campusDate, DAY, maxDate, minDate } from "../lib/dates";
 import { generatedStudents } from "./people";
 import { fallStartDate, mayGraduation, springStartDate } from "./reference";
@@ -11,6 +11,8 @@ import { fallStartDate, mayGraduation, springStartDate } from "./reference";
  * members sampled with college affinity (so business students cluster in
  * business clubs), joins bunched at the start of each semester, and a mix of
  * core, regular and drop-in members whose engagement fades at different rates.
+ * Directory clubs end up with about as many members as their real roster;
+ * dormant ones keep only a past roster and at most a couple of members.
  */
 
 export function engagement(ctx: Ctx, kind?: "core" | "regular" | "casual"): Engagement {
@@ -161,7 +163,7 @@ export function buildClubs(ctx: Ctx) {
   }
 }
 
-const TITLES: Record<string, string[]> = {
+const TITLES: Record<Topic, string[]> = {
   tech: ["Build Team Lead", "Lead Mentor", "Webmaster", "CAD Lead"],
   business: ["Portfolio Manager", "Alumni Liaison", "Social Chair"],
   health: ["Study Group Lead", "Service Hours Coordinator"],
@@ -174,6 +176,16 @@ const TITLES: Record<string, string[]> = {
   sports: ["Trip Leader", "Gear Manager", "Captain"],
   games: ["Tournament Director", "Social Chair"],
   ambassadors: ["Tour Lead"],
+  faith: ["Outreach Lead", "Music Lead", "Social Chair"],
+  advocacy: ["Campaign Lead", "Outreach Lead", "Social Media Lead"],
+  greek: ["Recruitment Chair", "Philanthropy Chair", "Social Chair", "Historian"],
+  honor: ["Induction Chair", "Tutoring Coordinator"],
+  media: ["Producer", "Editor", "Photographer"],
+  music: ["Section Leader", "Librarian"],
+  dance: ["Choreographer", "Costume Lead"],
+  spirit: ["Chant Leader", "Banner Captain"],
+  film: ["Programming Chair", "Projectionist"],
+  general: ["Social Chair", "Historian"],
 };
 
 /** Memberships for every club (personas first, then sampled students). */
@@ -214,9 +226,22 @@ export function buildMemberships(ctx: Ctx) {
   gwenAcm.endedAt = ctx.p("gwen").gradDate;
   gwenAcm.source = "IMPORT";
 
+  // Spread memberships: someone already in several clubs is less likely to be drawn for another.
+  const load = new Map<string, number>();
+  for (const c of ctx.clubs) for (const m of c.members) if (m.status === "ACTIVE") load.set(m.userId, (load.get(m.userId) ?? 0) + 1);
+  const spread = (s: Person) => 1 / (1 + 0.7 * (load.get(s.id) ?? 0));
+  const counted = (club: ClubM) => {
+    for (const m of club.members) if (m.status === "ACTIVE" && !ctx.person(m.userId).persona) load.set(m.userId, (load.get(m.userId) ?? 0) + 1);
+  };
+
   // ─── Sampled members ───────────────────────────────────────────────────────
   for (const club of ctx.clubs) {
     const def = club.def;
+    if (def.life === "dormant") {
+      dormantRoster(ctx, club, students);
+      counted(club);
+      continue;
+    }
     const founder = ctx.person(club.founderId);
     const founderEnd = founder.gradDate && founder.gradDate < club.end ? founder.gradDate : null;
     addMember(ctx, club, founder.id, {
@@ -237,9 +262,10 @@ export function buildMemberships(ctx: Ctx) {
       continue;
     }
 
-    // Co-founders: 2–4 friends of the founder who join on day one.
+    // Co-founders: 2–4 friends of the founder who join on day one (fewer in clubs with a small roster).
     const coPool = students.filter((s) => s.enrollStart < club.createdAt && (s.gradDate ?? NOW) > addDays(club.createdAt, 200) && !club.byUser.has(s.id));
-    for (const s of rng.weightedOrder(coPool, (s) => (def.college && s.collegeKey === def.college ? 5 : 1)).slice(0, rng.int(2, 4))) {
+    const coFounders = def.story ? rng.int(2, 4) : def.size <= 2 ? 0 : rng.int(1, Math.min(3, def.size - 1));
+    for (const s of rng.weightedOrder(coPool, (s) => (def.college && s.collegeKey === def.college ? 5 : 1)).slice(0, coFounders)) {
       const end = s.gradDate && s.gradDate < club.end ? s.gradDate : club.retiredAt;
       addMember(ctx, club, s.id, { status: end ? "ALUMNI" : "ACTIVE", source: "FOUNDER", joinedAt: addDays(club.createdAt, rng.float(0, 3)), endedAt: end, eng: engagement(ctx, "core") });
     }
@@ -259,7 +285,7 @@ export function buildMemberships(ctx: Ctx) {
       return b.getTime() - a.getTime() > 21 * DAY;
     });
     const affinity = (s: Person) => {
-      let w = s.propensity;
+      let w = s.propensity * spread(s);
       if (def.scope === "COLLEGE") w *= s.collegeKey === def.college ? 7 : 0.45;
       else if (def.scope === "UNIVERSITY") w *= 1.3;
       if (majorId && s.majorId === majorId) w *= 3;
@@ -299,6 +325,17 @@ export function buildMemberships(ctx: Ctx) {
       });
     }
 
+    // Directory clubs: no more on the roster today than the real list shows.
+    if (!def.story) {
+      const over = club.members.filter((m) => m.status === "ACTIVE").length - def.size;
+      const leavers = rng.shuffle(club.members.filter((x) => x.status === "ACTIVE" && x.joinedAt && x.joinedAt < addDays(NOW, -45)));
+      for (const m of leavers.slice(0, Math.max(0, over))) {
+        m.status = "LEFT";
+        m.endedAt = new Date(m.joinedAt!.getTime() + 21 * DAY + rng.next() * (NOW.getTime() - m.joinedAt!.getTime() - 30 * DAY));
+      }
+    }
+    counted(club);
+
     if (retired) continue;
 
     // Join requests waiting on the club's approval gate, plus a few decided ones.
@@ -317,20 +354,58 @@ export function buildMemberships(ctx: Ctx) {
 
     // Club-defined secondary titles on a few active members.
     if (rng.chance(0.55)) {
-      const titles = TITLES[def.category] ?? TITLES.culture;
+      const titles = TITLES[def.topic] ?? TITLES.general;
       const active = club.members.filter((m) => m.status === "ACTIVE" && !ctx.person(m.userId).persona);
       for (const m of rng.sample(active, rng.int(1, 3))) m.internalTitle = rng.pick(titles);
     }
   }
 
   // Two removals, for the roster history.
-  for (const key of ["anime", "ski"]) {
+  for (const key of ["paintball", "discgolf"]) {
     const club = ctx.club(key);
     const m = rng.pick(club.members.filter((x) => x.status === "ACTIVE" && x.source !== "FOUNDER" && !ctx.person(x.userId).persona));
     m.status = "REMOVED";
     m.endedAt = addDays(NOW, -rng.float(20, 120));
     if (m.joinedAt && m.endedAt < m.joinedAt) m.endedAt = addDays(m.joinedAt, 14);
   }
+}
+
+/**
+ * A dormant club's roster: a handful of people joined while it ran (founder
+ * first); by now all but `size` (0–2) of them have left or graduated.
+ */
+function dormantRoster(ctx: Ctx, club: ClubM, students: Person[]) {
+  const { rng, NOW } = ctx;
+  const def = club.def;
+  const lastEnd = ctx.term(def.lastActiveTerm!).endsOn;
+  const founder = ctx.person(club.founderId);
+  const pool = students.filter((s) => s.id !== founder.id && s.enrollStart < addDays(lastEnd, -60) && s.gradDate && s.gradDate > addDays(club.createdAt, 90));
+  const others = rng.weightedOrder(pool, (s) => s.propensity * (def.college ? (s.collegeKey === def.college ? 6 : 0.4) : 1)).slice(0, rng.int(2, 8));
+  const roster = [founder, ...others];
+  const stillHere = roster.filter((p) => p.gradDate && p.gradDate > addDays(NOW, 30) && p.kind === "STUDENT");
+  const keep = new Set(rng.sample(stillHere, def.size).map((p) => p.id));
+  roster.forEach((p, i) => {
+    const joinedAt = i === 0 ? club.createdAt : i <= 2 ? addDays(club.createdAt, rng.float(0, 3)) : joinTime(ctx, maxDate(club.createdAt, p.enrollStart), minDate(lastEnd, p.gradDate!));
+    if (!joinedAt || joinedAt >= addDays(NOW, -30)) return;
+    let status: MembershipStatus = "ACTIVE";
+    let endedAt: Date | null = null;
+    if (!keep.has(p.id)) {
+      const lo = addDays(joinedAt, 30);
+      const hi = minDate(addDays(lastEnd, 150), addDays(NOW, -30));
+      const leave = hi > lo ? new Date(lo.getTime() + rng.next() * (hi.getTime() - lo.getTime())) : lo;
+      if (p.gradDate && p.gradDate <= leave) {
+        status = "ALUMNI";
+        endedAt = p.gradDate;
+      } else {
+        status = "LEFT";
+        endedAt = minDate(leave, addDays(NOW, -30));
+      }
+    }
+    addMember(ctx, club, p.id, {
+      status, source: i <= 2 ? "FOUNDER" : joinedAt < fallStartDate(2024) ? "IMPORT" : "REGISTER", joinedAt, endedAt,
+      eng: { ...engagement(ctx), base: rng.float(0.25, 0.5) },
+    });
+  });
 }
 
 /** Ensure a club has an active, generated member graduating at `grad` (for election storylines). */

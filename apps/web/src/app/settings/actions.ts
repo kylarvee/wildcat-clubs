@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
 import { getCurrentUser } from "@/lib/auth/session";
 import * as profiles from "@/lib/domain/profiles";
+import * as details from "@/lib/domain/details";
 import type { YearMonth } from "@/lib/profiles/linkedin";
 
 /** Settings and the person's profile page show the same rows; refresh both. */
@@ -119,5 +120,25 @@ export async function markGraduatedAction(graduatedAt: string) {
   const r = await act((actor) => profiles.markGraduated(actor, { graduatedAt }));
   // Roles, memberships and org charts changed across clubs.
   if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
+export async function saveDetailsAction(input: details.DetailsInput) {
+  const r = await act((actor) => details.saveMyDetails(actor, input));
+  if (r.ok) {
+    revalidatePath("/settings/details");
+    revalidatePath("/tasks");
+    revalidatePath("/dashboard");
+  }
+  return r;
+}
+
+export async function confirmDetailsAction() {
+  const r = await act((actor) => details.confirmMyDetails(actor));
+  if (r.ok) {
+    revalidatePath("/settings/details");
+    revalidatePath("/tasks");
+    revalidatePath("/dashboard");
+  }
   return r;
 }

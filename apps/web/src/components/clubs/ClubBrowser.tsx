@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { Archive, ArrowDownWideNarrow, ArrowUpNarrowWide, LayoutGrid, List, Loader2, Search, Star, X } from "lucide-react";
-import type { ClubScope, ClubType } from "@prisma/client";
+import type { ClubCategory, ClubScope, ClubType } from "@prisma/client";
 import { cn } from "@/components/ui/cn";
-import { CLUB_SCOPE_LABEL, CLUB_SCOPES, CLUB_TYPE_LABEL, CLUB_TYPES } from "@/components/clubs/labels";
+import { CLUB_CATEGORIES, CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_SCOPES, CLUB_TYPE_LABEL, CLUB_TYPES } from "@/components/clubs/labels";
 import {
   CLUB_SORTS,
   clubListHref,
@@ -84,6 +84,7 @@ export function ClubBrowser({
   const chips: { key: string; label: string; clear: Partial<ClubListParams> }[] = [];
   if (params.q) chips.push({ key: "q", label: `“${params.q}”`, clear: { q: "" } });
   if (params.type) chips.push({ key: "type", label: CLUB_TYPE_LABEL[params.type], clear: { type: null } });
+  if (params.category) chips.push({ key: "category", label: CLUB_CATEGORY_LABEL[params.category], clear: { category: null } });
   if (params.college) chips.push({ key: "college", label: colleges.find((c) => c.slug === params.college)?.name ?? "College", clear: { college: null } });
   if (params.scope) chips.push({ key: "scope", label: CLUB_SCOPE_LABEL[params.scope], clear: { scope: null } });
   if (params.status) chips.push({ key: "status", label: STATUS_FILTER_LABEL[params.status], clear: { status: null } });
@@ -158,7 +159,15 @@ export function ClubBrowser({
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.3fr)]">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.3fr)]">
+          <FilterSelect label="Category" value={params.category ?? ""} onChange={(v) => go({ category: (v || null) as ClubCategory | null })}>
+            <option value="">All categories</option>
+            {CLUB_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {CLUB_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </FilterSelect>
           <FilterSelect label="Type" value={params.type ?? ""} onChange={(v) => go({ type: (v || null) as ClubType | null })}>
             <option value="">All types</option>
             {CLUB_TYPES.map((t) => (
@@ -239,7 +248,7 @@ export function ClubBrowser({
           </button>
         ))}
         {hasActiveFilters(params) ? (
-          <button type="button" onClick={() => go({ q: "", type: null, college: null, scope: null, status: null, mine: false })} className="text-xs font-medium text-ink-3 underline-offset-2 hover:text-ink hover:underline">
+          <button type="button" onClick={() => go({ q: "", type: null, category: null, college: null, scope: null, status: null, mine: false })} className="text-xs font-medium text-ink-3 underline-offset-2 hover:text-ink hover:underline">
             Clear all
           </button>
         ) : null}

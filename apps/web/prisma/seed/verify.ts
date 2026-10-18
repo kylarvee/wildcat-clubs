@@ -4,6 +4,8 @@
  */
 import { PrismaClient, type ClubRole } from "@prisma/client";
 import { PERSONAS } from "@/lib/auth/personas";
+import { evaluateClubActivity } from "@/lib/metrics/pure";
+import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
 
 const db = new PrismaClient();
 // Must match the seed run (SEED_NOW pins both).
@@ -19,16 +21,20 @@ async function user(key: string) {
   const p = PERSONAS.find((x) => x.key === key)!;
   return db.user.findUniqueOrThrow({ where: { email: p.email } });
 }
-async function club(slug: string) {
-  return db.club.findUniqueOrThrow({ where: { slug } });
+/** A seeded club by its story key (slugs follow the real names, keys don't change). */
+async function club(key: string) {
+  return db.club.findUniqueOrThrow({ where: { slug: clubByKey(key).slug } });
 }
 
 /** Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat. */
+let cached: { periodStart: Date; reqs: Awaited<ReturnType<typeof db.roleRequirement.findMany>> } | null = null;
 async function requirementState(userId: string, assignmentStartedAt: Date, clubApprovedAt: Date | null) {
-  const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
-  const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
-  const periodStart = terms.find((x) => x.academicYear === t.academicYear)!.startsOn;
-  const reqs = await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" } } });
+  if (!cached) {
+    const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+    const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
+    cached = { periodStart: terms.find((x) => x.academicYear === t.academicYear)!.startsOn, reqs: await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" } } }) };
+  }
+  const { periodStart, reqs } = cached;
   const out: { name: string; met: boolean; dueAt: Date; overdue: boolean }[] = [];
   for (const r of reqs) {
     const met =
@@ -46,6 +52,139 @@ async function hostCheckins(userId: string, clubId: string) {
   return db.attendance.count({ where: { userId, clubId } });
 }
 
+
+/** The real club list, the categories, today's officers against the list, and who reads as active. */
+async function clubChecks() {
+  const clubs = await db.club.findMany();
+  const dirNames = new Set(DIRECTORY.map((e) => e.name));
+  const approved = clubs.filter((c) => c.status === "APPROVED");
+  const demoNames = new Set(DEMO_CLUB_KEYS.map((k) => clubByKey(k).name));
+  const notReal = approved.filter((c) => c.type !== "COLLEGE_AMBASSADORS" && !dirNames.has(c.name));
+  check(
+    notReal.length === demoNames.size && notReal.every((c) => demoNames.has(c.name)),
+    "Every approved club is a real club from wsu-directory.json, except the two ambassador orgs and the named fictional demo clubs",
+    notReal.map((c) => c.name).join(", "),
+  );
+  const retired = clubs.filter((c) => c.status === "RETIRED");
+  check(retired.length > 0 && retired.every((c) => dirNames.has(c.name)), "Every retired club is a real club too", retired.map((c) => c.name).join(", "));
+  const real = clubs.filter((c) => dirNames.has(c.name));
+  const realApproved = real.filter((c) => c.status === "APPROVED").length;
+  check(
+    real.length === DIRECTORY.length && new Set(real.map((c) => c.name)).size === DIRECTORY.length && real.every((c) => c.status === "APPROVED" || c.status === "RETIRED"),
+    `All ${DIRECTORY.length} directory clubs are seeded, once each`,
+    `${realApproved} approved + ${real.length - realApproved} retired (story clubs); ${approved.length} approved in all with the ambassador orgs`,
+  );
+  check(approved.filter((c) => c.type !== "COLLEGE_AMBASSADORS" && !demoNames.has(c.name)).length === DIRECTORY.length - retired.length, "Approved real clubs = directory clubs minus the retired ones");
+  const lower = DIRECTORY.map((e) => e.name.toLowerCase());
+  const fictional = clubs.filter((c) => !dirNames.has(c.name) && c.type !== "COLLEGE_AMBASSADORS");
+  check(
+    fictional.every((c) => (demoNames.has(c.name) || ["DRAFT", "SUBMITTED", "CHANGES_REQUESTED", "REJECTED"].includes(c.status)) && !lower.some((n) => n.includes(c.name.toLowerCase()) || c.name.toLowerCase().includes(n))),
+    "Fictional clubs are the demo clubs or founding-stage/rejected ones, and no name overlaps a real club",
+    fictional.map((c) => `${c.name} (${c.status})`).join(", "),
+  );
+  check(clubs.every((c) => c.category !== null), "Every club has a category", Object.entries(clubs.reduce<Record<string, number>>((m, c) => ({ ...m, [String(c.category)]: (m[String(c.category)] ?? 0) + 1 }), {})).map(([k, v]) => `${k} ${v}`).join(", "));
+  const byName = new Map(DIRECTORY.map((e) => [e.name, e]));
+  const badEmail = real.filter((c) => (byName.get(c.name)!.email ?? null) !== c.contactEmail);
+  check(badEmail.length === 0, "Real clubs carry their real contact email (and none is invented)", badEmail.map((c) => c.name).join(", "));
+  const descr = real.filter((c) => byName.get(c.name)!.description.trim() && !(c.descriptionHtml ?? "").includes(byName.get(c.name)!.description.trim().split(/\s+/).slice(0, 4).join(" ").replace(/&/g, "&amp;")));
+  check(descr.length === 0, "Real clubs' About is their own purpose statement", descr.map((c) => c.name).join(", "));
+  check(clubs.every((c) => c.websiteUrl === null && Array.isArray(c.socialLinks) && (c.socialLinks as unknown[]).length === 0), "No website or social links were invented");
+  check(clubs.filter((c) => c.type === "AFFILIATE").every((c) => c.category === "FSL" || c.scope === "SPORTS"), "Affiliate clubs are FSL or club sports only");
+
+  // Today's leadership.
+  const current = await db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null }, _count: true });
+  const held = (clubId: string, role: string) => current.find((x) => x.clubId === clubId && x.role === role)?._count ?? 0;
+  const bySlug = new Map(clubs.map((c) => [c.slug, c]));
+  const story = CLUBS.filter((d) => d.story && d.status === "APPROVED");
+  const storyMissing = story.filter((d) => !held(bySlug.get(d.slug)!.id, "PRESIDENT") || !held(bySlug.get(d.slug)!.id, "ADVISOR"));
+  check(storyMissing.length === 0, "Every approved story club has a current president and advisor", storyMissing.map((d) => d.name).join(", "));
+  const listed = CLUBS.filter((d) => !d.story && d.life !== "dormant");
+  const offList = listed.filter((d) => {
+    const id = bySlug.get(d.slug)!.id;
+    const plan = d.seatPlan ?? {};
+    const officers = Object.entries(plan).filter(([k]) => k !== "President" && k !== "Vice President").reduce((n, [, v]) => n + v, 0);
+    return held(id, "PRESIDENT") !== (plan.President ?? 0) || held(id, "VP") !== (plan["Vice President"] ?? 0) || held(id, "OFFICER") !== officers || held(id, "ADVISOR") !== (d.advisors ?? 0);
+  });
+  check(offList.length === 0, `Directory clubs with members have the officers and advisors the list shows (${listed.length} clubs)`, offList.map((d) => d.name).join(", "));
+  const members = await db.membership.groupBy({ by: ["clubId"], where: { status: "ACTIVE", user: { kind: "STUDENT" } }, _count: true });
+  const memberCount = (clubId: string) => members.find((x) => x.clubId === clubId)?._count ?? 0;
+  const offRoster = listed.filter((d) => Math.abs(memberCount(bySlug.get(d.slug)!.id) - d.size) > 2);
+  check(offRoster.length === 0, "…and about as many members as their real roster (within 2)", offRoster.map((d) => `${d.name} ${memberCount(bySlug.get(d.slug)!.id)}/${d.size}`).join(", "));
+
+  // Dormant clubs: nobody on the real roster.
+  const dormant = CLUBS.filter((d) => d.life === "dormant").map((d) => bySlug.get(d.slug)!);
+  const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+  const counting = terms.filter((t) => t.countsForActivity);
+  const cur = counting.find((t) => t.startsOn <= NOW && NOW <= t.endsOn) ?? [...counting].reverse().find((t) => t.startsOn <= NOW)!;
+  const prev = [...counting].reverse().find((t) => t.startsOn < cur.startsOn)!;
+  const ayStarts = [...new Set(terms.map((t) => t.academicYear))].map((ay) => terms.find((t) => t.academicYear === ay)!.startsOn);
+  const lastYearStart = [...ayStarts].reverse().filter((d) => d <= NOW)[1];
+  const dormantIds = dormant.map((c) => c.id);
+  const lateEvents = await db.eventOccurrence.groupBy({ by: ["eventId"], where: { startsAt: { gte: lastYearStart }, event: { clubId: { in: dormantIds } } } });
+  const dormantLeaders = current.filter((x) => dormantIds.includes(x.clubId)).length;
+  const crowded = dormant.filter((c) => memberCount(c.id) > 2);
+  check(lateEvents.length === 0 && dormantLeaders === 0 && crowded.length === 0, `Dormant clubs (${dormant.length}): at most 2 members, no officers or advisor, no events this year or last`, `${lateEvents.length} events, ${dormantLeaders} seats, ${crowded.length} with >2 members`);
+
+  // Activity, by lib/metrics' own rule.
+  const heldRows = await db.$queryRawUnsafe<{ clubId: string; startsAt: Date }[]>(
+    `select x."clubId", o."startsAt" from "EventOccurrence" o join "Event" e on e.id = o."eventId"
+     join lateral (select e."clubId" union select c."clubId" from "EventCohost" c where c."eventId" = e.id and c.status = 'APPROVED') x on true
+     where o.status = 'SCHEDULED' and o."startsAt" <= $1 and x."clubId" is not null and exists (select 1 from "Attendance" a where a."occurrenceId" = o.id)`,
+    NOW,
+  );
+  const heldIn = (clubId: string, t: { startsOn: Date; endsOn: Date }) => heldRows.filter((r) => r.clubId === clubId && r.startsAt >= t.startsOn && r.startsAt <= new Date(t.endsOn.getTime() + 86_399_999)).length;
+  const activeOf = (c: (typeof clubs)[number]) =>
+    evaluateClubActivity({
+      status: c.status, createdAt: c.createdAt, heldEventsCurrentTerm: heldIn(c.id, cur), heldEventsPreviousTerm: heldIn(c.id, prev), registeredMembers: memberCount(c.id), activeMembers: 0,
+      at: NOW, terms, rule: { minEvents: 2, minMembers: 8 },
+    });
+  const ev = new Map(approved.map((c) => [c.id, activeOf(c)]));
+  const dormantInactive = dormant.filter((c) => !ev.get(c.id)!.active).length;
+  check(dormantInactive >= dormant.length * 0.9, "Most dormant clubs read as inactive", `${dormantInactive} of ${dormant.length}`);
+  const big = CLUBS.filter((d) => !d.story && d.life === "active").map((d) => bySlug.get(d.slug)!);
+  const bigActive = big.filter((c) => ev.get(c.id)!.active).length;
+  check(bigActive >= big.length * 0.8, "Most directory clubs with 8+ members read as active", `${bigActive} of ${big.length}`);
+  const small = CLUBS.filter((d) => d.life === "small").map((d) => bySlug.get(d.slug)!);
+  check(small.every((c) => !ev.get(c.id)!.active), "Directory clubs under 8 members read as inactive", `${small.length} clubs`);
+  for (const key of ["datasci", "firstgen", "pickleball"]) check(ev.get(bySlug.get(clubByKey(key).slug)!.id)!.inPilot, `${clubByKey(key).name} is in its pilot period`);
+  const inactiveStory = ["astro", "math", "modelun", "ceramics"].filter((k) => ev.get(bySlug.get(clubByKey(k).slug)!.id)!.active);
+  check(inactiveStory.length === 0, "The four story clubs that stopped meeting read as inactive", inactiveStory.join(", "));
+  const activeTotal = [...ev.values()].filter((x) => x.active).length;
+  check(activeTotal < approved.length / 2, "Most approved clubs are inactive, as in reality", `${activeTotal} active of ${approved.length} approved`);
+}
+
+/** Member details: one invented row per active student (Sam aside) and most faculty and staff. */
+async function detailChecks(samId: string, vanessaId: string, confirmedIds: string[]) {
+  const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+  const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
+  const ayStart = terms.find((x) => x.academicYear === t.academicYear)!.startsOn;
+  const students = await db.user.findMany({ where: { kind: "STUDENT", status: "ACTIVE" }, include: { details: true } });
+  const missing = students.filter((u) => !u.details && u.id !== samId);
+  check(missing.length === 0, "Every active student has member details (Sam's brand-new account aside)", `${missing.length} without`);
+  const rows = students.map((u) => u.details).filter((d): d is NonNullable<typeof d> => Boolean(d));
+  check(rows.every((d) => /^W0\d{7}$/.test(d.studentId ?? "") || d.studentId === null) && new Set(rows.map((d) => d.studentId).filter(Boolean)).size === rows.filter((d) => d.studentId).length, "Student IDs look like W0 + 7 digits and are unique");
+  check(rows.every((d) => d.phone === null || /^801-555-01\d\d$/.test(d.phone)) && rows.every((d) => d.emergencyPhone === null || /^\d{3}-555-01\d\d$/.test(d.emergencyPhone)), "Phones are in the fictional 555-01xx range");
+  check(rows.every((d) => (d.emergencyEmail === null || d.emergencyEmail.endsWith("@example.com")) && (d.contactEmail === null || d.contactEmail.endsWith("@example.com"))), "Personal and emergency emails are at example.com");
+  const age = (b: Date) => {
+    let a = NOW.getUTCFullYear() - b.getUTCFullYear();
+    if (NOW.getUTCMonth() < b.getUTCMonth() || (NOW.getUTCMonth() === b.getUTCMonth() && NOW.getUTCDate() < b.getUTCDate())) a--;
+    return a;
+  };
+  const ages = rows.filter((d) => d.birthDate).map((d) => age(d.birthDate!));
+  check(ages.filter((a) => a < 18).length === 1 && ages.every((a) => a >= 17 && a <= 30), "Students are 18–30, with exactly one 17-year-old", `${ages.filter((a) => a <= 24).length} of ${ages.length} are 18–24`);
+  const staff = await db.user.count({ where: { kind: "FACULTY_STAFF", status: "ACTIVE" } });
+  const staffRows = await db.personalDetails.findMany({ where: { user: { kind: "FACULTY_STAFF" } } });
+  check(staffRows.length >= staff * 0.7 && staffRows.every((d) => !d.studentId && !d.birthDate && !d.yearInSchool), "Most faculty and staff have details, without a student ID, birth date or year", `${staffRows.length} of ${staff}`);
+  const confirmed = rows.filter((d) => d.confirmedAt && d.confirmedAt >= ayStart).length;
+  const share = confirmed / rows.length;
+  check(share > 0.62 && share < 0.78, "About 70% of active students confirmed their details this academic year", `${confirmed} of ${rows.length}`);
+  const v = await db.personalDetails.findUnique({ where: { userId: vanessaId } });
+  check(Boolean(v) && !v!.confirmedAt, "Vanessa's details are unconfirmed");
+  const c = await db.personalDetails.findMany({ where: { userId: { in: confirmedIds } } });
+  const complete = (d: (typeof c)[number]) => [d.studentId, d.birthDate, d.gender, d.phone, d.yearInSchool, d.addressLine, d.addressCity, d.addressState, d.addressZip, d.emergencyName, d.emergencyRelationship, d.emergencyPhone, d.emergencyEmail].every((x) => x !== null && x !== "");
+  check(c.length === confirmedIds.length && c.every((d) => complete(d) && d.confirmedAt && d.confirmedAt >= ayStart), "Maya, Priya and Oscar are complete and confirmed");
+}
+
 async function main() {
   console.log("Personas");
   const sam = await user("sam");
@@ -58,11 +197,11 @@ async function main() {
   for (const m of mayaClubs) if ((await hostCheckins(maya.id, m.clubId)) >= 3) eligible.push(m.club.name);
   check(eligible.length === 3, "Maya has ≥3 check-ins in exactly 3 clubs", eligible.join(", "));
   check((await db.review.count({ where: { userId: maya.id } })) === 1, "Maya has left one review");
-  const anime = await club("anime-club");
-  check((await db.calendarSubscription.count({ where: { userId: maya.id, clubId: anime.id } })) === 1 && !mayaClubs.some((m) => m.clubId === anime.id), "Maya follows Anime Club's calendar without joining");
-  const psych = await club("psychology-club");
+  const anime = await club("anime");
+  check((await db.calendarSubscription.count({ where: { userId: maya.id, clubId: anime.id } })) === 1 && !mayaClubs.some((m) => m.clubId === anime.id), `Maya follows ${anime.name}'s calendar without joining`);
+  const psych = await club("psych");
   const election = await db.election.findFirst({ where: { clubId: psych.id, status: "VOTING" }, include: { candidates: true } });
-  check(Boolean(election) && election!.candidates.length === 3 && election!.votingClosesAt > NOW, "Psychology Club has a VOTING President election with 3 candidates");
+  check(Boolean(election) && election!.candidates.length === 3 && election!.votingClosesAt > NOW, `${psych.name} has a VOTING President election with 3 candidates`);
   check(election ? (await db.vote.count({ where: { electionId: election.id, voterId: maya.id } })) === 0 : false, "Maya hasn't voted yet");
   // Active = checked in within 31 days, or at one of the club's last two held events.
   const held = await db.eventOccurrence.findMany({
@@ -73,15 +212,16 @@ async function main() {
   });
   const recent = await db.attendance.count({ where: { userId: maya.id, clubId: psych.id, checkedInAt: { gte: new Date(NOW.getTime() - 31 * DAY) } } });
   const lastTwo = await db.attendance.count({ where: { userId: maya.id, occurrenceId: { in: held.map((h) => h.id) } } });
-  check(recent > 0 || lastTwo > 0, "Maya is an active Psychology Club member");
-  const live = await db.eventOccurrence.findFirst({ where: { startsAt: { lte: NOW }, endsAt: { gte: NOW }, event: { club: { slug: "service-volunteer-club" } } }, include: { event: true } });
-  check(Boolean(live) && live!.event.allowSelfCheckIn && live!.startsAt.getTime() >= NOW.getTime() - 25 * 60_000, "A Service & Volunteer event is live now with self check-in", live ? `${live.event.title} (${live.checkinCode})` : "");
+  check(recent > 0 || lastTwo > 0, `Maya is an active ${psych.name} member`);
+  const service = await club("service");
+  const live = await db.eventOccurrence.findFirst({ where: { startsAt: { lte: NOW }, endsAt: { gte: NOW }, event: { clubId: service.id } }, include: { event: true } });
+  check(Boolean(live) && live!.event.allowSelfCheckIn && live!.startsAt.getTime() >= NOW.getTime() - 25 * 60_000, `A ${service.name} event is live now with self check-in`, live ? `${live.event.title} (${live.checkinCode})` : "");
   check(live ? (await db.attendance.count({ where: { occurrenceId: live.id, userId: maya.id } })) === 0 : false, "Maya hasn't checked in to the live event");
   const endOfDay = new Date(NOW.getTime() + 8 * 3_600_000);
   check((await db.eventOccurrence.count({ where: { startsAt: { gt: NOW, lte: endOfDay }, event: { clubId: { in: mayaClubs.map((m) => m.clubId) } } } })) > 0, "Another of Maya's clubs has an event later today");
 
   const oscar = await user("oscar");
-  const fic = await club("finance-investment-club");
+  const fic = await club("fic");
   const tre = await db.roleAssignment.findFirst({ where: { userId: oscar.id, clubId: fic.id, endedAt: null }, include: { position: true } });
   check(tre?.role === "OFFICER" && tre.position?.name === "Treasurer" && tre.permissions.includes("budget"), "Oscar is Treasurer (OFFICER, budget permission)");
   check(Boolean(tre) && Math.abs(NOW.getTime() - tre!.startedAt.getTime() - 20 * DAY) < 2 * DAY, "Oscar's role started ~20 days ago");
@@ -91,28 +231,32 @@ async function main() {
   check((await db.fundingRequest.count({ where: { clubId: fic.id, status: "DRAFT" } })) >= 1 && (await db.fundingRequest.count({ where: { clubId: fic.id, status: "SUBMITTED", submittedById: oscar.id } })) === 1, "FIC has a DRAFT and Oscar's SUBMITTED funding request");
 
   const vanessa = await user("vanessa");
-  const swe = await club("society-of-women-engineers");
-  check((await db.roleAssignment.count({ where: { userId: vanessa.id, clubId: swe.id, role: "VP", endedAt: null } })) === 1, "Vanessa is VP of SWE");
+  const swe = await club("swe");
+  check((await db.roleAssignment.count({ where: { userId: vanessa.id, clubId: swe.id, role: "VP", endedAt: null } })) === 1, `Vanessa is VP of ${swe.name}`);
   check((await db.eventCohost.count({ where: { clubId: swe.id, status: "PENDING" } })) >= 1, "SWE has a pending incoming co-host request");
   check((await db.task.count({ where: { clubId: swe.id, sourceType: "cohost", status: "OPEN", capability: "events" } })) >= 1, "…with an APPROVAL task for SWE's events holders");
   check((await db.election.count({ where: { clubId: swe.id, status: "CLOSED", method: "LEADERSHIP_VOTE" } })) === 1, "SWE has a CLOSED leadership-vote election awaiting apply");
   check(
-    (await db.task.count({ where: { assigneeId: vanessa.id, required: true, status: "OPEN", title: "Fill out: Club Member Code of Conduct" } })) === 1,
-    "Vanessa owes WSUSA's member code-of-conduct form (a required task)",
+    (await db.task.count({ where: { assigneeId: vanessa.id, required: true, status: "OPEN", title: "Fill out: Club Member Agreements" } })) === 1,
+    "Vanessa owes WSUSA's Club Member Agreements form (a required task)",
   );
   check((await db.task.count({ where: { sourceType: "requirement", required: false } })) === 0, "Every requirement task is marked required");
 
   const priya = await user("priya");
-  const robotics = await club("wildcat-robotics");
-  check((await db.roleAssignment.count({ where: { userId: priya.id, clubId: robotics.id, role: "PRESIDENT", endedAt: null } })) === 1, "Priya is President of Wildcat Robotics");
+  const robotics = await club("robotics");
+  check((await db.roleAssignment.count({ where: { userId: priya.id, clubId: robotics.id, role: "PRESIDENT", endedAt: null } })) === 1, `Priya is President of ${robotics.name}`);
   const rActive = await db.membership.count({ where: { clubId: robotics.id, status: "ACTIVE" } });
-  check(rActive >= 85 && rActive <= 100, "Wildcat Robotics has ~90 active members", String(rActive));
-  check(robotics.joinPolicy === "APPROVAL" && (await db.membership.count({ where: { clubId: robotics.id, status: "PENDING" } })) === 5, "Robotics has an approval gate with 5 pending requests");
+  check(rActive >= 85 && rActive <= 100, `${robotics.name} has ~90 active members`, String(rActive));
+  check(robotics.joinPolicy === "APPROVAL" && (await db.membership.count({ where: { clubId: robotics.id, status: "PENDING" } })) === 5, "…with an approval gate and 5 pending requests");
   check((await db.task.count({ where: { clubId: robotics.id, sourceType: "membership", status: "OPEN", capability: "roster" } })) === 5, "…each with an APPROVAL task (roster)");
-  for (const [slug, label] of [["acm-computer-science-club", "ACM"], ["society-of-women-engineers", "SWE"]]) {
-    const c = await club(slug);
-    check((await db.eventCohost.count({ where: { clubId: c.id, status: "APPROVED", event: { clubId: robotics.id } } })) >= 3, `Robotics co-hosts with ${label}`);
+  for (const [key, label] of [["acm", "CSWS"], ["swe", "SWE"]]) {
+    const c = await club(key);
+    check((await db.eventCohost.count({ where: { clubId: c.id, status: "APPROVED", event: { clubId: robotics.id } } })) >= 3, `${robotics.name} co-hosts with ${label}`);
   }
+  check(
+    (await db.task.count({ where: { assigneeId: priya.id, required: true, status: "OPEN", title: "Fill out: Annual Club Re-registration", clubId: robotics.id } })) === 1,
+    `Priya owes WSUSA's Annual Club Re-registration for ${robotics.name} (a required task)`,
+  );
   for (const k of ["priya", "vanessa"]) {
     const u = await user(k);
     const a = await db.roleAssignment.findFirst({ where: { userId: u.id, endedAt: null, role: { in: ["PRESIDENT", "VP"] } }, include: { club: true } });
@@ -121,27 +265,27 @@ async function main() {
   }
 
   const amir = await user("amir");
-  const gsbe = await club("goddard-school-ambassadors");
-  for (const slug of ["accounting-society", "marketing-association"]) {
-    const c = await club(slug);
+  const gsbe = await club("gsbe-amb");
+  for (const key of ["accounting", "marketing"]) {
+    const c = await club(key);
     const a = await db.roleAssignment.findFirst({ where: { userId: amir.id, clubId: c.id, endedAt: null }, include: { position: true } });
     check(a?.role === "AMBASSADOR" && a.viaClubId === gsbe.id && a.position?.name === "College Ambassador", `Amir is placed in ${c.name} as College Ambassador via the Goddard org`);
   }
 
   const frank = await user("frank");
-  const bee = await club("wildcat-beekeeping-society");
-  const bg = await club("board-game-guild");
-  check(bee.status === "DRAFT" && bee.createdById === frank.id, "Frank's Wildcat Beekeeping Society is a DRAFT");
+  const bee = await club("beekeeping");
+  const bg = await club("boardgames");
+  check(bee.status === "DRAFT" && bee.createdById === frank.id, `Frank's ${bee.name} is a DRAFT`);
   const nathan = await user("nathan");
   const inv = await db.advisorInvite.findFirst({ where: { clubId: bee.id, status: "PENDING", inviteeId: nathan.id } });
   check(Boolean(inv), "Pending advisor invite to Prof. Nathan Reed (inviteeId set)");
   check((await db.task.count({ where: { assigneeId: nathan.id, sourceType: "advisorInvite", sourceId: inv?.id, status: "OPEN" } })) === 1, "Nathan has the advisor-invite APPROVAL task");
-  check(bg.status === "SUBMITTED" && (await db.advisorInvite.count({ where: { clubId: bg.id, status: "ACCEPTED" } })) === 1, "Board Game Guild is SUBMITTED with an accepted advisor");
+  check(bg.status === "SUBMITTED" && (await db.advisorInvite.count({ where: { clubId: bg.id, status: "ACCEPTED" } })) === 1, `${bg.name} is SUBMITTED with an accepted advisor`);
   check((await db.clubDocument.count({ where: { clubId: bg.id, status: "ACTIVE" } })) === 2, "…and an adopted constitution and bylaws");
   check((await db.task.count({ where: { sourceType: "club", sourceId: bg.id, status: "OPEN", assigneeType: "ADMINS" } })) === 1, "…and an admin review task");
 
   const gwen = await user("gwen");
-  const ailab = await club("applied-ai-lab");
+  const ailab = await club("ailab");
   const gp = await db.roleAssignment.findFirst({ where: { userId: gwen.id, clubId: ailab.id, role: "PRESIDENT" }, include: { projects: { include: { files: true } } } });
   check(gwen.status === "ALUMNI" && gwen.graduatedAt?.getUTCMonth() === 4, "Gwen is an alumna who graduated in May");
   check(gp?.endReason === "GRADUATED" && gp.startedAt.getUTCFullYear() === 2024 && gp.endedAt?.getUTCFullYear() === 2026, "Gwen was Applied AI Lab President 2024–2026 (GRADUATED)");
@@ -149,23 +293,21 @@ async function main() {
   check((await db.election.count({ where: { clubId: ailab.id, status: "APPLIED" } })) >= 1, "Applied AI Lab has an APPLIED election in its history");
 
   const elena = await user("elena");
-  for (const slug of ["wildcat-robotics", "pre-med-society"]) {
-    const c = await club(slug);
+  for (const key of ["robotics", "premed"]) {
+    const c = await club(key);
     check((await db.roleAssignment.count({ where: { userId: elena.id, clubId: c.id, role: "ADVISOR", endedAt: null } })) === 1, `Dr. Alvarez advises ${c.name}`);
   }
   const alex = await user("alex");
   const sydney = await user("sydney");
   check(alex.platformRole === "ADMIN" && sydney.platformRole === "SYSADMIN", "Alex is ADMIN, Sydney is SYSADMIN");
 
+  console.log("Clubs");
+  await clubChecks();
+
+  console.log("Member details");
+  await detailChecks(sam.id, vanessa.id, [maya.id, priya.id, oscar.id]);
+
   console.log("Rules");
-  const approved = await db.club.findMany({ where: { status: "APPROVED" } });
-  let noPres = 0;
-  let noAdv = 0;
-  for (const c of approved) {
-    if (!(await db.roleAssignment.count({ where: { clubId: c.id, role: "PRESIDENT", endedAt: null } }))) noPres++;
-    if (!(await db.roleAssignment.count({ where: { clubId: c.id, role: "ADVISOR", endedAt: null } }))) noAdv++;
-  }
-  check(noPres === 0 && noAdv === 0, "Every approved club has a current president and advisor", `${noPres} without president, ${noAdv} without advisor`);
   const leaders = await db.roleAssignment.findMany({ where: { endedAt: null, role: { in: ["OFFICER", "VP", "PRESIDENT"] as ClubRole[] }, club: { status: "APPROVED" } }, include: { club: true, user: true } });
   const overdue: string[] = [];
   for (const a of leaders) {
@@ -190,11 +332,18 @@ async function main() {
   check((await db.attendance.count({ where: { checkedInAt: { gt: NOW } } })) === 0, "No check-ins in the future");
   const futureAtt = await db.attendance.count({ where: { occurrence: { startsAt: { gt: NOW } } } });
   check(futureAtt === 0, "No check-ins at occurrences that haven't started");
-  const polisci = await club("political-science-society");
+  const polisci = await club("discgolf");
   const bombs = await db.review.count({ where: { clubId: polisci.id, rating: 1, createdAt: { gte: new Date(NOW.getTime() - 36 * 3_600_000) } } });
-  check(bombs === 4, "Political Science Society got four 1★ reviews in the last 36 hours");
+  check(bombs === 4, `${polisci.name} got four 1★ reviews in the last 36 hours`);
   check((await db.task.count({ where: { sourceType: "reviewBombing", sourceId: polisci.id, status: "OPEN", assigneeType: "ADMINS" } })) === 1, "…and an open review-bombing admin task");
-  check((await db.review.count({ where: { hiddenAt: { not: null } } })) === 1, "One hidden review");
+  const paintball = await club("paintball");
+  check((await db.review.count({ where: { hiddenAt: { not: null }, clubId: paintball.id } })) === 1 && (await db.review.count({ where: { hiddenAt: { not: null } } })) === 1, `One hidden review, on ${paintball.name}`);
+  const dirNames = DIRECTORY.map((e) => e.name);
+  const realComplaints = await db.complaint.count({ where: { club: { name: { in: dirNames } } } });
+  const realHidden = await db.review.count({ where: { hiddenAt: { not: null }, club: { name: { in: dirNames } } } });
+  const realLow = await db.review.count({ where: { rating: { lte: 2 }, club: { name: { in: dirNames } } } });
+  const realFlags = await db.reviewFlag.count({ where: { review: { club: { name: { in: dirNames } } } } });
+  check(realComplaints + realHidden + realLow + realFlags === 0, "No report, hidden or flagged review, or rating under 3★ is on a real club", `${realComplaints} reports, ${realHidden} hidden, ${realFlags} flags, ${realLow} low ratings`);
   const ineligible = await db.$queryRawUnsafe<{ n: bigint }[]>(
     `select count(*) n from "Review" r where (select count(*) from "Attendance" a where a."userId"=r."userId" and a."clubId"=r."clubId" and a."checkedInAt" < r."createdAt") < 3`,
   );

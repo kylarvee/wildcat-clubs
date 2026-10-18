@@ -1,6 +1,6 @@
-import { BookOpenCheck, CalendarCheck } from "lucide-react";
+import { BookOpenCheck, CalendarCheck, IdCard } from "lucide-react";
 
-export type RequirementLike = { id: string; name: string; description: string | null; kind: "TEST" | "TRAINING"; graceDays: number };
+export type RequirementLike = { id: string; name: string; description: string | null; kind: "TEST" | "TRAINING" | "PROFILE"; graceDays: number };
 
 /** What a role asks of whoever takes it: officer tests and trainings with their grace period. */
 export function RequirementList({ requirements, roleLabel }: { requirements: RequirementLike[]; roleLabel: string }) {
@@ -10,7 +10,7 @@ export function RequirementList({ requirements, roleLabel }: { requirements: Req
   return (
     <ul className="space-y-2">
       {requirements.map((r) => {
-        const Icon = r.kind === "TEST" ? BookOpenCheck : CalendarCheck;
+        const Icon = r.kind === "TEST" ? BookOpenCheck : r.kind === "PROFILE" ? IdCard : CalendarCheck;
         return (
           <li key={r.id} className="flex gap-3 rounded-lg border border-line bg-surface px-3 py-2">
             <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />

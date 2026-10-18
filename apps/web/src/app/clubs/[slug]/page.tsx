@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Archive, CalendarX2, Hammer, History, Mail } from "lucide-react";
 import { loadVisibleClub } from "@/lib/clubs/context";
-import { clubMetricsFor, clubUpcomingEvents, shouldPromptForApp, viewerClubStates, visibleAnnouncementCount } from "@/lib/clubs/queries";
+import { clubMeetingPattern, clubMetricsFor, clubUpcomingEvents, shouldPromptForApp, viewerClubStates, visibleAnnouncementCount } from "@/lib/clubs/queries";
 import { getConfig } from "@/lib/config";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtLongDate } from "@/lib/time";
@@ -22,7 +22,7 @@ import { ClubHero } from "@/components/clubs/ClubHero";
 import { ClubResources } from "@/components/clubs/ClubResources";
 import { ClubStats } from "@/components/clubs/ClubStats";
 import { EventList } from "@/components/clubs/EventList";
-import { CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/components/clubs/labels";
+import { CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL, readSocialLinks, SOCIAL_LABEL } from "@/components/clubs/labels";
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
@@ -57,20 +57,37 @@ export default async function ClubPage({ params, searchParams }: Props) {
   const isPublic = approved || retired;
   const member = Boolean(access?.isMember);
 
-  const [states, promptForApp, metrics, events, announcementCount, cfg] = await Promise.all([
+  const [states, promptForApp, metrics, events, announcementCount, cfg, meets] = await Promise.all([
     user ? viewerClubStates(user.id) : Promise.resolve(null),
     user && approved ? shouldPromptForApp(user.id) : Promise.resolve(false),
     clubMetricsFor(club.id),
     isPublic ? clubUpcomingEvents(club.id, user) : Promise.resolve([]),
     visibleAnnouncementCount(club.id, access),
     getConfig(),
+    approved ? clubMeetingPattern(club.id, user) : Promise.resolve([] as string[]),
   ]);
+  const links = readSocialLinks(club.socialLinks);
   const subscribed = Boolean(states?.get(club.id)?.subscribed);
   const autoRegister = approved && Boolean(user) && sp.register === "1";
   const office = cfg["wsusa.office"];
 
   const details = [
     { label: "Club type", value: <span title={CLUB_TYPE_HINT[club.type]}>{CLUB_TYPE_LABEL[club.type]}</span> },
+    ...(club.category ? [{ label: "Category", value: CLUB_CATEGORY_LABEL[club.category] }] : []),
+    ...(meets.length
+      ? [
+          {
+            label: "Meets",
+            value: (
+              <ul className="space-y-0.5">
+                {meets.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            ),
+          },
+        ]
+      : []),
     { label: club.scope === "COLLEGE" ? "College" : "Where", value: club.scope === "COLLEGE" && club.college ? club.college.name : CLUB_SCOPE_LABEL[club.scope] },
     ...(club.department ? [{ label: "Department", value: club.department.name }] : []),
     ...(club.focusMajor || club.focusOther ? [{ label: "Focus", value: club.focusMajor?.name ?? club.focusOther }] : []),
@@ -83,6 +100,31 @@ export default async function ClubPage({ params, searchParams }: Props) {
               <a href={`mailto:${club.contactEmail}`} className="inline-flex items-center gap-1 break-all text-brand-600 hover:underline">
                 <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {club.contactEmail}
               </a>
+            ),
+          },
+        ]
+      : []),
+    ...(club.websiteUrl || links.length
+      ? [
+          {
+            label: "Online",
+            value: (
+              <ul className="space-y-0.5">
+                {club.websiteUrl ? (
+                  <li>
+                    <a href={club.websiteUrl} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-brand-600 hover:underline">
+                      Website
+                    </a>
+                  </li>
+                ) : null}
+                {links.map((l) => (
+                  <li key={l.url}>
+                    <a href={l.url} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-brand-600 hover:underline">
+                      {SOCIAL_LABEL[l.platform]}
+                    </a>
+                  </li>
+                ))}
+              </ul>
             ),
           },
         ]

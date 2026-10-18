@@ -17,12 +17,19 @@ export const metadata: Metadata = {
   description: `Browse every WSUSA-approved student club at ${INSTITUTION.name}. Sort by rating, activity and membership, and register in a click.`,
 };
 
+/** Clubs shown per step; "Show more" adds another step (the count and filters cover them all). */
+const STEP = 48;
+
 export default async function ClubsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await getCurrentUser();
-  const parsed = parseClubListParams(await searchParams);
+  const sp = await searchParams;
+  const parsed = parseClubListParams(sp);
+  const showParam = Number(Array.isArray(sp.show) ? sp.show[0] : sp.show);
+  const limit = Number.isFinite(showParam) && showParam > STEP ? Math.min(Math.ceil(showParam / STEP) * STEP, 2000) : STEP;
   // "My clubs" means nothing to a signed-out visitor.
   const params = user ? parsed : { ...parsed, mine: false };
   const [result, promptForApp] = await Promise.all([listClubs(params, user), user ? shouldPromptForApp(user.id) : Promise.resolve(false)]);
+  const shownItems = result.items.slice(0, limit);
   const signedIn = Boolean(user);
   const startHref = user ? "/clubs/new" : `/login?next=${encodeURIComponent("/clubs/new")}`;
   const canStart = !user || can(user, "club.create");
@@ -78,16 +85,26 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
               />
             )
           ) : params.view === "list" ? (
-            <ClubTable clubs={result.items} states={result.states} signedIn={signedIn} />
+            <ClubTable clubs={shownItems} states={result.states} signedIn={signedIn} />
           ) : (
             <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="Clubs">
-              {result.items.map((club) => (
+              {shownItems.map((club) => (
                 <li key={club.id} className="flex min-w-0">
                   <ClubCard club={club} state={result.states.get(club.id)} signedIn={signedIn} />
                 </li>
               ))}
             </ul>
           )}
+          {result.items.length > shownItems.length ? (
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <p className="text-sm text-ink-3">
+                Showing {shownItems.length} of {result.items.length}
+              </p>
+              <ButtonLink href={`${clubListHref(params)}${clubListHref(params).includes("?") ? "&" : "?"}show=${limit + STEP}`} variant="outline" scroll={false}>
+                Show more clubs
+              </ButtonLink>
+            </div>
+          ) : null}
         </ClubBrowser>
       </AppPromptProvider>
     </Container>

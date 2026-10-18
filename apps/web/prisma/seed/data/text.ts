@@ -1,12 +1,12 @@
 import type { EventKind } from "@prisma/client";
-import type { Category } from "./clubs";
+import type { Topic } from "./clubs";
 
 /** Text banks: event ideas, reviews, chat, announcements and profile bits. */
 
 export type EventIdea = { title: string; kind: EventKind; where?: "campus" | "service" | "social" | "outdoors" | "virtual"; minutes?: number; cost?: [string, number, number] };
 
 // cost = [description, quantity, unit cost in dollars]
-export const EVENT_IDEAS: Record<Category, EventIdea[]> = {
+export const EVENT_IDEAS: Record<Topic, EventIdea[]> = {
   tech: [
     { title: "Intro to Git & GitHub Workshop", kind: "WORKSHOP" },
     { title: "Résumé Review with Industry Engineers", kind: "WORKSHOP" },
@@ -109,7 +109,7 @@ export const EVENT_IDEAS: Record<Category, EventIdea[]> = {
     { title: "Weekend Trip", kind: "SOCIAL", where: "outdoors", minutes: 480, cost: ["Van rental", 2, 120] },
     { title: "Home Tournament", kind: "COMPETITION", minutes: 300, cost: ["Tournament fees", 1, 200] },
     { title: "Season Kickoff Party", kind: "SOCIAL", cost: ["Snacks", 1, 80] },
-    { title: "Hat Tournament Fundraiser", kind: "FUNDRAISER", minutes: 240 },
+    { title: "Charity Tournament", kind: "FUNDRAISER", minutes: 240 },
     { title: "Safety & Certification Clinic", kind: "TRAINING", minutes: 120 },
   ],
   games: [
@@ -126,9 +126,82 @@ export const EVENT_IDEAS: Record<Category, EventIdea[]> = {
     { title: "Prospective Student Tour Day", kind: "SERVICE", minutes: 180 },
     { title: "Ambassador Training", kind: "TRAINING" },
   ],
+  faith: [
+    { title: "Welcome Back Barbecue", kind: "SOCIAL", where: "outdoors", minutes: 120, cost: ["Burgers & drinks", 1, 180] },
+    { title: "Study Group & Discussion", kind: "OTHER" },
+    { title: "Service Saturday", kind: "SERVICE", where: "service", minutes: 180 },
+    { title: "Guest Speaker Night", kind: "OTHER", minutes: 90 },
+    { title: "Finals Week Snack Break", kind: "SOCIAL", cost: ["Snacks", 1, 70] },
+    { title: "Game Night", kind: "SOCIAL", minutes: 120 },
+  ],
+  advocacy: [
+    { title: "Voter Registration Table", kind: "SERVICE", minutes: 240 },
+    { title: "Panel Discussion", kind: "WORKSHOP", minutes: 90 },
+    { title: "Documentary Screening & Discussion", kind: "OTHER", minutes: 150 },
+    { title: "Letter-Writing Night", kind: "OTHER" },
+    { title: "Awareness Week Booth", kind: "SERVICE", minutes: 240, cost: ["Printing", 200, 0.25] },
+    { title: "Community Cleanup", kind: "SERVICE", where: "service", minutes: 180 },
+  ],
+  greek: [
+    { title: "Rush Week Open House", kind: "SOCIAL", minutes: 120, cost: ["Refreshments", 1, 150] },
+    { title: "Philanthropy Fundraiser", kind: "FUNDRAISER", minutes: 240 },
+    { title: "Study Hours", kind: "OTHER", minutes: 120 },
+    { title: "Sisterhood/Brotherhood Night", kind: "SOCIAL", minutes: 120 },
+    { title: "Service Project", kind: "SERVICE", where: "service", minutes: 180 },
+  ],
+  honor: [
+    { title: "New Member Induction Ceremony", kind: "OTHER", minutes: 90, cost: ["Certificates & cords", 1, 160] },
+    { title: "Grad School Application Workshop", kind: "WORKSHOP" },
+    { title: "Faculty Research Talk", kind: "WORKSHOP" },
+    { title: "Tutoring Night", kind: "SERVICE", minutes: 120 },
+    { title: "Scholarship Info Session", kind: "WORKSHOP", where: "virtual" },
+  ],
+  media: [
+    { title: "Pitch Meeting", kind: "OTHER" },
+    { title: "Interviewing Workshop", kind: "WORKSHOP" },
+    { title: "Audio Editing Basics", kind: "WORKSHOP" },
+    { title: "Portfolio Review with Alumni", kind: "WORKSHOP", minutes: 90 },
+    { title: "Open House & Studio Tour", kind: "SOCIAL" },
+  ],
+  music: [
+    { title: "Jam Session", kind: "SOCIAL", minutes: 120 },
+    { title: "End-of-Semester Recital", kind: "OTHER", minutes: 120, cost: ["Programs printing", 80, 0.5] },
+    { title: "Masterclass", kind: "WORKSHOP", minutes: 90 },
+    { title: "Open Mic Night", kind: "SOCIAL", minutes: 120 },
+    { title: "Community Concert", kind: "SERVICE", where: "service", minutes: 120 },
+  ],
+  dance: [
+    { title: "Beginner Lesson Night", kind: "WORKSHOP", minutes: 90 },
+    { title: "Social Dance", kind: "SOCIAL", minutes: 150, cost: ["Sound system rental", 1, 90] },
+    { title: "Showcase Performance", kind: "OTHER", minutes: 120 },
+    { title: "Workshop with a Guest Instructor", kind: "WORKSHOP", minutes: 120, cost: ["Instructor fee", 1, 150] },
+    { title: "Practice Marathon", kind: "PRACTICE", minutes: 180 },
+  ],
+  spirit: [
+    { title: "Tailgate Before the Home Opener", kind: "SOCIAL", where: "campus", minutes: 150, cost: ["Food & drinks", 1, 250] },
+    { title: "Sign & Banner Painting Night", kind: "OTHER", cost: ["Paint and poster board", 1, 85] },
+    { title: "Away Game Watch Party", kind: "SOCIAL", minutes: 150, cost: ["Snacks", 1, 60] },
+    { title: "Homecoming Spirit Week Booth", kind: "OTHER", minutes: 240 },
+    { title: "Student Section Meetup", kind: "SOCIAL" },
+  ],
+  film: [
+    { title: "Cult Classic Double Feature", kind: "SOCIAL", minutes: 240, cost: ["Popcorn & drinks", 1, 55] },
+    { title: "Costume Screening Night", kind: "SOCIAL", minutes: 180 },
+    { title: "Short Film Night", kind: "OTHER", minutes: 120 },
+    { title: "Trivia & Trailers", kind: "SOCIAL" },
+    { title: "Outdoor Movie Night", kind: "SOCIAL", where: "social", minutes: 150, cost: ["Projector rental", 1, 120] },
+    { title: "Filmmaking Workshop", kind: "WORKSHOP" },
+  ],
+  general: [
+    { title: "Welcome Social", kind: "SOCIAL", cost: ["Snacks", 1, 50] },
+    { title: "Officer Q&A and Planning Night", kind: "OTHER" },
+    { title: "Movie Night", kind: "SOCIAL", minutes: 150 },
+    { title: "Service Day", kind: "SERVICE", where: "service", minutes: 180 },
+    { title: "End-of-Semester Party", kind: "SOCIAL", minutes: 120, cost: ["Pizza", 6, 14] },
+  ],
 };
 
-export const DRAFT_IDEAS: Record<Category, string[]> = {
+export const DRAFT_IDEAS: Record<Topic, string[]> = {
   tech: ["Alumni panel in the spring?", "Joint hackathon with Utah State", "Open house for the makerspace", "Workshop: intro to Raspberry Pi"],
   business: ["Trip to the Salt Lake CFA Society lunch", "Mock interview night with Goddard career services", "Panel on starting a business in Ogden"],
   health: ["Shadowing info night", "Partner with Nursing on a health fair", "MCAT practice exam day"],
@@ -141,6 +214,16 @@ export const DRAFT_IDEAS: Record<Category, string[]> = {
   sports: ["Spring trip to Moab", "Learn-to-play clinic", "Alumni game"],
   games: ["Charity tournament", "Convention carpool", "Collaborative mural"],
   ambassadors: ["Club leaders breakfast", "College-wide service day"],
+  faith: ["Retreat in the spring", "Interfaith dinner", "Service trip"],
+  advocacy: ["Candidate forum", "Speaker series", "Teach-in on campus"],
+  greek: ["Philanthropy week", "Alumni brunch", "Joint mixer with another chapter"],
+  honor: ["Induction ceremony venue", "Tutoring partnership with the Learning Center", "Conference trip"],
+  media: ["Live broadcast of a home game", "Workshop with a local newsroom", "Podcast series"],
+  music: ["Spring concert", "Instrument drive for local schools", "Recording session"],
+  dance: ["Spring showcase", "Partner with another dance club", "Beginner series"],
+  spirit: ["Road trip to an away game", "Homecoming float", "New student orientation booth"],
+  film: ["Halloween marathon", "Campus short film contest", "Screening with a local filmmaker"],
+  general: ["Spring social", "Joint event with another club", "Fundraiser idea"],
 };
 
 export const REVIEWS = {
@@ -179,9 +262,9 @@ export const REVIEWS = {
 } as const;
 
 export const BOMBING_REVIEWS = [
-  "Biased discussions and the officers shut down anyone who disagrees. Avoid.",
-  "Total echo chamber. One star.",
-  "Don't bother. They only want one point of view in the room.",
+  "Cliquey. The officers only play rounds with their friends. Avoid.",
+  "Total waste. One star.",
+  "Don't bother. New people get ignored.",
   "Worst club on campus. Skip it.",
 ];
 
@@ -220,6 +303,16 @@ export const CHAT = {
   sports: ["Conditions look great this weekend", "Carpool leaves the Stromberg lot at 7", "Who has extra gear to lend a beginner?", "Waivers need to be in before the trip"],
   games: ["Tournament bracket is posted", "Who's bringing the projector?", "Next week's pick is up for a vote"],
   ambassadors: ["Tour shifts are posted", "Please send me your club's updates by Friday", "Polo shirts are in the office"],
+  faith: ["See everyone Thursday night", "Who's bringing treats this week?", "Thanks for the great discussion tonight"],
+  advocacy: ["Tabling sign-up sheet is in files", "Bring a friend to the panel!", "Reminder: be respectful in here, even when we disagree"],
+  greek: ["Study hours are in the library this week", "Philanthropy shifts are posted", "Chapter meeting moved to 7:30"],
+  honor: ["Induction cords are in", "Tutoring sign-ups are open", "Dues reminder for new members"],
+  media: ["Pitches due Friday", "Who can cover Saturday's game?", "Studio is booked until 6"],
+  music: ["Sheet music is in the shared folder", "Who has an extra music stand?", "Rehearsal runs late Thursday"],
+  dance: ["Wear shoes you can turn in", "Practice playlist is posted", "We need two more leads for Friday"],
+  spirit: ["Wear purple Saturday!", "Banner paint night is Thursday", "Meet at the student section gate at 6"],
+  film: ["Next week's pick is up for a vote", "Who's bringing the projector?", "That ending though 😳"],
+  // "general" doubles as the generic topic's bank.
 } as const;
 
 export const ANNOUNCEMENTS = [

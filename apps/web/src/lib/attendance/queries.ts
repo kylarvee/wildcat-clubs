@@ -5,7 +5,7 @@ import type { Config } from "@/lib/config";
 import { ROLE_RANK } from "@/lib/authz";
 import { clubAttendanceByOccurrence } from "@/lib/metrics";
 import { buildMatrix, memberAt, type Matrix } from "@/lib/attendance/matrix";
-import { checkinWindow, windowState, type WindowState } from "@/lib/attendance/rules";
+import { allowsTapCheckIn, checkinWindow, windowState, type WindowState } from "@/lib/attendance/rules";
 
 /**
  * Read helpers for the Attendance Tool and tracker. Nothing here writes or
@@ -25,7 +25,6 @@ export const occurrenceInclude = {
       kind: true,
       status: true,
       visibility: true,
-      allowSelfCheckIn: true,
       allDay: true,
       clubId: true,
       locationType: true,
@@ -102,7 +101,8 @@ export function toOccurrenceSummary(o: OccurrenceRow, cfg: WindowConfig, now: Da
     place: placeLabel(o.event, o.roomOverride),
     visibility: o.event.visibility,
     cancelled: o.status !== "SCHEDULED" || o.event.status !== "SCHEDULED",
-    allowSelfCheckIn: o.event.allowSelfCheckIn,
+    /** True only for online events (rules.allowsTapCheckIn): in person needs the QR code or the posted code. */
+    allowSelfCheckIn: allowsTapCheckIn(o.event),
     opensAt: w.opensAt,
     closesAt: w.closesAt,
     windowState: windowState(w, now),

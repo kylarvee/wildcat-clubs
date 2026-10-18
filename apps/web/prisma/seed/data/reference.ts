@@ -193,3 +193,31 @@ export const OFFSITE: Record<"service" | "social" | "outdoors", Spot[]> = {
     { address: "Ogden Canyon, Pineview Reservoir north beach, Huntsville, UT", lat: 41.2617, lng: -111.8139 },
   ],
 };
+
+/**
+ * Where generated people live, for member details: Weber and Davis county
+ * towns with their ZIP codes and the kind of street a house there is on.
+ * Street numbers are generated, so no address is a real one.
+ */
+export type HomeTown = { city: string; zips: string[]; weight: number; streets: string[] };
+export const HOME_TOWNS: HomeTown[] = [
+  { city: "Ogden", zips: ["84401", "84403", "84404", "84405"], weight: 30, streets: ["Harrison Blvd", "Washington Blvd", "Monroe Blvd", "Jefferson Ave", "Adams Ave", "Quincy Ave", "Tyler Ave", "Polk Ave", "Gramercy Ave", "Liberty Ave", "Fowler Ave", "Taylor Ave"] },
+  { city: "South Ogden", zips: ["84403", "84405"], weight: 7, streets: ["Chimes View Dr", "Ben Lomond Ave", "Edgewood Dr", "Glasmann Way"] },
+  { city: "North Ogden", zips: ["84414"], weight: 5, streets: ["Fruitland Dr", "Mountain Rd", "Elberta Dr"] },
+  { city: "Riverdale", zips: ["84405"], weight: 3, streets: ["Parker Dr", "Ritter Dr", "River Park Dr"] },
+  { city: "Roy", zips: ["84067"], weight: 7, streets: ["Midland Dr", "Hinckley Dr", "Sandridge Dr"] },
+  { city: "Layton", zips: ["84040", "84041"], weight: 10, streets: ["Gentile St", "Hill Field Rd", "Fort Lane", "Antelope Dr", "Church St"] },
+  { city: "Kaysville", zips: ["84037"], weight: 5, streets: ["Flint St", "Mutton Hollow Rd", "Crestwood Rd"] },
+  { city: "Clearfield", zips: ["84015"], weight: 5, streets: ["State St", "Center St", "Antelope Dr"] },
+  { city: "Syracuse", zips: ["84075"], weight: 4, streets: ["Bluff Rd", "Gentile St", "Allison Way"] },
+  { city: "Clinton", zips: ["84015"], weight: 3, streets: ["Clinton Pkwy", "Center St"] },
+  { city: "West Haven", zips: ["84401"], weight: 3, streets: ["Midland Dr", "Wilson Ln"] },
+  { city: "Pleasant View", zips: ["84404", "84414"], weight: 2, streets: ["Pleasant View Dr", "Elberta Dr"] },
+  { city: "Harrisville", zips: ["84404"], weight: 2, streets: ["Larsen Ln", "Harrisville Rd"] },
+  { city: "Farmington", zips: ["84025"], weight: 3, streets: ["Main St", "Glovers Ln", "Shepard Ln"] },
+  { city: "Bountiful", zips: ["84010"], weight: 3, streets: ["Orchard Dr", "Main St", "Davis Blvd"] },
+  { city: "Brigham City", zips: ["84302"], weight: 2, streets: ["Main St", "Forest St"] },
+  { city: "Huntsville", zips: ["84317"], weight: 1, streets: ["Ogden Canyon Rd"] },
+];
+/** Utah's grid: "1234 W 4000 S" style addresses for the towns above. */
+export const GRID_DIRECTIONS = ["N", "S", "E", "W"] as const;

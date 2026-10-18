@@ -4,6 +4,11 @@ The mock database gives every role in the platform a ready-made account with a
 realistic history. Sign in at **/login** and pick a persona (personas are on
 whenever `AUTH_MODE` is `mock` or `both`, the default outside production).
 
+Its approved and retired clubs are Weber State's real clubs
+(`data/wsu-directory.json`, the public club list) with their real names,
+purpose statements and contact emails. Every person, membership, event and
+record in them is invented.
+
 ```
 cd apps/web
 npm run db:reset    # fresh schema + seed (~10 s)
@@ -22,7 +27,7 @@ permissions are paused.
 | Sam Rivera | sam.rivera@mail.weber.edu | New student | First visit, registering, join gates, first check-in |
 | Maya Chen | maya.chen@mail.weber.edu | Club member | Check-in (live now), voting, reviews, calendar, attendance |
 | Oscar Nguyen | oscar.nguyen@mail.weber.edu | Officer (Treasurer) | Budget & funding, officer test, requirement grace period |
-| Vanessa Brooks | vanessa.brooks@mail.weber.edu | Vice President | Co-host approval, VP limits, elections |
+| Vanessa Brooks | vanessa.brooks@mail.weber.edu | Vice President | Co-host approval, VP limits, elections, member details that still need confirming |
 | Priya Patel | priya.patel@mail.weber.edu | President | Running a big gated club, QR check-in screen, succession |
 | Amir Haddad | amir.haddad@mail.weber.edu | College ambassador | Ambassador placements without capabilities |
 | Frank Okafor | frank.okafor@mail.weber.edu | Club founder | Founding a club: draft, advisor invite, submission |
@@ -33,7 +38,7 @@ permissions are paused.
 | Sydney Park | sydney.park@weber.edu | System administrator | System settings, AI and integration switches, outbox |
 
 Check-in codes are fixed: **HERE26** (live now), **LATER7** (later today),
-**BUILD8** (Wildcat Robotics, live now). Type them at `/c/<code>` or in the app.
+**BUILD8** (RC Wrecker Bots Club, live now). Type them at `/c/<code>` or in the app.
 
 ---
 
@@ -43,52 +48,59 @@ Check-in codes are fixed: **HERE26** (live now), **LATER7** (later today),
 clubs, check-ins, tasks or notifications.
 
 1. Sign in — the dashboard should feel empty and point Sam to the clubs list.
-2. Open **Clubs**: switch grid/list, sort by rating, activity, active members,
-   retention, college or type. Inactive clubs (Astronomy, Math, Model UN,
-   Ceramics) and pilot clubs (Data Science Society, First-Gen Wildcats,
-   Pickleball Club) should read differently.
+2. Open **Clubs**: all 290 approved clubs on the real list (plus the two
+   college ambassador orgs). Switch grid/list, filter by category, sort by
+   rating, activity, active members, retention, college or type. Most clubs
+   read as inactive, as they do in reality: dormant clubs with nobody on the
+   roster, clubs under 8 members, and four that stopped meeting (Society of
+   Physics Students, Actuary Club, Model United Nations Organization, Art
+   Guild). Pilot clubs (Data Analytics Club, First Generation Club at WSU,
+   Swing Dance/ Social Dance Club) read differently again.
 3. Register for **Chess Club** (open): Sam becomes a member at once, the club
    calendar is subscribed, and the "get the app" prompt appears.
-4. Register for **Wildcat Robotics** (approval gate): the request is pending.
-   Sign in as Priya or Dr. Alvarez to see it in Tasks.
-5. Subscribe to **Anime Club**'s calendar without registering.
-6. Check in at the live service event with code **HERE26**: Service & Volunteer
+4. Register for **RC Wrecker Bots Club** (approval gate): the request is
+   pending. Sign in as Priya or Dr. Alvarez to see it in Tasks.
+5. Subscribe to **Incredibly Strange Movie Night (ISMN)**'s calendar without
+   registering.
+6. Check in at the live service event with code **HERE26**: Wildcat Service
    Club is open, so the check-in also makes Sam a member.
 7. Try to review a club — it stays locked until Sam has attended three events.
 8. **Report a concern** anonymously and keep the case code.
 
 ## Maya Chen — club member
 
-**Where Maya stands:** active member of Psychology Club (since fall 2024),
-Pre-Med Society (spring 2025), Wildcat Climbing Club (fall 2025, approval gate)
-and Service & Volunteer Club (joined two weeks ago, one check-in). She has three
-or more check-ins in the first three, so she can review them; she already gave
-Wildcat Climbing Club 5★. She follows Anime Club's calendar without joining.
+**Where Maya stands:** active member of Psi Chi Honors Club / Psi Cho
+(Psychology Club) (since fall 2024), Pre-Med Club (spring 2025), Hiking and
+Outdoors Club (fall 2025, approval gate) and Wildcat Service Club (joined two
+weeks ago, one check-in). She has three or more check-ins in the first three,
+so she can review them; she already gave the Hiking and Outdoors Club 5★. She
+follows ISMN's calendar without joining. Her member details are complete and
+confirmed for this year.
 
-1. **Check in, live now.** Service & Volunteer Club's *Care Kit Assembly for the
+1. **Check in, live now.** Wildcat Service Club's *Care Kit Assembly for the
    Weber Cares Pantry* started 15 minutes before the seed ran and ends 105
    minutes after it (self check-in allowed). Open the club page for the
    check-in pop-up — and its "not now" option — or use **HERE26**. About nine
    people are already checked in.
-2. **Later today:** Psychology Club's *Grad School Q&A with Psychology Faculty*
+2. **Later today:** Psi Chi's *Grad School Q&A with Psychology Faculty*
    starts about three hours after the seed ran (code **LATER7**; check-in opens
    30 minutes before).
-3. **Vote:** Psychology Club → *President — Spring 2027* (member vote, three
+3. **Vote:** Psi Chi → *President — Spring 2027* (member vote, three
    candidates, closes five days after seeding). Maya is an active member and
    hasn't voted.
-4. **Review** Pre-Med Society or Psychology Club. Her Climbing review can be
-   edited or deleted.
+4. **Review** Pre-Med Club or Psi Chi. Her Hiking and Outdoors Club review can
+   be edited or deleted.
 5. **Attendance tracker** (`/me/attendance`) and her record on each club page.
-6. **United calendar:** four clubs, Anime Club (subscribed only) and university
+6. **United calendar:** four clubs, ISMN (subscribed only) and university
    events.
 7. **Messages:** an unread DM from Priya; three unread messages in the
-   Psychology Club chat.
+   Psi Chi chat.
 8. **Profile** (`/u/mayachen`): barista job, summer research internship,
    education, club roles (none — she's a member).
 
 ## Oscar Nguyen — officer (Treasurer)
 
-**Where Oscar stands:** Treasurer of Finance & Investment Club since about 20
+**Where Oscar stands:** Treasurer of Wildcat Investors since about 20
 days before the seed (the previous treasurer resigned two days earlier). His
 seat grants only the `budget` capability. Neither officer requirement is met
 yet, but he's inside the grace period: the **Club Officer Policy Test** is due
@@ -114,11 +126,13 @@ about 10 days after seeding (30-day grace) and **Club Officer Training** about
 
 ## Vanessa Brooks — vice president
 
-**Where Vanessa stands:** VP of the Society of Women Engineers since May 2026
-(Secretary the year before). SWE picks officers by **leadership vote**. She has
-met both officer requirements. She's also a member of Wildcat Robotics.
+**Where Vanessa stands:** VP of the Society of Women Engineers (SWE) since May
+2026 (Secretary the year before). SWE picks officers by **leadership vote**. She
+has met both officer requirements. She's also a member of the RC Wrecker Bots
+Club. Her member details are filled in but **not confirmed** this year, and she
+hasn't signed the *Club Member Agreements* form.
 
-1. **Tasks → co-host request:** Cybersecurity Club asked SWE to co-host
+1. **Tasks → co-host request:** Cyber Security Club (CSC) asked SWE to co-host
    *Women in Cybersecurity Panel* (about nine days out). Approve it and it lands
    on SWE's calendar.
 2. **Org chart:** she can assign officers and ambassadors but **not** President
@@ -131,11 +145,12 @@ met both officer requirements. She's also a member of Wildcat Robotics.
 
 ## Priya Patel — president
 
-**Where Priya stands:** President of Wildcat Robotics since May 2026 (VP
-2025–26, Events Coordinator 2024–25). About 90 active members, an **approval
-gate** with **five pending join requests**, Tuesday build nights, and regular
-co-hosted events with ACM and SWE. Both officer requirements met. The club runs
-its own *Event Safety Quiz*.
+**Where Priya stands:** President of the RC Wrecker Bots Club since May 2026
+(VP 2025–26, Events Coordinator 2024–25). About 90 active members, an
+**approval gate** with **five pending join requests**, Tuesday build nights,
+and regular co-hosted events with CSWS (The Computing Society at Weber State)
+and SWE. Both officer requirements met; the *Annual Club Re-registration* form
+is still hers to fill out. The club runs its own *Event Safety Quiz*.
 
 1. **Members:** approve or decline the five requests — their tasks close for
    everyone with the roster capability.
@@ -146,25 +161,26 @@ its own *Event Safety Quiz*.
 3. **Org chart & history:** role history back to fall 2022 with hand-offs,
    December graduations, resignations and empty seats. She can name a
    successor or co-president and could retire the club.
-4. **Events:** upcoming co-hosted *Robotics × ACM: Intro to ROS Workshop* and
-   *Girls in STEM Robot Day*; idea drafts waiting for a date.
-5. **Budget:** *Lunabotics competition travel* is approved with an open
+4. **Events:** upcoming co-hosted *Wrecker Bots × CSWS: Intro to Embedded
+   Programming* and *Girls in STEM Robot Day*; idea drafts waiting for a date.
+5. **Budget:** *Combat robotics competition travel* is approved with an open
    invoice.
 6. **Club tests:** results for the Event Safety Quiz.
 7. **Messages:** the *Engineering club presidents* leaders group and DMs with
    Maya and Vanessa.
-8. **Network map:** Wildcat Robotics should be highlighted and sit near the
-   other EAST clubs.
+8. **Network map:** the RC Wrecker Bots Club should be highlighted and sit near
+   the other EAST clubs.
 
 ## Amir Haddad — college ambassador
 
 **Where Amir stands:** Club Representative Ambassador in **Goddard School
-Ambassadors** since fall 2025, placed as *College Ambassador* in **Accounting
-Society** and **Marketing Association** (ambassador role, no capabilities). Also
-a regular member of Entrepreneurship Club.
+Ambassadors** since fall 2025, placed as *College Ambassador* in **Beta Alpha
+Psi** and **Weber Association of Marketing (WAM) / Marketing Club** (ambassador
+role, no capabilities). Also a regular member of the Weber Entrepreneurs
+Association (WEA).
 
 1. His profile lists the ambassador roles with the org that placed him.
-2. Open Accounting Society's workspace: he's a leader there, but every tool is
+2. Open Beta Alpha Psi's workspace: he's a leader there, but every tool is
    locked until the club grants him a capability.
 3. Sign in as Alex to see Goddard School Ambassadors' placement view.
 
@@ -175,13 +191,16 @@ a regular member of Entrepreneurship Club.
   seeding. The profile is half-finished (no short description, an unfinished
   About), a constitution draft is started, and his advisor invitation to
   Prof. Nathan Reed is pending.
-- **Board Game Guild** — SUBMITTED about five days before seeding. Advisor
-  accepted (after an earlier invitee declined); constitution and bylaws adopted
-  with the builder. Waiting on WSUSA.
+- **Wildcat Puzzle Society** — SUBMITTED about five days before seeding.
+  Advisor accepted (after an earlier invitee declined); constitution and bylaws
+  adopted with the builder. Waiting on WSUSA.
+
+Both are new clubs, so they're fictional, and their names don't overlap any
+club on the real list.
 
 1. Finish the Beekeeping profile; submission stays blocked until an advisor
    accepts.
-2. Open Board Game Guild: "in WSUSA review" with the reviewers' contact details
+2. Open Wildcat Puzzle Society: "in WSUSA review" with the reviewers' contact details
    and office; profile, org chart, constitution and files are still editable.
 3. Full loop: sign in as **Nathan** to accept, back as Frank to submit, then as
    **Alex** to approve.
@@ -201,13 +220,14 @@ education on her profile.
 
 ## Dr. Elena Alvarez — advisor
 
-**Where Elena stands:** advisor of **Wildcat Robotics** (since its founding in
-2022) and **Pre-Med Society** (since May 2024, after the previous advisor's term
-ended). Full permissions in both.
+**Where Elena stands:** advisor of the **RC Wrecker Bots Club** (since its
+founding in 2022) and **Pre-Med Club** (since May 2024, after the previous
+advisor's term ended). Full permissions in both.
 
-1. Every tool in both workspaces is unlocked; she sees Robotics' join requests.
-2. Pre-Med Society: an outgoing co-host request to Nursing and a partially
-   approved funding request.
+1. Every tool in both workspaces is unlocked; she sees the Wrecker Bots' join
+   requests.
+2. Pre-Med Club: an outgoing co-host request to the National Student Nurses
+   Association (NSNA) Ogden Campus and a partially approved funding request.
 3. Advisors can assign any role and apply election results.
 
 ## Prof. Nathan Reed — invited advisor
@@ -220,17 +240,22 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
 ## Alex Morgan — WSUSA administrator
 
 **Queues waiting for Alex:**
-- **Club review:** Board Game Guild.
+- **Club review:** Wildcat Puzzle Society.
 - **Department request:** "Aviation Technology" for Aviation Club (changes
   requested, with a note).
-- **Custom bylaws:** Theatre Guild's uploaded bylaws (pending approval).
-- **Funding:** three submitted requests (Finance & Investment Club, SWE,
-  Nursing Student Association) and two open invoices (Wildcat Robotics, Black
-  Student Union).
-- **Review bombing:** Political Science Society got four 1★ reviews within 36
-  hours; members flagged them. One older Anime Club review is already hidden.
-- **Reports:** five (two anonymous — opening one requires acknowledging the
-  anonymity notice, and every opening is logged).
+- **Custom bylaws:** Associated Artists of the Theatre (AAT)'s uploaded bylaws
+  (pending approval).
+- **Funding:** three submitted requests (Wildcat Investors, SWE, NSNA) and two
+  open invoices (RC Wrecker Bots Club, Black Student Union (BSU)).
+- **Review bombing:** Ogden Valley Disc Golf Club got four 1★ reviews within
+  36 hours; members flagged them. One older Wildcat Paintball Club review is
+  already hidden.
+- **Reports:** five, all on those two clubs (two anonymous — opening one
+  requires acknowledging the anonymity notice, and every opening is logged).
+
+The two are fictional **demo clubs** (approved, with members, events and
+check-ins) made to carry these incidents, so nothing negative is invented
+about a real club.
 - **Tests:** five officer-test attempts with open answers to grade (each also a
   task in Tasks).
 - **Officer requirements:** one officer is past the grace period, so their
@@ -250,28 +275,59 @@ push), scheduled jobs, and granting admin.
 
 ## Other things in the data
 
-- **47 clubs:** 39 approved across every college and university-wide,
-  independent and sports scopes; 2 college ambassador orgs; 3 pilot clubs
-  created this term; 4 inactive; Frank's draft and submitted clubs; Aviation
-  Club (changes requested); Campus Poker League (rejected, with the reason);
-  Photography Collective and Wildcat Rugby Club (retired, full role history).
-- **About 450 students** (including ~80 alumni who held earlier roles), ~40
-  faculty and staff, and 2 more WSUSA admins.
+- **300 clubs.** All 292 clubs on Weber State's list: 290 approved and 2
+  retired (Photographic Society and Ballroom and Hip Hop Club, with full role
+  history). Plus the two college ambassador orgs (Goddard School Ambassadors,
+  EAST Ambassadors — platform structures, not on the list), two fictional
+  approved demo clubs that carry the reports, review bombing, hidden review
+  and roster removals (Wildcat Paintball Club, Ogden Valley Disc Golf Club),
+  and four fictional new clubs: Frank's draft and submitted clubs, Aviation
+  Club (changes requested) and Campus Poker League (rejected, with the
+  reason). Real clubs get no rating below 3★, no flags and no reports.
+- **Story clubs.** About 40 of the real clubs carry the walkthroughs above and
+  keep their story's size and history (the RC Wrecker Bots Club has ~90
+  members, though its real roster is smaller). They keep a stable key in
+  `data/clubs.ts` (`robotics`, `swe`, `psych`…); slugs follow the real names.
+- **The rest of the list follows the real roster.** Clubs with people on it get
+  about that many members, officers in the seats the list shows (president,
+  VPs, other officers, advisors), a weekly or biweekly meeting and a light
+  event history; with 8+ members they read as active. Clubs with nobody on the
+  roster are dormant: approved, at most two members, no officers or advisor,
+  and nothing on the calendar this academic year or last. About 68 of the 292
+  approved clubs read as active.
+- **Categories.** Every club has a WSUSA category (Academic, Cultural, FSL,
+  Honor society, Service & advocacy, Student life, Religious) and a type:
+  Sponsored for department-connected academic clubs, Registered for
+  independent ones, Affiliate only for FSL and club sports. About pages are the
+  clubs' own purpose statements (or one neutral line when the list has none);
+  contact emails are the real ones. No websites or social links.
+- **About 850 active students** and ~160 alumni who held earlier roles, ~100
+  faculty and staff (a faculty member in every department), and 2 more WSUSA
+  admins. Names, pronouns and gender agree with each other.
+- **Member details** (Settings → Member details) for every active student
+  except Sam, and most faculty and staff — all invented: W0-numbers,
+  801-555-01xx phones, example.com emails, generated street numbers in Ogden,
+  Layton, Roy and nearby towns. About 70% of active students confirmed theirs
+  this academic year; the rest still owe it (never confirmed, confirmed last
+  year, or a field or two missing). One concurrent-enrollment freshman is 17.
 - **Events** from fall 2024 through fall 2026: weekly or biweekly meetings per
   semester (holidays and spring break cancelled), socials, workshops, service
   days and competitions, on campus, off campus and online; co-hosted events;
   idea drafts; Club Officer Training and Funding Workshop every semester.
-- **About 40,000 check-ins** with semester-start spikes, pre-finals dips and
+- **About 59,000 check-ins** with semester-start spikes, pre-finals dips and
   members who drift away at different rates. Officers show up most. Members of
   several clubs in the same college give the network map its clusters.
-- **Files:** each approved club has Meeting Minutes, Flyers & Photos, Resources
-  (featured on the club page), Constitution & Bylaws (PDFs) and leaders-only
-  Officer Notes. Bytes live in `apps/web/storage/seed/`.
+- **Files:** each approved club that meets has Meeting Minutes, Flyers & Photos,
+  Resources (featured on the club page), Constitution & Bylaws (PDFs) and
+  leaders-only Officer Notes; dormant clubs keep just their constitution and
+  bylaws. Bytes live in `apps/web/storage/seed/`.
 - **Role history contributions:** in most approved and retired clubs, one or
   two past leaders have a project tied to the seat they held, usually with a
   file (a club file they made that term, or a write-up in their own files).
-- **Event Safety Quiz:** Wildcat Robotics members who haven't passed it have a
-  *Take: Event Safety Quiz* task.
+- **Event Safety Quiz:** RC Wrecker Bots Club members who haven't passed it
+  have a *Take: Event Safety Quiz* task.
 
-All policy text is sample text and says so at the top. Names, people and
-incidents are fictional; building coordinates are approximate.
+All policy text is sample text and says so at the top. People, memberships,
+events and reviews are fictional even where the club is real; reports and
+incidents exist only on the fictional demo clubs. Building coordinates are
+approximate.

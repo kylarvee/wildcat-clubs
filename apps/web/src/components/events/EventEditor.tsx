@@ -36,6 +36,8 @@ export type EditorEvent = {
   links: EventLink[];
   visibility: Visibility;
   allowSelfCheckIn: boolean;
+  setupMinutes: number;
+  cleanupMinutes: number;
   startsAt: string | null;
   durationMinutes: number;
   allDay: boolean;
@@ -117,7 +119,8 @@ export function EventEditor(props: EventEditorProps) {
   const [kind, setKind] = useState<EventKind>(event?.kind ?? (isClub ? "MEETING" : "TRAINING"));
   const [description, setDescription] = useState(event?.descriptionHtml ?? "");
   const [visibility, setVisibility] = useState<Visibility>(event?.visibility ?? (isClub ? "PUBLIC" : "UNIVERSITY"));
-  const [selfCheckIn, setSelfCheckIn] = useState(event?.allowSelfCheckIn ?? true);
+  const [setupMinutes, setSetupMinutes] = useState(String(event?.setupMinutes ?? 0));
+  const [cleanupMinutes, setCleanupMinutes] = useState(String(event?.cleanupMinutes ?? 0));
   const [when, setWhen] = useState<WhenValue>(() => initialWhen(props));
   const [location, setLocation] = useState<LocationValue>(() => initialLocation(event));
   const [files, setFiles] = useState<PickedFile[]>(event?.attachments ?? []);
@@ -187,7 +190,8 @@ export function EventEditor(props: EventEditorProps) {
       descriptionHtml: description,
       links,
       visibility,
-      allowSelfCheckIn: selfCheckIn,
+      setupMinutes: Number(setupMinutes) || 0,
+      cleanupMinutes: Number(cleanupMinutes) || 0,
       attachmentFileIds: files.map((f) => f.id),
       cohostClubIds: isClub ? cohostIds : [],
       cohostAllClubs: isClub ? cohostAll : false,
@@ -377,12 +381,20 @@ export function EventEditor(props: EventEditorProps) {
                 ))}
               </div>
             </fieldset>
-            <Checkbox
-              label="Let people check themselves in"
-              description="During the event, people can tap “Check in” in the app. Turn this off to require scanning the QR code at the door."
-              checked={selfCheckIn}
-              onChange={(e) => setSelfCheckIn(e.target.checked)}
-            />
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-ink">Room time</legend>
+              <p className="text-xs text-ink-3">Extra time you need the room before and after, for setup and cleanup. It isn&apos;t shown as part of the event.</p>
+              <div className="flex flex-wrap gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor={`${id}-setup`}>Setup (minutes)</Label>
+                  <Input id={`${id}-setup`} type="number" inputMode="numeric" min={0} max={480} step={5} value={setupMinutes} onChange={(e) => setSetupMinutes(e.target.value)} className="w-28" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor={`${id}-cleanup`}>Cleanup (minutes)</Label>
+                  <Input id={`${id}-cleanup`} type="number" inputMode="numeric" min={0} max={480} step={5} value={cleanupMinutes} onChange={(e) => setCleanupMinutes(e.target.value)} className="w-28" />
+                </div>
+              </div>
+            </fieldset>
           </CardBody>
         </Card>
 

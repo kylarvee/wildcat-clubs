@@ -30,4 +30,4 @@ export async function loadAttendees(occurrenceId: string) {
   return { occ, rolesByUser };
 }
 
-export const METHOD_LABEL = { QR: "QR scan", SELF: "Self check-in", MANUAL: "Added by staff" } as const;
+export const METHOD_LABEL = { QR: "QR scan", SELF: "Event code", MANUAL: "Added by staff" } as const;

@@ -4,6 +4,8 @@ import { getClubBySlug } from "@/lib/clubs/context";
 import { clubMemberAttendanceCounts } from "@/lib/metrics";
 import { rosterData } from "@/lib/roles/queries";
 import { toCsv } from "@/lib/attendance/matrix";
+import { memberContacts } from "@/lib/domain/details";
+import { YEAR_LABEL } from "@/lib/details/rules";
 import { fmtDate, fmtLongDate } from "@/lib/time";
 
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Member", PENDING: "Requested to join", ALUMNI: "Alumni", LEFT: "Left", REMOVED: "Removed", DECLINED: "Declined" };
@@ -19,14 +21,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
   if (!access?.capabilities.has("roster")) return new Response("You don't have access to this club's roster.", { status: 403 });
 
   const [roster, attendance] = await Promise.all([rosterData(club.id), clubMemberAttendanceCounts(club.id)]);
-  const header = ["Name", "Email", "Status", "Roles", "Internal title", "Joined", "Events attended", "Last attended", "Active"];
+  // Contact basics from member details, under the same rule as the roster page (lib/authz/details).
+  const contacts = await memberContacts(user, club.id, roster.map((r) => r.person.id));
+  const header = ["Name", "Email", "Personal email", "Phone", "Year in school", "Status", "Roles", "Internal title", "Joined", "Events attended", "Last attended", "Active"];
   const lines = roster
     .filter((r) => r.status !== "DECLINED")
     .map((r) => {
       const a = attendance.get(r.person.id);
+      const c = contacts.get(r.person.id);
       return [
         r.person.name,
         r.person.email,
+        c?.contactEmail ?? "",
+        c?.phone ?? "",
+        c?.yearInSchool ? YEAR_LABEL[c.yearInSchool] : "",
         STATUS_LABEL[r.status] ?? r.status,
         r.roles.map((x) => x.label).join("; ") || "Member",
         r.internalTitle,

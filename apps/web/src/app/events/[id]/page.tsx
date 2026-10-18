@@ -363,7 +363,7 @@ export default async function EventPage({ params, searchParams }: Props) {
               <CardBody className="flex gap-2 text-sm text-ink-2">
                 <Users className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
                 <p>
-                  Check in by scanning the QR code at the event{event.allowSelfCheckIn ? ", or tap “Check in” in the Wildcat Clubs app while it's happening" : ""}.
+                  {event.locationType === "VIRTUAL" ? "Members check in by tapping “Check in” on Wildcat Clubs while it's happening." : "Check in at the event: scan the QR code, or type the code shown on the screen."}
                   {!viewer ? " You'll be asked to sign in with your Weber State account." : ""}
                 </p>
               </CardBody>
