@@ -296,8 +296,8 @@ export function buildGovernance(ctx: Ctx) {
       }
       if (recent || userId === oscar) {
         ctx.rows.notifications.push({
-          id: ctx.id(), userId, kind: "requirement.assigned", title: "Your new role has required training",
-          body: "Finish Club Officer Policy Test, Club Officer Training to keep your leadership permissions active.", href: "/tasks",
+          id: ctx.id(), userId, kind: "requirement.assigned", title: "Your new role has WSUSA requirements",
+          body: "Finish Club Officer Policy Test, Club Officer Training to keep your permissions on.", href: "/tasks",
           createdAt: addMin(clock, 2), readAt: userId === oscar ? addDays(clock, 1) : rng.chance(0.5) ? addDays(clock, 1) : null,
         });
       }
@@ -319,13 +319,13 @@ export function buildGovernance(ctx: Ctx) {
     for (const adv of club.advisorIds.slice(0, 1)) {
       ctx.rows.notifications.push({
         id: ctx.id(), userId: adv, kind: "test.missed", title: `${person.name} missed the Club Officer Policy Test deadline`,
-        body: `Their officer permissions in ${club.name} are paused until they pass the test and attend training.`, href: `/clubs/${club.slug}/manage/org-chart`,
+        body: `Their permissions in ${club.name} are paused until they pass the test and attend training.`, href: `/clubs/${club.slug}/manage/org-chart`,
         createdAt: addDays(currentAy.start, 30.4), readAt: null,
       });
     }
     ctx.rows.notifications.push({
-      id: ctx.id(), userId: pastGrace, kind: "requirement.overdue", title: "Your officer permissions are paused",
-      body: `Your Club Officer Policy Test and training were due. Finish them and your ${club.name} permissions come back right away.`, href: "/tasks",
+      id: ctx.id(), userId: pastGrace, kind: "requirement.overdue", title: `Permissions paused in ${club.name}`,
+      body: "Club Officer Policy Test and Club Officer Training are overdue. Your title stays, and your permissions come back as soon as they're done.", href: "/tasks",
       createdAt: addDays(currentAy.start, 30.5), readAt: null,
     });
   }
@@ -373,7 +373,7 @@ export function buildGovernance(ctx: Ctx) {
     ctx.rows.testAssignments.push({ id: assignmentId, testId: quizId, userId: m.userId, cycleKey: "once", dueAt: closesAt, status, createdAt: joined, resolvedAt });
     // The inbox task tests.syncAssignments opens with every assignment (closed once they pass).
     ctx.rows.tasks.push({
-      id: ctx.id(), kind: "REQUIREMENT", title: "Take: Event Safety Quiz", description: `Assigned by ${robotics.name}.`, assigneeType: "USER", assigneeId: m.userId,
+      id: ctx.id(), kind: "TEST", title: "Take: Event Safety Quiz", description: `Assigned by ${robotics.name}.`, assigneeType: "USER", assigneeId: m.userId,
       clubId: robotics.id, href: `/tests/${quizId}`, dueAt: closesAt, status: status === "COMPLETED" ? "DONE" : "OPEN", sourceType: "testAssignment", sourceId: assignmentId,
       createdAt: joined, completedAt: resolvedAt, completedById: resolvedAt ? m.userId : null,
     });
@@ -491,8 +491,8 @@ function requiredForm(ctx: Ctx, ay: { label: string; start: Date }, def: Require
     });
     if (!signed && (def.unsigned.has(userId) || rng.chance(0.3))) {
       ctx.rows.notifications.push({
-        id: ctx.id(), userId, kind: "requirement.assigned", title: def.audience === "MEMBER" ? "Required by WSUSA" : "Officer requirement to finish",
-        body: def.audience === "MEMBER" ? `WSUSA asks every club member to finish ${def.title} by ${shortDate(dueAt)}.` : `Finish ${def.title} by ${shortDate(dueAt)} to keep your leadership permissions active.`,
+        id: ctx.id(), userId, kind: "requirement.assigned", title: def.audience === "MEMBER" ? "Required by WSUSA" : "A WSUSA requirement to finish",
+        body: def.audience === "MEMBER" ? `WSUSA asks every club member to finish ${def.title} by ${shortDate(dueAt)}.` : `Finish ${def.title} by ${shortDate(dueAt)} to keep your permissions on.`,
         href: "/tasks", createdAt: addMin(clock, 3), readAt: def.unsigned.has(userId) ? null : rng.chance(0.5) ? addDays(clock, 1) : null,
       });
     }
@@ -530,8 +530,10 @@ function memberDetailsRequirement(ctx: Ctx, ay: { label: string; start: Date }) 
     const confirmedAt = d?.confirmedAt ? new Date(d.confirmedAt as Date) : null;
     const met = Boolean(d && confirmedAt && confirmedAt >= ay.start && missingDetails(d as DetailsLike, "STUDENT").length === 0);
     const completedAt = met ? maxDate(confirmedAt!, clock) : null;
+    // Like requirements.syncUserRequirements: details still missing a field are filled in, complete ones confirmed.
+    const verb = !d || missingDetails(d as DetailsLike, "STUDENT").length ? "Fill in" : "Confirm";
     ctx.rows.tasks.push({
-      id: ctx.id(), kind: "REQUIREMENT", title: "Confirm: Member details", description, assigneeType: "USER", assigneeId: userId, clubId: null, href: "/settings/details",
+      id: ctx.id(), kind: "REQUIREMENT", title: `${verb}: Member details`, description, assigneeType: "USER", assigneeId: userId, clubId: null, href: "/settings/details",
       dueAt: addDays(clock, 30), required: true, status: met ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt, completedById: met ? userId : null,
     });
   }

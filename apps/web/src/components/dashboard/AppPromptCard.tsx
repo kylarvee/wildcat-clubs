@@ -8,8 +8,9 @@ import { toast } from "@/components/ui/misc";
 import { dismissAppPromptAction } from "@/app/dashboard/actions";
 
 /**
- * "Get the app" — shown until you sign in on the mobile app or choose
- * "Not now" (which is permanent, same as the prompt after registering).
+ * "Get the app" — the dashboard shows it when shouldPromptForApp says so (the
+ * app is in a store and you haven't signed in on it). "Not now" hides it, and
+ * the prompt after registering, for 30 days.
  */
 export function AppPromptCard() {
   const [hidden, setHidden] = useState(false);

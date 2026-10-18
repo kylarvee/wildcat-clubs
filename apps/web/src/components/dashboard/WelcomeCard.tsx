@@ -8,7 +8,7 @@ export function WelcomeCard({ firstName }: { firstName: string }) {
   const steps = [
     { icon: Compass, title: "Find a club", body: `Browse ${INSTITUTION.shortName}'s clubs by college, major or interest, then press Register.` },
     { icon: CalendarDays, title: "Your calendar fills in", body: "Events from clubs you join or follow show up on your calendar here." },
-    { icon: QrCode, title: "Show up and check in", body: "Scan the code at the meeting with the app. After a few events you can review the club." },
+    { icon: QrCode, title: "Show up and check in", body: "Scan the code at the meeting with your phone's camera. After a few events you can review the club." },
   ];
   return (
     <section aria-labelledby="dash-welcome-title">

@@ -1,11 +1,11 @@
 // Everything that tailors the platform to one university lives here (code-level)
-// or in system config (things a sysadmin changes at runtime, like office hours).
-// To run the platform for another school, change this file and the seed data.
+// or in system config (things a sysadmin changes at runtime, like office hours
+// and the help email, `platform.supportEmail`).
+// To run the platform for another school, change this file, the config defaults and the seed data.
 
 export const PLATFORM = {
   name: "Wildcat Clubs",
   tagline: "Find, found and run your club at Weber State.",
-  supportEmail: "clubs@weber.edu",
 } as const;
 
 export const INSTITUTION = {

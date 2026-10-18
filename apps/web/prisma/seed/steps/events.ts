@@ -4,7 +4,7 @@ import { generateCheckinSecret } from "@/lib/attendance/token";
 import type { ClubM, Ctx, Ev, Occ } from "../ctx";
 import { COLLEGE_BUILDINGS, OFFSITE } from "../data/reference";
 import { isQuiet } from "../data/clubs";
-import { DRAFT_IDEAS, EVENT_IDEAS, type EventIdea } from "../data/text";
+import { EVENT_IDEAS, type EventIdea } from "../data/text";
 import { addDays, addMin, calAdd, campusDate, DAY, floor5, local, maxDate, minDate } from "../lib/dates";
 import { fallStart, holidayNote, springEnd } from "./reference";
 
@@ -12,8 +12,8 @@ import { fallStart, holidayNote, springEnd } from "./reference";
  * Events: a weekly or biweekly meeting series per club per semester (expanded
  * with the platform's own recurrence code, holidays cancelled), one-off
  * socials, workshops, service days and competitions, co-hosted events between
- * related clubs, idea drafts, university trainings — and a few events that are
- * happening right now so check-in can be tested immediately.
+ * related clubs, university trainings — and a few events that are happening
+ * right now (one of them online) so check-in can be tested immediately.
  */
 
 const DOW_TIME: Partial<Record<EventKind, { dows: number[]; times: [number, number][] }>> = {
@@ -51,7 +51,6 @@ export function newEvent(ctx: Ctx, e: Partial<Ev> & Pick<Ev, "clubId" | "title" 
     lat: null,
     lng: null,
     virtualUrl: null,
-    allowSelfCheckIn: true,
     createdAt: ctx.NOW,
     termId: null,
     isSeries: false,
@@ -107,7 +106,7 @@ function onWeekday(from: Date, dow: number, H: number, M: number) {
   return campusDate(d.y, d.m, d.d, H, M);
 }
 
-function describe(club: ClubM, title: string, kind: EventKind) {
+function describe(club: ClubM, title: string, kind: EventKind, online = false) {
   const lead: Record<string, string> = {
     MEETING: `Our regular ${club.def.meeting.title?.toLowerCase() ?? "meeting"}: updates, projects and time to hang out.`,
     SOCIAL: "Come hang out, meet members from other majors and bring a friend.",
@@ -118,7 +117,9 @@ function describe(club: ClubM, title: string, kind: EventKind) {
     TRAINING: "Required for anyone who wants to help lead activities.",
     OTHER: "Everyone's welcome.",
   };
-  return `<p><strong>${title}</strong> with ${club.name}. ${lead[kind] ?? ""}</p><ul><li>Open to all Weber State students</li><li>Check in with the QR code when you arrive</li></ul>`;
+  // Online events have nothing to scan: members check in with one tap (lib/attendance/rules allowsTapCheckIn).
+  const checkin = online ? "Members check in with one tap on Wildcat Clubs once it starts" : "Check in with the QR code when you arrive";
+  return `<p><strong>${title}</strong> with ${club.name}. ${lead[kind] ?? ""}</p><ul><li>Open to all Weber State students</li><li>${checkin}</li></ul>`;
 }
 
 const EVENT_TERMS = (ctx: Ctx) => {
@@ -197,14 +198,13 @@ function clubEvents(ctx: Ctx, club: ClubM) {
       const ev = newEvent(ctx, {
         clubId: club.id,
         title: idea.title,
-        descriptionHtml: describe(club, idea.title, idea.kind),
+        descriptionHtml: describe(club, idea.title, idea.kind, idea.where === "virtual"),
         kind: idea.kind,
         status: cancelled ? "CANCELLED" : "SCHEDULED",
         visibility: vis,
         startsAt,
         durationMinutes: idea.minutes ?? rng.pick([60, 90, 90, 120]),
         ...locate(ctx, club, idea.where),
-        allowSelfCheckIn: rng.chance(0.85),
         createdById: ctx.leaderAt(club, addDays(startsAt, -14)),
         createdAt: minDate(addDays(startsAt, -rng.float(7, 30)), NOW),
         termId: term.id,
@@ -281,7 +281,6 @@ function universityEvents(ctx: Ctx) {
     room: "Ballroom C",
     lat: su.lat,
     lng: su.lng,
-    allowSelfCheckIn: true,
     createdById: alex.id,
     createdAt: addDays(trainingStart, -30),
   });
@@ -360,7 +359,6 @@ function liveEvents(ctx: Ctx) {
     durationMinutes: 120,
     ...campusSpot(ctx, service, "SU"),
     room: "Room 404B",
-    allowSelfCheckIn: true,
     createdById: ctx.leaderAt(service, addDays(NOW, -10)),
     createdAt: addDays(NOW, -10.2),
     termId: term.id,
@@ -382,7 +380,6 @@ function liveEvents(ctx: Ctx) {
     durationMinutes: 60,
     ...campusSpot(ctx, psych, "SS"),
     room: "Room 238",
-    allowSelfCheckIn: true,
     createdById: ctx.leaderAt(psych, addDays(NOW, -12)),
     createdAt: addDays(NOW, -12.4),
     termId: term.id,
@@ -403,7 +400,6 @@ function liveEvents(ctx: Ctx) {
     durationMinutes: 150,
     ...campusSpot(ctx, robotics, "NB"),
     room: "Room 150 (Makerspace)",
-    allowSelfCheckIn: true,
     createdById: ctx.p("priya").id,
     createdAt: addDays(NOW, -4.1),
     termId: term.id,
@@ -411,6 +407,29 @@ function liveEvents(ctx: Ctx) {
   addOccurrences(ctx, build, [{ startsAt: buildStart, endsAt: addMin(buildStart, 150) }], { code: "BUILD8" });
   robotics.events.push(build);
   ctx.refs.buildEventId = build.id;
+
+  // Online and live now in another of Maya's clubs. Online events are the only
+  // ones with the one-tap "Check in" prompt (web and app), recorded as TAP.
+  const premed = ctx.club("premed");
+  const onlineStart = new Date(Math.floor(addMin(NOW, -10).getTime() / 60_000) * 60_000);
+  const online = newEvent(ctx, {
+    clubId: premed.id,
+    title: "Online MCAT Study Hall",
+    descriptionHtml:
+      "<p>Two hours of MCAT prep on Google Meet: a short strategy talk, then quiet study in breakout rooms, with upperclassmen on hand for questions.</p><ul><li>Bring the practice questions you're stuck on.</li><li>Members check in with one tap on Wildcat Clubs once it starts.</li></ul>",
+    kind: "WORKSHOP",
+    visibility: "PUBLIC",
+    startsAt: onlineStart,
+    durationMinutes: 120,
+    locationType: "VIRTUAL",
+    virtualUrl: meetLink(ctx),
+    createdById: ctx.leaderAt(premed, addDays(NOW, -6)),
+    createdAt: addDays(NOW, -6.3),
+    termId: term.id,
+  });
+  addOccurrences(ctx, online, [{ startsAt: onlineStart, endsAt: addMin(onlineStart, 120) }]);
+  premed.events.push(online);
+  ctx.refs.onlineEventId = online.id;
 }
 
 function upcomingCohosts(ctx: Ctx) {
@@ -466,28 +485,6 @@ function upcomingCohosts(ctx: Ctx) {
     "<p>Middle-school girls from Ogden build and drive their first robots with RC Wrecker Bots and SWE mentors.</p>", ["Robot kits and supplies", 1, 320]);
 }
 
-function draftIdeas(ctx: Ctx) {
-  const { rng, NOW } = ctx;
-  for (const club of ctx.clubs) {
-    if (club.status !== "APPROVED" || isQuiet(club.def.life)) continue;
-    const ideas = rng.sample(DRAFT_IDEAS[club.def.topic], club.def.life === "pilot" ? rng.int(1, 2) : club.def.life === "small" ? rng.int(0, 1) : club.def.story ? rng.int(1, 3) : rng.int(0, 2));
-    for (const title of ideas) {
-      const createdAt = addDays(NOW, -rng.float(2, 45));
-      club.events.push(
-        newEvent(ctx, {
-          clubId: club.id,
-          title,
-          descriptionHtml: `<p>${rng.pick(["Idea from the last officer meeting.", "Someone suggested this in the club chat — worth planning?", "Needs a date and a room.", "Could co-host with another club."])}</p>`,
-          kind: rng.pick(["OTHER", "SOCIAL", "WORKSHOP", "SERVICE"] as EventKind[]),
-          status: "DRAFT",
-          createdById: ctx.leaderAt(club, createdAt),
-          createdAt,
-        }),
-      );
-    }
-  }
-}
-
 export function buildEvents(ctx: Ctx) {
   universityEvents(ctx);
   for (const club of ctx.clubs) {
@@ -499,7 +496,6 @@ export function buildEvents(ctx: Ctx) {
   const anime = ctx.club("anime");
   const target = anime.events.find((e) => !e.isSeries && e.startsAt && e.startsAt < ctx.NOW && e.cohosts.length === 0);
   if (target) approvedCohost(ctx, target, anime, ctx.club("chess"), "DECLINED");
-  draftIdeas(ctx);
 }
 
 export function allEvents(ctx: Ctx): Ev[] {

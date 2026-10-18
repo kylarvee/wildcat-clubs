@@ -38,7 +38,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ occurren
       id: e.id,
       clubId: e.clubId,
       visibility: e.visibility,
-      status: e.status,
       club: e.club,
       cohosts: e.cohosts.map((c) => ({ clubId: c.club.id, status: "APPROVED" })),
     });

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { notFound } from "@/lib/domain/kit";
 import { clubListMetrics, networkData } from "@/lib/metrics";
+import { standingOf, type ClubStanding } from "@/lib/labels/clubs";
 import { academicYearAt, currentOrLastTerm, getTerms } from "@/lib/terms";
 import {
   buildView,
@@ -129,7 +130,7 @@ export async function loadNetwork(opts: { window: NetworkWindow; group: NetworkG
 
 // ─── Details for the side panel ──────────────────────────────────────────────
 
-export type ClubStanding = "active" | "pilot" | "inactive";
+export type { ClubStanding };
 
 export type NetworkNodeDetails =
   | {
@@ -204,7 +205,7 @@ async function buildNodeDetails(opts: { window: NetworkWindow; group: NetworkGro
       activeMembers: m?.activeMembers ?? 0,
       checkins: node.size,
       retentionRate: m?.retentionRate ?? null,
-      standing: !m ? "inactive" : m.inPilot ? "pilot" : m.isActive ? "active" : "inactive",
+      standing: m ? standingOf(m) : "inactive",
       windowLabel: base.windowLabel,
     };
   }
@@ -306,7 +307,7 @@ async function directedCounts(A: string[], B: string[], since: Date, until: Date
           SELECT array_agg(c."clubId") AS ids FROM "EventCohost" c
            WHERE c."eventId" = e.id AND c.status = 'APPROVED' AND c."clubId" IS DISTINCT FROM e."clubId"
         ) co ON TRUE
-       WHERE o.status = 'SCHEDULED' AND e.status <> 'DRAFT' AND o."startsAt" >= ${ts(since)} AND o."startsAt" <= ${ts(until)}
+       WHERE o.status = 'SCHEDULED' AND o."startsAt" >= ${ts(since)} AND o."startsAt" <= ${ts(until)}
          AND array_remove(ARRAY[e."clubId"] || COALESCE(co.ids, ARRAY[]::text[]), NULL) && ${all}::text[]
     ),
     mem AS (
@@ -318,8 +319,7 @@ async function directedCounts(A: string[], B: string[], since: Date, until: Date
       SELECT array_remove(ARRAY[e."clubId"] || COALESCE(
                (SELECT array_agg(c."clubId") FROM "EventCohost" c WHERE c."eventId" = e.id AND c.status = 'APPROVED'), ARRAY[]::text[]), NULL) AS clubs
         FROM "Event" e
-       WHERE e.status <> 'DRAFT'
-         AND EXISTS (SELECT 1 FROM "EventOccurrence" o WHERE o."eventId" = e.id AND o.status = 'SCHEDULED' AND o."startsAt" >= ${ts(since)} AND o."startsAt" <= ${ts(until)})
+       WHERE EXISTS (SELECT 1 FROM "EventOccurrence" o WHERE o."eventId" = e.id AND o.status = 'SCHEDULED' AND o."startsAt" >= ${ts(since)} AND o."startsAt" <= ${ts(until)})
     )
     SELECT
       (SELECT count(*) FROM mem, unnest(mem.clubs) AS x(club) WHERE mem.m_club = ANY(${A}::text[]) AND x.club = ANY(${B}::text[]) AND x.club <> mem.m_club)::int AS a_to_b,

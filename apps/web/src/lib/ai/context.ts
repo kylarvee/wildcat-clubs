@@ -18,13 +18,14 @@ import { CONTEXT_MARKER } from "@/lib/ai/knowledge";
  * Day-level only: no clock time, or the note would change on every message.
  */
 
+/** Recognition in the platform's words (lib/labels/clubs), with what it means for a founder. */
 const STATUS_WORD: Record<string, string> = {
-  DRAFT: "founding draft, not yet submitted to WSUSA",
-  SUBMITTED: "submitted, waiting for WSUSA review",
-  CHANGES_REQUESTED: "WSUSA asked for changes",
-  APPROVED: "approved",
-  REJECTED: "not approved by WSUSA",
-  RETIRED: "retired",
+  DRAFT: "Draft: founding, not yet submitted to WSUSA",
+  SUBMITTED: "In WSUSA review",
+  CHANGES_REQUESTED: "Changes requested by WSUSA",
+  APPROVED: "Approved",
+  REJECTED: "Not approved by WSUSA",
+  RETIRED: "Retired",
 };
 
 export async function buildContextNote(actor: Actor, now = new Date()): Promise<string> {
@@ -63,7 +64,7 @@ export async function buildContextNote(actor: Actor, now = new Date()): Promise<
     : isAdmin(actor)
       ? "WSUSA administrator (full access to every club and the admin tools; no system settings)"
       : "regular user";
-  const status = actor.status === "ALUMNI" ? " Account status: alumni (can't join new clubs, self check-in or review)." : "";
+  const status = actor.status === "ALUMNI" ? " Account status: alumni (can't join new clubs, check in or write reviews)." : "";
   lines.push(`You're helping ${actor.name}, a ${kind}. Platform role: ${platform}.${status}`);
 
   // ── Their clubs ──
@@ -99,10 +100,10 @@ export async function buildContextNote(actor: Actor, now = new Date()): Promise<
     let caps = "";
     if (top && ROLE_RANK[top.role] >= 1) {
       const access = await getClubAccess(actor, e.clubId);
-      if (access?.suspended) caps = "; permissions paused until an overdue officer requirement is done";
+      if (access?.suspended) caps = "; permissions paused until an overdue WSUSA requirement is done";
       else if (access) {
         const list = [...access.capabilities].map((c) => CAPABILITIES[c].label);
-        caps = top.role === "PRESIDENT" || top.role === "VP" || top.role === "ADVISOR" ? "; every club tool this phase allows" : list.length ? `; can use ${list.join(", ")}` : "; no club tools granted";
+        caps = top.role === "PRESIDENT" || top.role === "VP" || top.role === "ADVISOR" ? "; every permission this phase allows" : list.length ? `; permissions: ${list.join(", ")}` : "; no permissions granted";
       }
     }
     const statusNote = e.status === "APPROVED" ? "" : ` [${STATUS_WORD[e.status] ?? e.status.toLowerCase()}]`;
@@ -120,14 +121,22 @@ export async function buildContextNote(actor: Actor, now = new Date()): Promise<
     [
       "Current platform settings:",
       `- Active student: attended in the last ${cfg["activity.studentWindowDays"]} days, or one of the club's last ${cfg["activity.studentRecentEvents"]} held events.`,
-      `- Active club: at least ${cfg["activity.clubMinEvents"]} held events in the current or previous term and at least ${cfg["activity.clubMinMembers"]} registered members (waived during the pilot period).`,
+      `- Active (club standing): at least ${cfg["activity.clubMinEvents"]} held events in the current or previous term and at least ${cfg["activity.clubMinMembers"]} registered members (waived during the pilot period).`,
       `- Reviews unlock after attending ${cfg["reviews.minAttendance"]} of a club's events.`,
       `- Check-in opens ${cfg["checkin.opensMinutesBefore"]} minutes before an event and closes ${cfg["checkin.closesMinutesAfter"]} minutes after it ends.`,
+      cfg["app.iosUrl"].trim() || cfg["app.androidUrl"].trim()
+        ? "- The mobile app is in the stores: links are at /get-the-app."
+        : "- The mobile app isn't in the App Store or Google Play yet, so don't suggest downloading it. Everything works on the web: pointing a phone's camera at a meeting's check-in QR code opens check-in in the browser.",
     ].join("\n"),
   );
+  // Sysadmins can leave any office field blank; mention only what's set.
   const office = cfg["wsusa.office"];
-  const officeBits = [office.location, office.hours, office.email, office.phone].filter(Boolean).join(" · ");
-  lines.push(`WSUSA clubs office (for founders and questions about review): ${office.name} — ${officeBits}. Typical review time: about ${office.reviewDays} business days.`);
+  const officeBits = [office.location, office.hours, office.email && `email ${office.email}`, office.phone && `phone ${office.phone}`].filter(Boolean).join(" · ");
+  const reviewers = (cfg["wsusa.reviewers"] ?? []).filter((r) => r?.name).map((r) => [r.name, r.title, r.email].filter(Boolean).join(", "));
+  lines.push(
+    `WSUSA clubs office (for founders and questions about review): ${office.name}${officeBits ? ` — ${officeBits}` : ""}. Typical review time: about ${office.reviewDays} business days.` +
+      (reviewers.length ? ` Reviewers founders can contact: ${reviewers.join("; ")}.` : ""),
+  );
 
   return lines.join("\n\n");
 }

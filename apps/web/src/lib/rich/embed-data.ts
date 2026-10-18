@@ -15,8 +15,7 @@ import { fmtRange } from "@/lib/time";
  *   UNIVERSITY  any signed-in Weber State account
  *   MEMBERS     members of the host club or an approved co-host club, and admins
  *               (a university event marked MEMBERS is treated as UNIVERSITY)
- * Drafts (the club's idea list) show only to the club's event planners and admins,
- * and events of clubs that aren't approved yet only to that club's leaders.
+ * Events of clubs that aren't approved yet show only to that club's leaders.
  */
 
 // Event visibility is decided by lib/authz/events (the one rule for every surface).
@@ -75,7 +74,7 @@ const cardSelect = {
 export type EventCardData = {
   id: string;
   title: string;
-  status: "DRAFT" | "SCHEDULED" | "CANCELLED";
+  status: "SCHEDULED" | "CANCELLED";
   visibility: Visibility;
   recurrence: Recurrence;
   allDay: boolean;

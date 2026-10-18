@@ -11,7 +11,7 @@ import { EventsBuilder } from "@/components/events/EventsBuilder";
 
 export const metadata: Metadata = { title: "Events Builder" };
 
-export default async function ClubEventsPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ tab?: string; date?: string }> }) {
+export default async function ClubEventsPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ date?: string }> }) {
   const { slug } = await params;
   const sp = await searchParams;
   const { club, access, allowed } = await loadClubWorkspace(slug, "events");
@@ -36,7 +36,7 @@ export default async function ClubEventsPage({ params, searchParams }: { params:
     <div className="space-y-6">
       <PageHeader
         title="Events"
-        description="Plan meetings and events, keep a list of ideas, and co-host with other clubs. Everything here shows on your club page, member calendars and the Budget tool."
+        description="Plan meetings and events, and co-host with other clubs. Everything here shows on your club page, member calendars and the Budget tool."
         actions={
           data.googleLive ? (
             <Badge tone="success">
@@ -50,13 +50,11 @@ export default async function ClubEventsPage({ params, searchParams }: { params:
         mode="club"
         club={{ id: club.id, slug: club.slug, name: club.name }}
         basePath={base}
-        ideas={data.ideas}
         incoming={data.incoming}
         outgoing={data.outgoing}
         buildings={data.buildings}
         terms={data.terms}
         googleLive={data.googleLive}
-        initialTab={sp.tab === "cohosts" ? "cohosts" : "ideas"}
         initialDate={date}
       />
     </div>

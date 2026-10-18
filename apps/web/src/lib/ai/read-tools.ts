@@ -6,7 +6,8 @@ import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, ROLE_LABEL, ROL
 import { requirementStatus } from "@/lib/authz/requirements";
 import { listClubs, clubUpcomingEvents, type ClubListItem } from "@/lib/clubs/queries";
 import { clubListHref, SORT_DEFAULT_DIR, type ClubListParams } from "@/components/clubs/list-params";
-import { CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/components/clubs/labels";
+import { CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL, STANDING_LABEL, standingOf } from "@/lib/labels/clubs";
+import { MEMBERSHIP_STATUS_LABEL } from "@/components/admin/users/labels";
 import { clubActivity, clubActivityMany, clubListMetrics, memberClubSummaries, reviewEligibility } from "@/lib/metrics";
 import { feedOccurrences, viewerContext } from "@/lib/events/feed";
 import { canManageEvent, canSeeEventCosts, canViewEvent, eventCostSummary } from "@/lib/domain/events";
@@ -32,20 +33,18 @@ import { resolveClub, resolveCollege, ToolError } from "@/lib/ai/resolve";
 
 const clubRef = z.string().min(1).max(160).describe("The club's name (or part of it) or its URL slug, e.g. \"Chess Club\" or \"wildcat-robotics\"");
 
+/** Recognition (Club.status) in the platform's words: "Approved", "In WSUSA review"… Standing is separate. */
 const CLUB_STATUS_TEXT: Record<string, string> = {
-  DRAFT: "founding draft (not yet submitted)",
-  SUBMITTED: "submitted — waiting for WSUSA review",
-  CHANGES_REQUESTED: "WSUSA asked for changes",
-  APPROVED: "approved",
-  REJECTED: "not approved by WSUSA",
-  RETIRED: "retired (archived)",
+  ...CLUB_STATUS_LABEL,
+  DRAFT: "Draft (founding, not yet submitted to WSUSA)",
+  RETIRED: "Retired (archived)",
 };
 
-function clubStatusText(item: Pick<ClubListItem, "status" | "hasMetrics" | "metrics">) {
-  if (item.status === "RETIRED") return "retired (archived)";
+/** Standing for an approved club: "Active", "Pilot period" or "Inactive" (lib/metrics). */
+function clubStandingText(item: Pick<ClubListItem, "status" | "hasMetrics" | "metrics">) {
+  if (item.status === "RETIRED") return "Retired (archived)";
   if (!item.hasMetrics) return "no activity data yet";
-  if (item.metrics.inPilot) return "active (pilot period)";
-  return item.metrics.isActive ? "active" : "not active right now";
+  return STANDING_LABEL[standingOf(item.metrics)];
 }
 
 function ratingText(avg: number | null, count: number) {
@@ -56,8 +55,8 @@ function relationship(s: { member: boolean; pending: boolean; subscribed: boolea
   if (!s) return null;
   if (s.leader) return "you're a leader here";
   if (s.member) return "you're a member";
-  if (s.pending) return "your join request is pending";
-  if (s.subscribed) return "you follow its calendar";
+  if (s.pending) return "Request pending: your join request is waiting for its leaders";
+  if (s.subscribed) return "you're following its calendar";
   return null;
 }
 
@@ -78,17 +77,17 @@ const searchClubs = readTool({
   name: "search_clubs",
   running: "Searching clubs",
   description:
-    "Search Weber State's clubs with the same search as the clubs list: it looks inside each club's page — about, events, public announcements, constitution, reviews and files — not just names, and copes with typos and acronyms (\"SWE\"). Returns each club's name, link, type, college, focus, short description, where the words were found, why it suits this person, whether joining is open, activity status, members, rating, retention and the person's relationship to it. Without a query it lists clubs in Recommended order (active, popular clubs and ones matching the person's majors, clubs and check-ins first). Use it for \"find clubs about X\", recommendations, comparisons and browsing.",
+    "Search Weber State's clubs with the same search engine as the clubs list and the mobile app: it looks inside each club's page — about, seats, events, public announcements, constitution, reviews and public file names — not just names, and copes with typos and acronyms (\"SWE\"). Returns each club's name, link, type, category, college, focus, short description, where the words were found (\"Found in …\"), up to two reasons it suits this person, the join policy, standing (Active, Pilot period or Inactive), attending and registered members, rating, retention and the person's relationship to it. With a query it sorts by Best match; without one, by Recommended (active, popular clubs and ones that fit the person's majors, clubs, check-ins and follows first). Use it for \"find clubs about X\", recommendations, comparisons and browsing.",
   schema: z.object({
     query: z.string().max(100).optional().describe("Words to look for in club pages, e.g. \"AI\", \"chess\", \"welding\", \"nursing\". Leave out to browse or recommend."),
     type: z.enum(["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"]).optional(),
     category: z.enum(["ACADEMIC", "CULTURAL", "FSL", "HONOR_SOCIETY", "SERVICE_ADVOCACY", "STUDENT_LIFE", "RELIGIOUS"]).optional().describe("WSUSA's club category: academic, cultural, fraternity & sorority life, honor society, service & advocacy, student life & special interest, or religious"),
-    status: z.enum(["active", "pilot", "inactive"]).optional().describe("active = counts as active (includes pilot clubs); pilot = new clubs in their pilot period; inactive = not active right now"),
+    status: z.enum(["active", "pilot", "inactive"]).optional().describe("Standing: active = counts as active (includes clubs in their pilot period); pilot = new clubs in their pilot period; inactive = below WSUSA's activity standard"),
     college: z.string().max(120).optional().describe("Only clubs in this college (name or short name)"),
     sort: z
       .enum(["relevance", "recommended", "name", "rating", "members", "retention", "activity"])
       .optional()
-      .describe("Default: relevance (best match) with a query, recommended without one"),
+      .describe("Default: relevance (Best match) with a query, recommended (Recommended) without one; members = attending members"),
     limit: z.number().int().min(1).max(20).optional().describe("How many to return (default 8)"),
     archived: z.boolean().optional().describe("Search retired clubs instead of current ones"),
   }),
@@ -117,15 +116,16 @@ const searchClubs = readTool({
       name: c.name,
       link: `/clubs/${c.slug}`,
       type: CLUB_TYPE_LABEL[c.type],
+      ...(c.category ? { category: CLUB_CATEGORY_LABEL[c.category] } : {}),
       placement: c.placement,
       focus: c.focus,
       department: c.departmentName,
       about: c.shortDescription,
       ...(c.match ? { found_in: foundInText(c.match) } : {}),
       ...(c.reasons.length ? { why_suggested: c.reasons } : {}),
-      joining: c.joinPolicy === "OPEN" ? "open — registering makes you a member right away" : "leaders approve new members",
-      status: clubStatusText(c),
-      active_members: c.metrics.activeMembers,
+      joining: JOIN_POLICY_LABEL[c.joinPolicy],
+      standing: clubStandingText(c),
+      attending_members: c.metrics.activeMembers,
       registered_members: c.metrics.registeredMembers,
       rating: ratingText(c.metrics.avgRating, c.metrics.reviewCount),
       monthly_retention: percent(c.metrics.retentionRate),
@@ -150,7 +150,7 @@ const getClub = readTool({
   name: "get_club",
   running: "Looking up the club",
   description:
-    "Everything about one club: profile, type, college, how joining works, its primary way of choosing leaders (succession), stats (activity status with reasons, members, retention, rating), leaders and advisors, upcoming events this person can see, and the person's own relationship (member, role, calendar, review eligibility).",
+    "Everything about one club: profile, type, college, its join policy, its primary way of choosing leaders (succession), its recognition (Approved, In WSUSA review…) and standing (Active, Pilot period or Inactive, with reasons), attending and registered members, retention, rating, leaders and advisors, upcoming events this person can see, and the person's own relationship (member, role, whether they follow its calendar, review eligibility).",
   schema: z.object({ club: clubRef }),
   async run({ actor }, input) {
     const ref = await resolveClub(actor, input.club);
@@ -197,10 +197,10 @@ const getClub = readTool({
         name: club.name,
         link: `/clubs/${club.slug}`,
         ...(access?.isLeader ? { workspace_link: `/clubs/${club.slug}/manage` } : {}),
-        status: CLUB_STATUS_TEXT[club.status],
+        recognition: CLUB_STATUS_TEXT[club.status],
         type: CLUB_TYPE_LABEL[club.type],
         college: club.college?.name ?? null,
-        placement: club.scope === "COLLEGE" ? (club.college?.name ?? "College") : { UNIVERSITY: "University-wide", INDEPENDENT: "Independent", SPORTS: "Sports", COLLEGE: "College" }[club.scope],
+        placement: club.scope === "COLLEGE" ? (club.college?.name ?? CLUB_SCOPE_LABEL.COLLEGE) : CLUB_SCOPE_LABEL[club.scope],
         department: club.department?.name ?? (club.requestedDepartmentName ? `${club.requestedDepartmentName} (requested; not on the list yet)` : null),
         focus: club.focusMajor?.name ?? club.focusOther ?? null,
         about: club.shortDescription,
@@ -213,13 +213,13 @@ const getClub = readTool({
         ...(club.retiredAt ? { retired: fmtDate(club.retiredAt, "MMM d, yyyy"), retired_reason: club.retiredReason } : {}),
         stats: metrics
           ? {
-              active_members: metrics.activeMembers,
+              attending_members: metrics.activeMembers,
               registered_members: metrics.registeredMembers,
               rating: ratingText(metrics.avgRating, metrics.reviewCount),
               monthly_retention: percent(metrics.retentionRate),
               activity: activity
                 ? {
-                    status: activity.inPilot ? "active (pilot period)" : activity.active ? "active" : "not active right now",
+                    standing: STANDING_LABEL[standingOf(activity)],
                     pilot_ends: activity.pilotEndsAt ? fmtDate(activity.pilotEndsAt, "MMM d, yyyy") : null,
                     held_events_current_term: activity.heldEventsCurrentTerm,
                     held_events_previous_term: activity.heldEventsPreviousTerm,
@@ -242,8 +242,8 @@ const getClub = readTool({
           link: `/events/${e.eventId}?o=${e.occurrenceId}`,
         })),
         you: {
-          relationship: access?.isMember ? (access.role === "MEMBER" ? "member" : ROLE_LABEL[access.role!]) : access?.isPendingMember ? "join request pending" : access?.viaPlatform ? "admin (not a member)" : "not a member",
-          follows_calendar: Boolean(sub),
+          relationship: access?.isMember ? (access.role === "MEMBER" ? "member" : ROLE_LABEL[access.role!]) : access?.isPendingMember ? "Request pending" : access?.viaPlatform ? "admin (not a member)" : "not a member",
+          following_calendar: Boolean(sub),
           ...(review ? { reviews: review.eligible ? "can review this club" : `attended ${review.attended} of the ${review.required} events needed to review` } : {}),
         },
       },
@@ -258,7 +258,7 @@ const myClubsAndRoles = readTool({
   name: "my_clubs_and_roles",
   running: "Checking your clubs",
   description:
-    "The person's clubs: memberships (and pending join requests), current roles with the club tools they can use, paused permissions, clubs they're founding, and calendars they follow without joining.",
+    "The person's clubs: memberships (and pending join requests), current roles with the permissions they have, paused permissions, clubs they're founding, and club calendars they follow without joining.",
   schema: z.object({}),
   async run({ actor }) {
     const [memberships, roles, subs] = await Promise.all([
@@ -283,13 +283,13 @@ const myClubsAndRoles = readTool({
       clubs.push({
         club: club.name,
         link: leader ? `/clubs/${club.slug}/manage` : `/clubs/${club.slug}`,
-        club_status: CLUB_STATUS_TEXT[club.status],
-        membership: m ? (m.status === "ACTIVE" ? `member since ${m.joinedAt ? fmtDate(m.joinedAt, "MMM yyyy") : "recently"}` : "join request pending") : "no membership",
+        club_recognition: CLUB_STATUS_TEXT[club.status],
+        membership: m ? (m.status === "ACTIVE" ? `member since ${m.joinedAt ? fmtDate(m.joinedAt, "MMM yyyy") : "recently"}` : MEMBERSHIP_STATUS_LABEL.PENDING) : "no membership",
         internal_title: m?.internalTitle ?? undefined,
         roles: rs.map((r) => ({ seat: r.position?.name ?? ROLE_LABEL[r.role], role: ROLE_LABEL[r.role], since: fmtDate(r.startedAt, "MMM d, yyyy") })),
         ...(leader && access
           ? {
-              club_tools: access.suspended ? [] : [...access.capabilities].map((c) => CAPABILITIES[c].label),
+              permissions: access.suspended ? [] : [...access.capabilities].map((c) => CAPABILITIES[c].label),
               permissions_paused: access.suspended || undefined,
               can_assign_roles: access.assignableRoles.map((r) => ROLE_LABEL[r]),
             }
@@ -301,7 +301,7 @@ const myClubsAndRoles = readTool({
       data: {
         platform_role: actor.platformRole === "SYSADMIN" ? "system administrator" : actor.platformRole === "ADMIN" ? "WSUSA administrator" : "regular user",
         clubs,
-        follows_calendars_of: subs.filter((s) => !clubIds.includes(s.club.id)).map((s) => ({ club: s.club.name, link: `/clubs/${s.club.slug}` })),
+        following_calendars_of: subs.filter((s) => !clubIds.includes(s.club.id)).map((s) => ({ club: s.club.name, link: `/clubs/${s.club.slug}` })),
       },
       label: "Checked your clubs and roles",
     };
@@ -375,23 +375,29 @@ const TASK_KIND: Record<string, string> = {
   PERSONAL: "personal to-do",
   CLUB: "club to-do",
   APPROVAL: "waiting on your decision",
-  REQUIREMENT: "officer requirement",
+  REQUIREMENT: "WSUSA requirement",
+  TEST: "Test",
   INVOICE: "invoice follow-up",
 };
+
+/** A test assigned by a club reads "Club test"; one from WSUSA, just "Test". */
+const taskKind = (t: { kind: string; club?: { name: string } | null }) => (t.kind === "TEST" && t.club ? "Club test" : (TASK_KIND[t.kind] ?? t.kind.toLowerCase()));
 
 const myTasks = readTool({
   name: "my_tasks",
   running: "Checking your tasks",
-  description: "The person's open tasks (their inbox): approvals waiting on them, officer requirements, invoices, club to-dos and personal to-dos, with due dates and links.",
+  description: "The person's open Tasks: approvals waiting on them, WSUSA requirements (marked required, listed first), tests assigned to them, invoices, club to-dos and personal to-dos, with due dates and links.",
   schema: z.object({ include_completed: z.boolean().optional().describe("Also list the 10 most recently completed tasks") }),
   async run({ actor, now }, input) {
     const [open, done] = await Promise.all([listTasks(actor, { status: "OPEN", take: 40 }), input.include_completed ? listTasks(actor, { status: "DONE", take: 10 }) : Promise.resolve([])]);
     const row = (t: (typeof open)[number]) => ({
       title: t.title,
-      kind: TASK_KIND[t.kind] ?? t.kind.toLowerCase(),
+      kind: taskKind(t),
+      ...(t.required ? { required: "Required by WSUSA" } : {}),
       club: t.club?.name ?? null,
       due: t.dueAt ? fmtDate(t.dueAt, "EEE, MMM d, yyyy") : null,
-      overdue: t.dueAt && t.dueAt < now && t.status === "OPEN" ? true : undefined,
+      overdue: t.dueAt && t.dueAt < now && t.status === "OPEN" && !t.awaitingGrade ? true : undefined,
+      ...(t.awaitingGrade ? { waiting_for_a_grader: true } : {}),
       details: t.description ?? undefined,
       link: t.href ?? "/tasks",
     });
@@ -460,7 +466,7 @@ const myAttendance = readTool({
       .map((s) => ({
         club: s.club.name,
         link: `/clubs/${s.club.slug}`,
-        membership: s.membershipStatus ? s.membershipStatus.toLowerCase() : "guest (not a member)",
+        membership: s.membershipStatus ? MEMBERSHIP_STATUS_LABEL[s.membershipStatus] : "guest (not a member)",
         events_attended: s.summary.attended,
         held_since_joining: s.summary.heldSinceJoined,
         attendance_rate: s.membershipStatus ? percent(s.summary.rate) : null,
@@ -545,10 +551,13 @@ const getPolicy = readTool({
 
 // ─── explain_permissions ────────────────────────────────────────────────────
 
+/** What a WSUSA requirement asks for (a form is a test with grading off). */
+const REQUIREMENT_KIND: Record<string, string> = { TEST: "test or form", TRAINING: "training", PROFILE: "member details" };
+
 const PHASE_NOTE: Record<string, string> = {
-  DRAFT: "While a club is being founded only Profile, Org chart, Constitution and Files are available.",
-  SUBMITTED: "While WSUSA reviews the club only Profile, Org chart, Constitution and Files are available.",
-  CHANGES_REQUESTED: "Until WSUSA approves the club only Profile, Org chart, Constitution and Files are available.",
+  DRAFT: "While a club is being founded only Club profile, Org chart, Constitution and Files are available.",
+  SUBMITTED: "While the club is in WSUSA review only Club profile, Org chart, Constitution and Files are available.",
+  CHANGES_REQUESTED: "Until WSUSA approves the club only Club profile, Org chart, Constitution and Files are available.",
   APPROVED: "",
   REJECTED: "This club wasn't approved, so it's read-only.",
   RETIRED: "This club is retired, so it's read-only.",
@@ -558,7 +567,7 @@ const explainPermissions = readTool({
   name: "explain_permissions",
   running: "Checking permissions",
   description:
-    "What the person can and can't do in one club, straight from the permission system: their role, the club tools (capabilities) they have and don't have, which roles they can assign, whether they can invite advisors or retire the club, and any paused permissions with the overdue officer requirements.",
+    "What the person can and can't do in one club, straight from the permission system: their role, the permissions they have and don't have, which roles they can assign, whether they can invite advisors or retire the club, and whether their permissions are paused, with their WSUSA requirements.",
   schema: z.object({ club: clubRef }),
   async run({ actor }, input) {
     const club = await resolveClub(actor, input.club);
@@ -572,22 +581,22 @@ const explainPermissions = readTool({
       const approved = await db.club.findUnique({ where: { id: club.id }, select: { approvedAt: true } });
       if (top) {
         const status = await requirementStatus(actor.id, access.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: approved?.approvedAt ?? null });
-        requirements = status.items.map((i) => ({ name: i.requirement.name, kind: i.requirement.kind === "TEST" ? "test" : "training", done: i.met, due: fmtDate(i.dueAt, "MMM d, yyyy"), overdue: i.overdue }));
+        requirements = status.items.map((i) => ({ name: i.requirement.name, kind: REQUIREMENT_KIND[i.requirement.kind] ?? "requirement", done: i.met, due: fmtDate(i.dueAt, "MMM d, yyyy"), overdue: i.overdue }));
       }
     }
     return {
       data: {
         club: club.name,
-        club_status: CLUB_STATUS_TEXT[club.status],
-        your_role: access.viaPlatform ? (access.viaPlatform === "SYSADMIN" ? "system administrator (full access)" : "WSUSA administrator (full access)") : access.role ? ROLE_LABEL[access.role] : access.isPendingMember ? "join request pending" : "not a member",
-        permissions_paused: access.suspended ? "Yes — an officer requirement is overdue, so club tools are paused until it's done. The title stays." : undefined,
-        can_use: has.map((c) => ({ tool: CAPABILITIES[c].label, what: CAPABILITIES[c].description })),
+        club_recognition: CLUB_STATUS_TEXT[club.status],
+        your_role: access.viaPlatform ? (access.viaPlatform === "SYSADMIN" ? "system administrator (full access)" : "WSUSA administrator (full access)") : access.role ? ROLE_LABEL[access.role] : access.isPendingMember ? "Request pending (not a member yet)" : "not a member",
+        permissions_paused: access.suspended ? "Yes — a WSUSA requirement is overdue, so their permissions are paused until it's done. The title stays." : undefined,
+        can_use: has.map((c) => ({ permission: CAPABILITIES[c].label, what: CAPABILITIES[c].description })),
         cannot_use: lacks.map((c) => CAPABILITIES[c].label),
         can_assign_roles: access.assignableRoles.map((r) => ROLE_LABEL[r]),
         can_invite_advisor: access.canInviteAdvisor,
         can_retire_club: access.canRetire,
         phase_note: PHASE_NOTE[access.clubStatus] || undefined,
-        officer_requirements: requirements,
+        wsusa_requirements: requirements,
         workspace_link: access.isLeader ? `/clubs/${club.slug}/manage` : undefined,
       },
       label: `Checked your permissions in ${club.name}`,
@@ -601,7 +610,7 @@ const eventDetails = readTool({
   name: "event_details",
   running: "Looking up the event",
   description:
-    "Details of one event the person can see: host and co-hosts, schedule, next meetings (with cancellations), location, who can see it, whether self check-in is allowed, description, and expected costs when they're a leader who may see them. Pass the event_id from another tool, or a title to search.",
+    "Details of one event the person can see: host and co-hosts, schedule, next meetings (with cancellations), location, who can see it, how check-in works there, description, and expected costs when they're a leader who may see them. Pass the event_id from another tool, or a title to search.",
   schema: z.object({
     event_id: z.string().max(64).optional().describe("The event_id from my_calendar or get_club"),
     title: z.string().max(140).optional().describe("Search by title when you don't have the id"),
@@ -637,7 +646,7 @@ const eventDetails = readTool({
       data: {
         title: event.title,
         type: KIND_LABEL[event.kind],
-        status: event.status === "DRAFT" ? "draft (not on the calendar yet)" : event.status === "CANCELLED" ? "cancelled" : "scheduled",
+        status: event.status === "CANCELLED" ? "cancelled" : "scheduled",
         host: event.club?.name ?? "Weber State (university event)",
         cohosts: event.cohosts.map((c) => c.club.name),
         schedule: event.startsAt
@@ -653,7 +662,12 @@ const eventDetails = readTool({
         where: locationText(event),
         online_link: event.virtualUrl ?? undefined,
         who_can_see_it: VISIBILITY_LABEL[event.visibility],
-        check_in: event.locationType === "VIRTUAL" ? "members tap Check in while it's happening" : "at the event: scan the QR code or type the code on the screen; leaders can add people",
+        check_in:
+          event.locationType === "VIRTUAL"
+            ? "Online: members of the host and co-host clubs press Check in while it's on (One-tap (online)); leaders with Attendance can add people (Added by a leader)."
+            : event.club
+              ? "In person only: scan the rotating QR code shown at the event (QR scan), or members of the host and co-host clubs type the code shown there (Typed code); leaders with Attendance can add people (Added by a leader)."
+              : "In person only: scan the rotating QR code shown at the event (QR scan); a university event has no host club, so a typed code doesn't work. WSUSA staff running it can add people (Added by a leader).",
         description: richToText(event.descriptionHtml, 1500) || null,
         expected_costs: summary && summary.totalCents > 0 ? { total: fmtMoney(summary.totalCents), per_meeting: fmtMoney(summary.perOccurrenceCents), one_time: fmtMoney(summary.oneTimeCents) } : undefined,
         link: `/events/${event.id}`,
@@ -718,7 +732,7 @@ const clubHealth = readTool({
   name: "club_health",
   running: "Checking club activity",
   description:
-    "Which clubs are at risk: approved clubs that don't count as active (with the reasons from the metrics layer) and pilot clubs whose pilot period ends soon. Admins see every club; everyone else sees the clubs they lead or advise.",
+    "Which clubs are at risk: approved clubs whose standing is Inactive (with the reasons from the metrics layer) and clubs whose pilot period ends soon. Admins see every club; everyone else sees the clubs they lead or advise.",
   schema: z.object({ pilot_ending_within_days: z.number().int().min(1).max(365).optional().describe("Flag pilot periods ending within this many days (default 60)") }),
   async run({ actor, now }, input) {
     const window = (input.pilot_ending_within_days ?? 60) * 86_400_000;
@@ -740,7 +754,7 @@ const clubHealth = readTool({
     for (const [id, a] of activity) {
       const c = byId.get(id);
       if (!c) continue;
-      const row = { club: c.name, link: `/clubs/${c.slug}`, registered_members: a.registeredMembers, active_members: a.activeMembers, held_events_current_term: a.heldEventsCurrentTerm, held_events_previous_term: a.heldEventsPreviousTerm };
+      const row = { club: c.name, link: `/clubs/${c.slug}`, registered_members: a.registeredMembers, attending_members: a.activeMembers, held_events_current_term: a.heldEventsCurrentTerm, held_events_previous_term: a.heldEventsPreviousTerm };
       if (!a.active) atRisk.push({ ...row, reasons: a.reasons });
       else if (a.inPilot && a.pilotEndsAt && a.pilotEndsAt.getTime() - now.getTime() <= window) pilotEnding.push({ ...row, pilot_ends: fmtDate(a.pilotEndsAt, "MMM d, yyyy"), reasons: a.reasons });
       else healthy++;
@@ -750,8 +764,8 @@ const clubHealth = readTool({
       data: {
         scope: clubIds ? "clubs this person leads or advises" : "every approved club",
         term: term?.name ?? null,
-        not_active: atRisk,
-        pilot_ending_soon: pilotEnding,
+        inactive: atRisk,
+        pilot_period_ending_soon: pilotEnding,
         active_and_fine: healthy,
         ...(clubIds ? {} : { admin_pages: { clubs: "/admin/clubs", analytics: "/admin/analytics" } }),
       },
@@ -797,7 +811,7 @@ const orgChart = readTool({
 const findClubMember = readTool({
   name: "find_club_member",
   running: "Looking up members",
-  description: "Find active members of a club by name (for assigning roles). Only for people who can see the club's member roster (the Members permission) or assign its roles.",
+  description: "Find a club's current members by name (for assigning roles). Only for people who can see the club's member roster (the Members permission) or assign its roles.",
   schema: z.object({ club: clubRef, name: z.string().min(1).max(100).describe("Part of the person's name") }),
   async run({ actor }, input) {
     const club = await resolveClub(actor, input.club);
@@ -806,7 +820,7 @@ const findClubMember = readTool({
     if (!access || !(access.capabilities.has("roster") || access.assignableRoles.length > 0)) {
       throw new ToolError(
         access?.suspended
-          ? `Their permissions in ${club.name} are paused until they finish an overdue officer requirement (see their Tasks).`
+          ? `Their permissions in ${club.name} are paused until they finish an overdue WSUSA requirement (see their Tasks).`
           : `Looking up ${club.name}'s members needs the ${CAPABILITIES.roster.label} permission there, which they don't have. The President, a Vice President or the club's advisor can grant it in the org chart.`,
       );
     }

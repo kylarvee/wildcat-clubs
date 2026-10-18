@@ -70,7 +70,7 @@ export default async function MemberAttendancePage({ params }: { params: Promise
   const statusBadge = isMember ? (
     <Badge tone="brand">Member{membership?.joinedAt ? ` since ${fmtDate(membership.joinedAt, "MMM yyyy")}` : ""}</Badge>
   ) : membership?.status === "PENDING" ? (
-    <Badge tone="warning">Join request pending</Badge>
+    <Badge tone="warning">Request pending</Badge>
   ) : membership?.joinedAt ? (
     <Badge tone="neutral">Former member</Badge>
   ) : (

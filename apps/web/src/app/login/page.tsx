@@ -10,7 +10,7 @@ import { Callout } from "@/components/ui/layout";
 import { buttonClasses } from "@/components/ui/button";
 import { signInAsPersona, signInWithTestEmail } from "./actions";
 
-export const metadata: Metadata = { title: "Log in" };
+export const metadata: Metadata = { title: "Sign in" };
 
 /** Sign-in failures arrive as codes (from the Google callback and test sign-in); unknown codes show nothing. */
 const ERRORS: Record<string, string> = {
@@ -38,7 +38,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="mb-4 flex justify-center">
           <LogoMark size={48} />
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Log in to {PLATFORM.name}</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Sign in to {PLATFORM.name}</h1>
         <p className="mt-2 text-ink-2">
           Use your {INSTITUTION.shortName} Google account — <span className="font-medium">@{INSTITUTION.studentEmailDomain}</span> for students,{" "}
           <span className="font-medium">@{INSTITUTION.staffEmailDomain}</span> for faculty and staff.

@@ -5,28 +5,22 @@ import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Stars } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
-import { CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, pct, safeHex } from "@/components/clubs/labels";
+import { CLUB_STATUS_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, JOIN_POLICY_LABEL, JOIN_POLICY_SHORT, STANDING_HINT, STANDING_LABEL, STANDING_TONE, pct, safeHex, standingOf } from "@/components/clubs/labels";
 import { RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
 import { FoundIn } from "@/components/search/FoundIn";
 import { Reasons } from "@/components/search/Reasons";
 
-/** Pilot / inactive / retired badge. Shows nothing until the metrics layer has numbers for the club. */
+/** "Pilot period" / "Inactive" standing, or "Retired". Shows nothing for active clubs, or until the metrics layer has numbers. */
 export function ClubStatusBadge({ club }: { club: Pick<ClubListItem, "status" | "metrics" | "hasMetrics"> }) {
-  if (club.status === "RETIRED") return <Badge>Retired</Badge>;
+  if (club.status === "RETIRED") return <Badge>{CLUB_STATUS_LABEL.RETIRED}</Badge>;
   if (!club.hasMetrics) return null;
-  if (club.metrics.inPilot)
-    return (
-      <Badge tone="info" title="New clubs count as active through their first full semester">
-        Pilot
-      </Badge>
-    );
-  if (!club.metrics.isActive)
-    return (
-      <Badge tone="warning" title="Fewer events or members this term than an active club needs">
-        Inactive
-      </Badge>
-    );
-  return null;
+  const standing = standingOf(club.metrics);
+  if (standing === "active") return null;
+  return (
+    <Badge tone={STANDING_TONE[standing]} title={STANDING_HINT[standing]}>
+      {STANDING_LABEL[standing]}
+    </Badge>
+  );
 }
 
 export function RatingInline({ avg, count, size = 14 }: { avg: number | null; count: number; size?: number }) {
@@ -48,7 +42,7 @@ export function RatingInline({ avg, count, size = 14 }: { avg: number | null; co
 /**
  * A club in the grid: identity, what it's about, and its numbers. With a
  * search, where the words were found when the card doesn't show them; and up
- * to two reasons it's suggested. Signed-in viewers get Register / Subscribe.
+ * to two reasons it's suggested. Signed-in viewers get Register / Follow.
  */
 export function ClubCard({ club, state, signedIn, showActions = true }: { club: ClubListItem; state?: ViewerClubState; signedIn: boolean; showActions?: boolean }) {
   const color = safeHex(club.logoColor);
@@ -81,8 +75,9 @@ export function ClubCard({ club, state, signedIn, showActions = true }: { club: 
         </Badge>
         <ClubStatusBadge club={club} />
         {club.joinPolicy === "APPROVAL" && club.status === "APPROVED" ? (
-          <Badge title="Club leaders approve new members">
-            <Lock className="h-3 w-3" aria-hidden="true" /> Approval to join
+          <Badge title={JOIN_POLICY_LABEL.APPROVAL}>
+            <Lock className="h-3 w-3" aria-hidden="true" /> <span aria-hidden="true">{JOIN_POLICY_SHORT.APPROVAL}</span>
+            <span className="sr-only">{JOIN_POLICY_LABEL.APPROVAL}</span>
           </Badge>
         ) : null}
       </div>
@@ -96,11 +91,11 @@ export function ClubCard({ club, state, signedIn, showActions = true }: { club: 
       <dl className="mx-4 mt-3 grid grid-cols-3 gap-2 border-t border-line py-3 text-xs">
         <div className="min-w-0">
           <dt className="flex items-center gap-1 text-ink-3">
-            <Users className="h-3.5 w-3.5" aria-hidden="true" /> Active
+            <Users className="h-3.5 w-3.5" aria-hidden="true" /> Attending
           </dt>
-          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title={`${m.registeredMembers} registered members`}>
+          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title={`Attending members, of ${m.registeredMembers} registered`}>
             {m.activeMembers.toLocaleString("en-US")}
-            <span className="sr-only"> active members of {m.registeredMembers} registered</span>
+            <span className="sr-only"> attending members of {m.registeredMembers} registered</span>
           </dd>
         </div>
         <div className="min-w-0">

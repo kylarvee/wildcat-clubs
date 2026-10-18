@@ -8,10 +8,11 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
  * `/c/<code>?t=<token>`, where the token is an HMAC of the current time window.
  * It changes every `checkin.qrRotateSeconds`, so a photo of the screen sent to a
  * friend stops working. Scans with a valid token count as QR check-ins; the
- * code alone counts as a self check-in, which the event can switch off.
+ * code alone works only for members of the host and co-host clubs
+ * (lib/attendance/rules decideMethod).
  *
  * A rotating token only lives ~1–1.5 minutes, which is too short for someone
- * who scans, then has to log in (or pauses before tapping "Check in"). So when
+ * who scans, then has to sign in (or pauses before tapping "Check in"). So when
  * the check-in page sees a live token it swaps it for a *pass*: a signed,
  * timestamped proof of that scan that stays good for CHECKIN_PASS_MAX_AGE_MS.
  * Passes are only ever minted from a live token, never from another pass.

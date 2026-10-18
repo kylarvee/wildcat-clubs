@@ -1,22 +1,25 @@
-import { BookOpenCheck, CalendarCheck, IdCard } from "lucide-react";
+import { BookOpenCheck, CalendarCheck, FileText, IdCard } from "lucide-react";
 
-export type RequirementLike = { id: string; name: string; description: string | null; kind: "TEST" | "TRAINING" | "PROFILE"; graceDays: number };
+export type RequirementLike = { id: string; name: string; description: string | null; kind: "TEST" | "TRAINING" | "PROFILE"; graceDays: number; isForm?: boolean };
 
-/** What a role asks of whoever takes it: officer tests and trainings with their grace period. */
+/** What to do, worded like the requirement's task. */
+const verbFor = (r: RequirementLike) => (r.kind === "TRAINING" ? "Attend" : r.kind === "PROFILE" ? "Confirm" : r.isForm ? "Fill out" : "Pass");
+
+/** What a role asks of whoever takes it: WSUSA's tests, forms, trainings and member details, with their grace period. */
 export function RequirementList({ requirements, roleLabel }: { requirements: RequirementLike[]; roleLabel: string }) {
   if (requirements.length === 0) {
-    return <p className="text-sm text-ink-3">WSUSA doesn&apos;t require any tests or trainings for the {roleLabel} role right now.</p>;
+    return <p className="text-sm text-ink-3">WSUSA doesn&apos;t require anything of the {roleLabel} role right now.</p>;
   }
   return (
     <ul className="space-y-2">
       {requirements.map((r) => {
-        const Icon = r.kind === "TEST" ? BookOpenCheck : r.kind === "PROFILE" ? IdCard : CalendarCheck;
+        const Icon = r.kind === "TRAINING" ? CalendarCheck : r.kind === "PROFILE" ? IdCard : r.isForm ? FileText : BookOpenCheck;
         return (
           <li key={r.id} className="flex gap-3 rounded-lg border border-line bg-surface px-3 py-2">
             <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
             <div className="min-w-0 text-sm">
               <p className="font-medium text-ink">
-                {r.kind === "TEST" ? "Pass" : "Attend"}: {r.name}
+                {verbFor(r)}: {r.name}
               </p>
               {r.description ? <p className="text-ink-3">{r.description}</p> : null}
               <p className={r.graceDays === 0 ? "text-danger" : "text-ink-2"}>

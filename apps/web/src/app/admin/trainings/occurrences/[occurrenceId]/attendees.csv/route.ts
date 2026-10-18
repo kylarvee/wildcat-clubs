@@ -3,7 +3,8 @@ import { can } from "@/lib/authz";
 import { fmtDate, inCampusTime } from "@/lib/time";
 import { format } from "date-fns";
 import { toCsv } from "@/lib/attendance/matrix";
-import { loadAttendees, METHOD_LABEL } from "../attendees";
+import { METHOD_LABEL } from "@/lib/attendance/rules";
+import { loadAttendees } from "../attendees";
 
 /** Attendee list for one university-event meeting, as CSV (admins). */
 export async function GET(_req: Request, { params }: { params: Promise<{ occurrenceId: string }> }) {

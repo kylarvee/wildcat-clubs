@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Bell, CalendarDays, CheckCircle2, Mail, Smartphone } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
+import { shouldPromptForApp } from "@/lib/clubs/queries";
 import { settingsUser } from "@/lib/profiles/queries";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,7 +18,7 @@ export const metadata: Metadata = { title: "Settings · Notifications & calendar
  */
 export default async function NotificationSettingsPage() {
   const actor = await requireUser("/settings/notifications");
-  const user = await settingsUser(actor.id);
+  const [user, offerApp] = await Promise.all([settingsUser(actor.id), shouldPromptForApp(actor.id, { ignoreSnooze: true })]);
   if (!user) notFound();
 
   return (
@@ -38,28 +39,31 @@ export default async function NotificationSettingsPage() {
         </p>
       </Card>
 
-      <Card className="p-5 sm:p-6">
-        <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
-          <Smartphone className="h-5 w-5 text-ink-3" aria-hidden /> Mobile app
-        </h2>
-        {user.hasMobileApp ? (
-          <div className="mt-3 flex gap-2 text-sm text-ink-2">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
-            <p>
-              You&apos;ve signed in on the Wildcat Clubs app, so push notifications reach your phone. To turn them off or on, use your phone&apos;s notification settings for the app.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-3">
-            <p className="text-sm text-ink-2">
-              You haven&apos;t signed in on the app yet. It&apos;s where you scan the QR code to check in at meetings, and it sends reminders before events and when announcements are posted.
-            </p>
-            <ButtonLink href="/get-the-app" variant="secondary">
-              <Smartphone className="h-4 w-4" aria-hidden /> Get the app
-            </ButtonLink>
-          </div>
-        )}
-      </Card>
+      {/* Hidden until the app is in a store (shouldPromptForApp), unless they already use it. */}
+      {user.hasMobileApp || offerApp ? (
+        <Card className="p-5 sm:p-6">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
+            <Smartphone className="h-5 w-5 text-ink-3" aria-hidden /> Mobile app
+          </h2>
+          {user.hasMobileApp ? (
+            <div className="mt-3 flex gap-2 text-sm text-ink-2">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
+              <p>
+                You&apos;ve signed in on the Wildcat Clubs app, so push notifications reach your phone. To turn them off or on, use your phone&apos;s notification settings for the app.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-ink-2">
+                You haven&apos;t signed in on the app yet. It&apos;s where you scan the QR code to check in at meetings, and it sends reminders before events and when announcements are posted.
+              </p>
+              <ButtonLink href="/get-the-app" variant="secondary">
+                <Smartphone className="h-4 w-4" aria-hidden /> Get the app
+              </ButtonLink>
+            </div>
+          )}
+        </Card>
+      ) : null}
 
       <Card className="p-5 sm:p-6">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">

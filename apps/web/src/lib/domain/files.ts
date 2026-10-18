@@ -972,7 +972,7 @@ export async function searchPeopleToShare(actor: Actor | null, fileId: string, r
     email: p.email,
     avatarUrl: p.avatarUrl,
     avatarColor: p.avatarColor,
-    note: notes.get(p.id) ?? (space.clubId ? "Not in this club" : p.kind === "STUDENT" ? "Student" : "Faculty or staff"),
+    note: notes.get(p.id) ?? (space.clubId ? "Not in this club" : p.kind === "STUDENT" ? "Student" : "Faculty & staff"),
   }));
 }
 
@@ -1013,7 +1013,7 @@ export async function uploadFile(actor: Actor | null, input: UploadInput, opts: 
     if (!access) throw notFound("Club");
     clubId = input.clubId;
     allowed = access.capabilities.has(opts.capability ?? "files");
-    if (!allowed && access.suspended && !parentId) throw forbidden("Your leadership permissions are paused until you finish your required training or test.");
+    if (!allowed && access.suspended && !parentId) throw forbidden("Your leadership permissions are paused until you finish your overdue WSUSA requirement.");
   } else if (input.scope === "user") {
     ownerId = actor.id;
     allowed = true;

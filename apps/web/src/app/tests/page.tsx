@@ -13,7 +13,7 @@ import { Container, EmptyState, PageHeader, Section } from "@/components/ui/layo
 import { FormBadge, ResultBadge } from "@/components/tests/badges";
 import { REQUIRED_LABEL } from "@/components/tasks/labels";
 
-export const metadata: Metadata = { title: "Your tests" };
+export const metadata: Metadata = { title: "Tests & forms" };
 
 /** Every test and form you've been asked to take or fill out (this round) and everything you've handed in. */
 export default async function MyTestsPage() {
@@ -26,7 +26,7 @@ export default async function MyTestsPage() {
   return (
     <Container size="md">
       <PageHeader
-        title="Your tests"
+        title="Tests & forms"
         description="Tests to take and forms to fill out from your clubs and WSUSA, and what you've handed in. WSUSA's come first."
       />
 
@@ -77,7 +77,8 @@ export default async function MyTestsPage() {
 }
 
 function TodoCard({ t, now }: { t: MyTestItem; now: Date }) {
-  const late = t.dueAt ? t.dueAt < now : false;
+  // Handed in and waiting for a grader: nothing more to do, so it doesn't read as late.
+  const late = t.dueAt && t.status !== "needs-review" ? t.dueAt < now : false;
   const action =
     t.status === "in-progress" && t.latestAttemptId
       ? { href: `/tests/${t.testId}/attempt/${t.latestAttemptId}`, label: "Continue" }

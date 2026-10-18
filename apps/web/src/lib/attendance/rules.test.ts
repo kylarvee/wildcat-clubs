@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { campusDate } from "@/lib/time";
-import { allowsTapCheckIn, blockMessage, checkinWindow, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, windowMessage, windowState } from "./rules";
+import {
+  allowsTapCheckIn,
+  blockMessage,
+  CHECKIN_METHODS,
+  checkinWindow,
+  codeClubsPhrase,
+  codeNotFoundMessage,
+  decideMethod,
+  METHOD_LABEL,
+  METHOD_SHORT,
+  normalizeCode,
+  publicShortName,
+  windowMessage,
+  windowState,
+} from "./rules";
 
 const cfg = { opensMinutesBefore: 30, closesMinutesAfter: 30 };
 // Fri Oct 16 2026, 6:00–7:30 PM campus time.
@@ -54,8 +68,25 @@ describe("check-in method", () => {
     expect(decideMethod({ ...base, isParticipatingMember: true })).toEqual({ ok: true, method: "SELF" });
   });
 
-  it("an expired scan still works as a self check-in for members", () => {
+  it("an expired scan still works as a typed code for members", () => {
     expect(decideMethod({ ...base, scanPresented: true, isParticipatingMember: true })).toEqual({ ok: true, method: "SELF" });
+  });
+
+  it("the one-tap prompt at an online event is a TAP check-in", () => {
+    expect(decideMethod({ ...base, isParticipatingMember: true, tapped: true, tapAllowed: true })).toEqual({ ok: true, method: "TAP" });
+  });
+
+  it("typing the code at an online event is still a typed code", () => {
+    expect(decideMethod({ ...base, isParticipatingMember: true, tapped: false, tapAllowed: true })).toEqual({ ok: true, method: "SELF" });
+  });
+
+  it("a tap at an in-person event counts as the code it carried", () => {
+    expect(decideMethod({ ...base, isParticipatingMember: true, tapped: true, tapAllowed: false })).toEqual({ ok: true, method: "SELF" });
+  });
+
+  it("a tap never lets a non-member in, and a live scan still wins", () => {
+    expect(decideMethod({ ...base, tapped: true, tapAllowed: true })).toEqual({ ok: false, reason: "NOT_MEMBER" });
+    expect(decideMethod({ ...base, scanValid: true, scanPresented: true, isParticipatingMember: true, tapped: true, tapAllowed: true })).toEqual({ ok: true, method: "QR" });
   });
 
   it("non-members need the QR code", () => {
@@ -72,6 +103,26 @@ describe("check-in method", () => {
     const d = decideMethod({ ...base, scanPresented: true });
     expect(d).toEqual({ ok: false, reason: "EXPIRED_SCAN" });
     expect(blockMessage("EXPIRED_SCAN", 30)).toContain("every 30 seconds");
+  });
+});
+
+describe("method labels", () => {
+  it("names every method once, the same way everywhere", () => {
+    expect(METHOD_LABEL).toEqual({ QR: "QR scan", SELF: "Typed code", TAP: "One-tap (online)", MANUAL: "Added by a leader" });
+    expect(METHOD_SHORT).toEqual({ QR: "QR", SELF: "Code", TAP: "Tap", MANUAL: "Leader" });
+    expect([...CHECKIN_METHODS].sort()).toEqual(Object.keys(METHOD_LABEL).sort());
+  });
+});
+
+describe("who may use the code", () => {
+  it("names the host and its co-hosts", () => {
+    expect(codeClubsPhrase("Chess Club", [])).toBe("Chess Club");
+    expect(codeClubsPhrase("RC Wrecker Bots Club", ["CSWS"])).toBe("RC Wrecker Bots Club or CSWS");
+    expect(codeClubsPhrase("RC Wrecker Bots Club", ["CSWS", "SWE"])).toBe("RC Wrecker Bots Club and its co-host clubs");
+  });
+
+  it("is nobody at a university event", () => {
+    expect(codeClubsPhrase(null, [])).toBeNull();
   });
 });
 

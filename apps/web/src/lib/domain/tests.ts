@@ -64,7 +64,7 @@ import {
  * that use the form are met, and PASSED ("Submitted") automations run.
  *
  * Task sources this module opens and closes:
- *   "testAssignment" (sourceId = TestAssignment.id) — a person owes a test
+ *   "testAssignment" (sourceId = TestAssignment.id) — a person owes a test (a TEST task)
  *   "testAttempt"    (sourceId = TestAttempt.id)    — open answers to grade
  *   "testFollowUp"   (sourceId = testId:userId:cycleKey:TRIGGER) — automation follow-ups
  * and resolves "requirement" tasks when an officer test is passed.
@@ -238,7 +238,8 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
     const noun = testNoun(test.isForm);
     await db.task.createMany({
       data: rows.map((a) => ({
-        kind: "REQUIREMENT" as const,
+        // Not a WSUSA requirement (those are lib/domain/requirements' REQUIREMENT tasks): a test someone assigned.
+        kind: "TEST" as const,
         title: `${test.isForm ? "Fill out" : "Take"}: ${test.title}`,
         description: test.club ? `Assigned by ${test.club.name}.` : "Assigned by WSUSA.",
         assigneeType: "USER" as const,
@@ -1357,7 +1358,7 @@ export async function searchTestPeople(actor: Actor | null, input: { clubId: str
     take: 20,
     select: { id: true, name: true, handle: true, email: true, avatarUrl: true, avatarColor: true, kind: true },
   });
-  return rows.map((r) => ({ id: r.id, name: r.name, handle: r.handle, email: r.email, avatarUrl: r.avatarUrl, avatarColor: r.avatarColor, detail: r.kind === "STUDENT" ? "Student" : "Faculty/staff" }));
+  return rows.map((r) => ({ id: r.id, name: r.name, handle: r.handle, email: r.email, avatarUrl: r.avatarUrl, avatarColor: r.avatarColor, detail: r.kind === "STUDENT" ? "Student" : "Faculty & staff" }));
 }
 
 /** The chosen people, for showing the selection in the editor. */
@@ -1375,7 +1376,7 @@ export async function testPeopleByIds(ids: string[]): Promise<TestPersonOption[]
     email: r.email,
     avatarUrl: r.avatarUrl,
     avatarColor: r.avatarColor,
-    detail: r.status !== "ACTIVE" ? "Account not active" : r.kind === "STUDENT" ? "Student" : "Faculty/staff",
+    detail: r.status !== "ACTIVE" ? "Account not active" : r.kind === "STUDENT" ? "Student" : "Faculty & staff",
   }));
 }
 

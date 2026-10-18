@@ -23,6 +23,7 @@ type View = "open" | "done" | "assigned";
 const KIND_FILTER_NOUN: Record<TaskKind, string> = {
   APPROVAL: "approvals",
   REQUIREMENT: "requirements",
+  TEST: "tests",
   INVOICE: "invoices",
   CLUB: "club tasks",
   PERSONAL: "personal tasks",
@@ -33,11 +34,11 @@ const DONE_LIMIT = 100;
 
 /**
  * The Task Manager: everything waiting on you in one list — approvals,
- * officer requirements, invoices, club tasks and your own to-dos. Approvals,
- * requirements and invoices close on their own when the thing is done;
- * personal and club tasks you check off. Leaders can hand club tasks to
- * members and follow them under "Assigned by you". What WSUSA requires sits
- * in its own card at the top of the open list.
+ * WSUSA requirements, tests, invoices, club tasks and your own to-dos.
+ * Approvals, requirements, tests and invoices close on their own when the
+ * thing is done; personal and club tasks you check off. Leaders can hand club
+ * tasks to members and follow them under "Assigned by you". What WSUSA
+ * requires sits in its own card at the top of the open list.
  */
 export default async function TasksPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("/tasks");
@@ -108,8 +109,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
         title="Tasks"
         description={
           openItems.length
-            ? `${openItems.length} open${requiredCount ? ` · ${requiredCount} required` : ""}${overdue ? ` · ${overdue} overdue` : ""}. Approvals, requirements and invoices close themselves when they're done; check off the rest.`
-            : "Approvals, WSUSA requirements, invoices, club tasks and your own to-dos — all in one list."
+            ? `${openItems.length} open${requiredCount ? ` · ${requiredCount} required` : ""}${overdue ? ` · ${overdue} overdue` : ""}. Approvals, requirements, tests and invoices close themselves when they're done; check off the rest.`
+            : "Approvals, WSUSA requirements, tests, invoices, club tasks and your own to-dos — all in one list."
         }
         actions={assignClubs.length ? <AssignTaskDialog clubs={assignClubs.map((c) => ({ id: c.id, name: c.name, roleLabel: c.roleLabel }))} capabilities={capabilityOptions} /> : null}
       />
@@ -187,7 +188,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
                     <ShieldAlert className="h-4.5 w-4.5 text-danger" aria-hidden /> {REQUIRED_LABEL}
                   </h2>
                   <p className="mb-4 mt-0.5 text-sm text-ink-3">
-                    WSUSA requires these, and each one closes on its own once it&apos;s done. If you lead a club, an overdue officer requirement pauses your leadership permissions until you finish it.
+                    WSUSA requires these, and each one closes on its own once it&apos;s done. If one that comes with a club role goes overdue, your permissions in that club pause until you finish it. Your title stays.
                   </p>
                   <TaskList items={requiredItems} />
                 </Card>

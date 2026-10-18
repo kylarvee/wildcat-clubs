@@ -146,11 +146,17 @@ export default async function FundingRequestPage({ params }: { params: Params })
             <CardBody className="flex gap-3 text-sm text-ink-2">
               <Mail className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
               <p>
-                Questions about this request? Email{" "}
-                <a href={`mailto:${cfg["wsusa.office"].email}`} className="font-medium text-brand-600 hover:underline">
-                  {cfg["wsusa.office"].name}
-                </a>
-                {cfg["wsusa.office"].location ? ` or stop by the ${cfg["wsusa.office"].location}` : ""}.
+                {cfg["wsusa.office"].email ? (
+                  <>
+                    Questions about this request? Email{" "}
+                    <a href={`mailto:${cfg["wsusa.office"].email}`} className="font-medium text-brand-600 hover:underline">
+                      {cfg["wsusa.office"].name}
+                    </a>
+                    {cfg["wsusa.office"].location ? ` or stop by the ${cfg["wsusa.office"].location}` : ""}.
+                  </>
+                ) : (
+                  `Questions about this request? Ask ${cfg["wsusa.office"].name}${cfg["wsusa.office"].location ? ` at the ${cfg["wsusa.office"].location}` : ""}.`
+                )}
               </p>
             </CardBody>
           </Card>

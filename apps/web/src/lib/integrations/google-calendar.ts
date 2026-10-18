@@ -144,7 +144,6 @@ export async function syncEventToGoogle(eventId: string, opts: { createMeet?: bo
     if (!(await integrationLive("googleCalendar"))) return { status: "off", message: "Google Calendar sync is off." };
     const account = e.club ? clubGoogleAccount(e.club) : { email: PLATFORM_SENDER };
     if (!account.email) return { status: "off", message: account.reason };
-    if (e.status === "DRAFT") return { status: "skipped" };
 
     const cal = await client(account.email);
     const calendarId = await calendarIdFor(cal, e);

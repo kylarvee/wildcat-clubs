@@ -2,6 +2,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { can, ROLE_LABEL } from "@/lib/authz";
 import { listRequirementsForAdmin, requirementCompliance } from "@/lib/domain/requirements";
 import { toCsv } from "@/lib/attendance/matrix";
+import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
 import { fmtDate } from "@/lib/time";
 import { applyFilter, parseFilter } from "../filters";
 
@@ -17,15 +18,23 @@ export async function GET(req: Request) {
   const columns = reqs.filter((r) => r.active && (!f.req || r.id === f.req));
   const shown = applyFilter(rows, f);
   const label = (c: { state: string; dueAt: Date } | undefined) =>
-    !c ? "Not required" : c.state === "met" ? "Met" : c.state === "overdue" ? `Overdue (was due ${fmtDate(c.dueAt, "yyyy-MM-dd")})` : `Due by ${fmtDate(c.dueAt, "yyyy-MM-dd")}`;
+    !c
+      ? "Not required"
+      : c.state === "met"
+        ? "Met"
+        : c.state === "review"
+          ? AWAITING_GRADE_LABEL
+          : c.state === "overdue"
+            ? `Overdue (was due ${fmtDate(c.dueAt, "yyyy-MM-dd")})`
+            : `Due by ${fmtDate(c.dueAt, "yyyy-MM-dd")}`;
   const csv = toCsv([
     ["Name", "Email", "Club", "Role", "Seat", "Role since", ...columns.map((c) => c.name), "Permissions"],
-    ...shown.map((r) => [r.person.name, r.person.email, r.club.name, ROLE_LABEL[r.role], r.seat ?? "", fmtDate(r.startedAt, "yyyy-MM-dd"), ...columns.map((c) => label(r.cells[c.id])), r.paused ? "Paused" : "Active"]),
+    ...shown.map((r) => [r.person.name, r.person.email, r.club.name, ROLE_LABEL[r.role], r.seat ?? "", fmtDate(r.startedAt, "yyyy-MM-dd"), ...columns.map((c) => label(r.cells[c.id])), r.paused ? "Paused" : "On"]),
   ]);
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="officer-requirements-${fmtDate(new Date(), "yyyy-MM-dd")}.csv"`,
+      "Content-Disposition": `attachment; filename="wsusa-requirements-${fmtDate(new Date(), "yyyy-MM-dd")}.csv"`,
       "Cache-Control": "no-store",
     },
   });

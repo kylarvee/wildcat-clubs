@@ -26,7 +26,7 @@ export async function starterPrompts(actor: Actor): Promise<StarterPrompt[]> {
   if (isAdmin(actor)) {
     add("Which clubs are at risk this term?");
     add("What's waiting on me?", "What's waiting on me in my tasks?");
-    add("Explain officer requirements", "How do officer requirements and grace periods work?");
+    add("Explain WSUSA requirements", "How do WSUSA requirements and grace periods work?");
   }
   if (founding.length) {
     const club = founding[0].club;

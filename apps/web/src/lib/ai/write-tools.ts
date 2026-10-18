@@ -13,7 +13,7 @@ import { assignRole } from "@/lib/domain/roles";
 import { audienceReach, createClubAnnouncement } from "@/lib/domain/announcements";
 import { ANNOUNCEMENT_TITLE_MAX, audienceOptions } from "@/components/announcements/labels";
 import { activeRequirements } from "@/lib/roles/queries";
-import { CLUB_TYPE_HINT, CLUB_TYPE_LABEL } from "@/components/clubs/labels";
+import { CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL } from "@/lib/labels/clubs";
 import { KIND_LABEL, VISIBILITY_HINT, VISIBILITY_LABEL, roomLabel } from "@/lib/events/labels";
 import { describeRecurrence } from "@/lib/events/summary";
 import { expandOccurrences } from "@/lib/events/recurrence";
@@ -40,10 +40,13 @@ const TIME = /^\d{1,2}:\d{2}$/;
 
 const LEADER_HELP = "The President, a Vice President or the club's advisor can grant it in the org chart.";
 
+/** "Backed by…" → "backed by…", for a hint used mid-sentence. */
+const lcFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
 async function requireClubCap(ctx: ToolCtx, clubId: string, clubName: string, cap: Capability) {
   const access = await getClubAccess(ctx.actor, clubId);
   if (access?.capabilities.has(cap)) return access;
-  if (access?.suspended) throw new ToolError(`Their permissions in ${clubName} are paused until they finish an overdue officer requirement (see their Tasks).`);
+  if (access?.suspended) throw new ToolError(`Their permissions in ${clubName} are paused until they finish an overdue WSUSA requirement (see their Tasks).`);
   throw new ToolError(`This needs the ${CAPABILITIES[cap].label} permission in ${clubName}, which they don't have. ${LEADER_HELP}`);
 }
 
@@ -60,7 +63,7 @@ const joinClubTool = writeTool({
   name: "join_club",
   running: "Preparing to join",
   description:
-    "Register the person for a club (the same as the Register button). Open clubs make them a member right away and add the club's calendar; clubs with an approval gate send a join request to the club's officers. Needs confirmation.",
+    "Register the person for a club (the same as the Register button). Open clubs (\"Open: anyone can join\") make them a member right away and follow the club's calendar for them; Approval clubs (\"Approval: leaders approve each request\") send a join request to the club's leaders. Needs confirmation.",
   schema: z.object({ club: clubRef }),
   async prepare(ctx, input) {
     const { actor } = ctx;
@@ -68,21 +71,21 @@ const joinClubTool = writeTool({
     if (actor.status !== "ACTIVE") throw new ToolError("Alumni accounts can't join new clubs.");
     const existing = await db.membership.findUnique({ where: { userId_clubId: { userId: actor.id, clubId: club.id } }, select: { status: true } });
     if (existing?.status === "ACTIVE") throw new ToolError(`They're already a member of ${club.name}.`);
-    if (existing?.status === "PENDING") throw new ToolError(`Their request to join ${club.name} is already waiting for its officers.`);
+    if (existing?.status === "PENDING") throw new ToolError(`Their request to join ${club.name} is already pending with its leaders.`);
     const gated = club.joinPolicy === "APPROVAL" || existing?.status === "REMOVED" || existing?.status === "DECLINED";
     return {
       card: {
         title: `Join ${club.name}`,
         details: gated
-          ? [`${club.name} approves new members, so this sends a join request to its officers.`, "You'll get a notification when they decide.", "Its events are added to your calendar once you're in."]
-          : [`You'll become a member of ${club.name} right away.`, "Its events are added to your calendar.", "You can leave any time from the club page."],
+          ? [`${club.name}'s leaders approve each request, so this sends them a join request.`, "You'll get a notification when they decide.", "You'll follow its calendar once you're in."]
+          : [`You'll become a member of ${club.name} right away.`, "You'll follow its calendar, so its events show on yours.", "You can leave any time from the club page."],
         confirmLabel: gated ? "Send request" : "Join club",
       },
       async execute() {
         const r = await joinClub(actor, club.id, "REGISTER");
         const outcome = {
           ACTIVE: `You're now a member of ${club.name}.`,
-          PENDING: `Sent your join request to ${club.name}'s officers.`,
+          PENDING: `Sent your join request to ${club.name}'s leaders.`,
           ALREADY_MEMBER: `You were already a member of ${club.name}.`,
           ALREADY_PENDING: `Your request to join ${club.name} was already pending.`,
         }[r.status];
@@ -464,7 +467,7 @@ const createEventTool = writeTool({
 // ─── start_club_draft ───────────────────────────────────────────────────────
 
 const SCOPE = { college: "COLLEGE", university: "UNIVERSITY", independent: "INDEPENDENT", sports: "SPORTS" } as const;
-const SCOPE_WORD = { college: "", university: "University-wide", independent: "Independent", sports: "Sports" } as const;
+
 
 const startClubTool = writeTool({
   name: "start_club_draft",
@@ -473,7 +476,9 @@ const startClubTool = writeTool({
     "Start founding a new club: creates a private draft with the default org chart (the same as Start a club). A student founder becomes President; faculty/staff become its advisor. Collect the name, type, short description and placement first. Needs confirmation.",
   schema: z.object({
     name: z.string().min(3).max(100),
-    type: z.enum(["sponsored", "affiliate", "registered"]).describe("sponsored = backed by an academic department; affiliate = tied to a university office or program; registered = student-run, registered with WSUSA"),
+    type: z
+      .enum(["sponsored", "affiliate", "registered"])
+      .describe(`sponsored = ${lcFirst(CLUB_TYPE_HINT.SPONSORED)}; affiliate = ${lcFirst(CLUB_TYPE_HINT.AFFILIATE)}; registered = ${lcFirst(CLUB_TYPE_HINT.REGISTERED)}`),
     short_description: z.string().min(10).max(200).describe("One or two sentences (10–200 characters) for club cards"),
     placement: z.enum(["college", "university", "independent", "sports"]).describe("college = belongs to one college; otherwise university-wide, independent or sports"),
     college: z.string().max(120).optional().describe("Required when placement is college"),
@@ -506,13 +511,13 @@ const startClubTool = writeTool({
     const major = input.focus?.trim() ? await findMajor(input.focus) : null;
     const focusOther = !major && input.focus?.trim() ? input.focus.trim() : null;
     const type = input.type.toUpperCase() as "SPONSORED" | "AFFILIATE" | "REGISTERED";
-    const placement = college ? college.name : SCOPE_WORD[input.placement];
+    const placement = college ? college.name : CLUB_SCOPE_LABEL[SCOPE[input.placement]];
 
     return {
       card: {
         title: `Start a club draft: ${quote(name, 70)}`,
         details: [
-          `Type: ${CLUB_TYPE_LABEL[type]} — ${CLUB_TYPE_HINT[type].charAt(0).toLowerCase()}${CLUB_TYPE_HINT[type].slice(1)}.`,
+          `Type: ${CLUB_TYPE_LABEL[type]} — ${lcFirst(CLUB_TYPE_HINT[type])}.`,
           ...(deptLine ? [deptLine] : []),
           `Placement: ${placement}.${major || focusOther ? ` Focus: ${major?.name ?? focusOther}.` : ""}`,
           `Short description: ${quote(input.short_description, 140)}`,
@@ -604,7 +609,7 @@ const assignRoleTool = writeTool({
     club: clubRef,
     seat: z.string().min(1).max(100).describe("Seat name from the org chart, e.g. \"Treasurer\" or \"Vice President\""),
     person: z.string().min(1).max(100).describe("The member's name"),
-    permissions: z.array(z.enum(CAP_KEYS)).max(11).optional().describe("Officer/ambassador seats only: club tools to grant instead of the seat's defaults"),
+    permissions: z.array(z.enum(CAP_KEYS)).max(11).optional().describe("Officer/ambassador seats only: permissions to grant instead of the seat's defaults"),
     replace: z.string().max(100).optional().describe("Name of the current holder they replace, when the seat is full"),
   }),
   async prepare({ actor }, input) {
@@ -639,11 +644,11 @@ const assignRoleTool = writeTool({
 
     const toolsLine = leadership
       ? seat.role === "PRESIDENT"
-        ? "They get every club tool, including naming a successor and retiring the club."
-        : "They get every club tool except assigning President or VP and retiring the club."
+        ? "They get every permission, including naming a successor and retiring the club."
+        : "They get every permission except assigning President or VP and retiring the club."
       : permissions && permissions.length
-        ? `Club tools they get: ${permissions.map((p) => CAPABILITIES[p].label).join(", ")}.`
-        : "No club tools yet — you can grant some later in the org chart.";
+        ? `Permissions they get: ${permissions.map((p) => CAPABILITIES[p].label).join(", ")}.`
+        : "No permissions yet — you can grant some later in the org chart.";
     return {
       card: {
         title: `Make ${person.name} ${seat.name} of ${club.name}`,
@@ -651,7 +656,7 @@ const assignRoleTool = writeTool({
           `Role: ${ROLE_LABEL[seat.role]}${seat.name !== ROLE_LABEL[seat.role] ? ` (the ${seat.name} seat)` : ""}.`,
           toolsLine,
           ...(replacing.length ? [`${replacing.map((h) => h.user.name).join(", ")} leaves the seat; the role history records it as a hand-off.`] : []),
-          ...(requirements.length ? [`Officer requirements for them: ${requirements.map((r) => `${r.name}${r.graceDays ? ` (within ${r.graceDays} days)` : " (before the role's tools work)"}`).join("; ")}.`] : []),
+          ...(requirements.length ? [`WSUSA requirements for this role: ${requirements.map((r) => `${r.name}${r.graceDays ? ` (within ${r.graceDays} days)` : " (before their permissions work)"}`).join("; ")}.`] : []),
           "They'll be notified, and the role shows on their profile and in the club's role history.",
         ],
         confirmLabel: "Assign role",

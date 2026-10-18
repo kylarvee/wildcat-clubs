@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/ui/layout";
 import { RequirementForm } from "../RequirementForm";
 import { requireRequirementAdmin } from "../guard";
 
-export const metadata: Metadata = { title: "Edit officer requirement" };
+export const metadata: Metadata = { title: "Edit WSUSA requirement" };
 
 export default async function EditRequirementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

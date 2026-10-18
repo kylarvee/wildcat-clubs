@@ -29,7 +29,7 @@ export function windowState(w: CheckinWindow, now: Date): WindowState {
   return "OPEN";
 }
 
-function sameCampusDay(a: Date, b: Date) {
+export function sameCampusDay(a: Date, b: Date) {
   return fmtDate(a, "yyyy-MM-dd") === fmtDate(b, "yyyy-MM-dd");
 }
 
@@ -48,20 +48,30 @@ export function windowMessage(state: WindowState, w: CheckinWindow, now: Date): 
 // ─── How someone is checking in ─────────────────────────────────────────────
 
 export type BlockReason = "NOT_MEMBER" | "EXPIRED_SCAN";
-export type MethodDecision = { ok: true; method: Extract<CheckInMethod, "QR" | "SELF"> } | { ok: false; reason: BlockReason };
+export type MethodDecision = { ok: true; method: Extract<CheckInMethod, "QR" | "SELF" | "TAP"> } | { ok: false; reason: BlockReason };
 
 /**
  * A live scan (rotating token or pass) is always a QR check-in. Without one,
  * the event's code is enough only for active members of the host or an
- * approved co-host club (method SELF, shown as "Code") — so a code passed
- * around can't sign in strangers who weren't in the room. In person, the code
- * is only ever shown at the event (the QR screen); online events, which have
- * nothing to scan, are the only ones the app offers a one-tap check-in for
- * (allowsTapCheckIn).
+ * approved co-host club — so a code passed around can't sign in strangers who
+ * weren't in the room. Typed, that's SELF ("Typed code"). Online events, which
+ * have nothing to scan, are the only ones the app offers the one-tap prompt
+ * for (allowsTapCheckIn): pressing it there is TAP ("One-tap (online)"). The
+ * prompt only hands over the code, so a tap anywhere else counts as the code.
+ * In person, the code is only ever shown at the event (the QR screen), and a
+ * university event has no host club, so only its QR code works.
  */
-export function decideMethod(input: { scanValid: boolean; scanPresented: boolean; isParticipatingMember: boolean }): MethodDecision {
+export function decideMethod(input: {
+  scanValid: boolean;
+  scanPresented: boolean;
+  isParticipatingMember: boolean;
+  /** Came from the one-tap prompt rather than a typed code. */
+  tapped?: boolean;
+  /** The event takes one-tap check-ins (allowsTapCheckIn). */
+  tapAllowed?: boolean;
+}): MethodDecision {
   if (input.scanValid) return { ok: true, method: "QR" };
-  if (input.isParticipatingMember) return { ok: true, method: "SELF" };
+  if (input.isParticipatingMember) return { ok: true, method: input.tapped && input.tapAllowed ? "TAP" : "SELF" };
   if (input.scanPresented) return { ok: false, reason: "EXPIRED_SCAN" };
   return { ok: false, reason: "NOT_MEMBER" };
 }
@@ -78,6 +88,19 @@ export function blockMessage(reason: BlockReason, rotateSeconds: number) {
     case "NOT_MEMBER":
       return "Scan the QR code shown at the event. Checking in with just the code is for the club's members.";
   }
+}
+
+/**
+ * The clubs whose members may check in with just the code (or one tap), in
+ * words: "Chess Club", "Chess Club or SWE", "Chess Club and its co-host
+ * clubs". Null for a university event: it has no host club, so only its QR
+ * code works.
+ */
+export function codeClubsPhrase(host: string | null, cohosts: string[]): string | null {
+  if (!host) return null;
+  if (cohosts.length === 0) return host;
+  if (cohosts.length === 1) return `${host} or ${cohosts[0]}`;
+  return `${host} and its co-host clubs`;
 }
 
 // ─── Codes ──────────────────────────────────────────────────────────────────
@@ -112,13 +135,19 @@ export function codeNotFoundMessage(code: string) {
 
 // ─── Labels ─────────────────────────────────────────────────────────────────
 
+/** The one set of check-in method names, everywhere (tracker, CSV exports, stats, the app). */
 export const METHOD_LABEL: Record<CheckInMethod, string> = {
   QR: "QR scan",
-  SELF: "Event code",
+  SELF: "Typed code",
+  TAP: "One-tap (online)",
   MANUAL: "Added by a leader",
 };
 
-export const METHOD_SHORT: Record<CheckInMethod, string> = { QR: "QR", SELF: "Code", MANUAL: "Manual" };
+/** Short forms for tight spots (table cells, stat chips). */
+export const METHOD_SHORT: Record<CheckInMethod, string> = { QR: "QR", SELF: "Code", TAP: "Tap", MANUAL: "Leader" };
+
+/** Display order: the ways people check themselves in, then a leader's add. */
+export const CHECKIN_METHODS: CheckInMethod[] = ["QR", "SELF", "TAP", "MANUAL"];
 
 /** "Maya C." — how names show on a projected screen, where the whole room can read them. */
 export function publicShortName(name: string) {

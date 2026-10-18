@@ -10,7 +10,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { SearchSelect, type SearchOption } from "@/components/founding/SearchSelect";
-import { CLUB_TYPES, SCOPES, type FoundingType } from "@/components/founding/copy";
+import { FOUNDING_TYPES, SCOPES, type FoundingType } from "@/components/founding/copy";
 import { createClubAction } from "@/app/clubs/new/actions";
 
 const OTHER = "__other__";
@@ -56,7 +56,7 @@ export function CreateClubWizard({
   const [focusOther, setFocusOther] = useState("");
   const [contactEmail, setContactEmail] = useState("");
 
-  const typeInfo = CLUB_TYPES.find((t) => t.value === type) ?? null;
+  const typeInfo = FOUNDING_TYPES.find((t) => t.value === type) ?? null;
   const steps = useMemo(() => (typeInfo?.department === "none" ? ["Club type", "Profile essentials"] : ["Club type", "Department", "Profile essentials"]), [typeInfo]);
   const current = steps[step];
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -138,7 +138,7 @@ export function CreateClubWizard({
             </div>
             <fieldset className="grid gap-3 md:grid-cols-3">
               <legend className="sr-only">Club type</legend>
-              {CLUB_TYPES.map((t) => {
+              {FOUNDING_TYPES.map((t) => {
                 const Icon = TYPE_ICON[t.value];
                 const on = type === t.value;
                 return (

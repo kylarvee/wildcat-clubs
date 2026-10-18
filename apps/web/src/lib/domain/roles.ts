@@ -291,7 +291,7 @@ export async function handOffPresidency(actor: Actor | null, clubId: string, inp
   const access = await getClubAccess(actor, clubId);
   if (!access) throw notFound("Club");
   if (!access.assignableRoles.includes("PRESIDENT")) {
-    throw forbidden(access.suspended ? "Your leadership permissions are paused until you finish your required training or test." : "Only the President, an advisor or an administrator can hand off the presidency.");
+    throw forbidden(access.suspended ? "Your leadership permissions are paused until you finish your overdue WSUSA requirement." : "Only the President, an advisor or an administrator can hand off the presidency.");
   }
   const full = access.viaPlatform !== null || access.isAdvisor;
   const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, name: true, slug: true } });

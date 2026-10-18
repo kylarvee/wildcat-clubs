@@ -1,5 +1,5 @@
 import type { ClubCategory, ClubScope, ClubType } from "@prisma/client";
-import { CLUB_CATEGORIES, CLUB_SCOPES, CLUB_TYPES } from "@/components/clubs/labels";
+import { CLUB_CATEGORIES, CLUB_SCOPES, CLUB_TYPES, STANDING_LABEL } from "@/lib/labels/clubs";
 
 /**
  * The clubs list lives in the URL (?q=&type=&sort=…), so every view is a
@@ -14,7 +14,7 @@ export const SORT_LABEL: Record<ClubSort, string> = {
   relevance: "Best match",
   name: "Name",
   rating: "Student rating",
-  members: "Active members",
+  members: "Attending members",
   retention: "Retention",
   activity: "Activity",
   college: "College",
@@ -48,11 +48,8 @@ export function defaultSort(q: string): ClubSort {
 
 export const STATUS_FILTERS = ["active", "pilot", "inactive"] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
-export const STATUS_FILTER_LABEL: Record<StatusFilter, string> = {
-  active: "Active",
-  pilot: "In pilot period",
-  inactive: "Not active right now",
-};
+/** Standing filters (lib/labels/clubs). "Active" includes clubs in their pilot period, which count as active. */
+export const STATUS_FILTER_LABEL: Record<StatusFilter, string> = STANDING_LABEL;
 
 export type ClubListParams = {
   q: string;

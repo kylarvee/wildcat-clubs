@@ -35,7 +35,7 @@ export default async function ClubFilesPage({ params, searchParams }: { params: 
   ) : !canManage ? (
     access.suspended ? (
       <>
-        Your leadership permissions are paused until you finish your required training or test, so you can open files but not change them. Check{" "}
+        Your leadership permissions are paused until you finish your overdue WSUSA requirement, so you can open files but not change them. Check{" "}
         <Link href="/tasks" className="underline">
           your tasks
         </Link>

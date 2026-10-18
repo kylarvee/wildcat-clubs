@@ -142,7 +142,7 @@ function CameraBlocked({ canAsk, cameraError, onAllow }: { canAsk: boolean; came
       </Text>
       <Text tone="ink2" style={styles.center}>
         {cameraError
-          ? `${cameraError} You can type the check-in code instead — it's under the QR code.`
+          ? `${cameraError} Members of the club hosting the event can type the check-in code instead — it's on the check-in screen.`
           : 'Wildcat Clubs uses the camera only to read the check-in QR code at club events.'}
       </Text>
       {cameraError ? null : canAsk ? (
@@ -174,7 +174,7 @@ function ManualEntry({ onSubmit, onCancel }: { onSubmit: (code: string) => void;
           Enter the check-in code
         </Text>
         <Text variant="small" tone="ink2">
-          It&apos;s the 6-character code under the QR code.
+          It&apos;s the 6-character code on the event&apos;s check-in screen. Typed codes work for members of the clubs hosting the event.
         </Text>
         <TextInput
           value={value}
@@ -182,7 +182,7 @@ function ManualEntry({ onSubmit, onCancel }: { onSubmit: (code: string) => void;
             setValue(t.toUpperCase());
             if (error) setError(null);
           }}
-          placeholder="ABC123"
+          placeholder="ABC234"
           placeholderTextColor={c.ink3}
           autoCapitalize="characters"
           autoCorrect={false}

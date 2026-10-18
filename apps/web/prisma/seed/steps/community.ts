@@ -124,7 +124,7 @@ export function buildReviews(ctx: Ctx) {
       ctx.rows.reviewFlags.push({ id: ctx.id(), reviewId: id, userId: m.userId, reason: "Attacks a named officer.", createdAt: addHours(createdAt, rng.float(2, 30)) });
     }
     ctx.rows.tasks.push({
-      id: ctx.id(), kind: "APPROVAL", title: `Review reported on ${anime.name}`, description: "3 people reported this review. Decide whether to keep or hide it.",
+      id: ctx.id(), kind: "APPROVAL", title: `Review flagged on ${anime.name}`, description: "3 people flagged this review. Decide whether to keep or hide it.",
       assigneeType: "ADMINS", clubId: anime.id, href: `/admin/reviews?club=${anime.id}&review=${id}`, status: "DONE", sourceType: "reviewFlag", sourceId: id,
       createdAt: addHours(createdAt, 30), completedAt: addDays(NOW, -24.8), completedById: ctx.p("alex").id,
     });

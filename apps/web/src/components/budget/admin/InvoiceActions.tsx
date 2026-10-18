@@ -23,7 +23,7 @@ export function CreateInvoiceButton({ requestId, amountCents, clubName }: { requ
         description={`It's numbered automatically and adds a task for WSUSA admins to make sure the ${fmtMoney(amountCents)} goes through in the university finance system within 10 days. The club can download it right away.`}
         confirmLabel="Create invoice"
         onConfirm={() => {
-          void run(() => createInvoiceAction(requestId), { success: "Invoice created. Its follow-up task is in the admin inbox." });
+          void run(() => createInvoiceAction(requestId), { success: "Invoice created. Its follow-up task is in Tasks for every admin." });
         }}
       />
       {error ? <Callout tone="danger">{error}</Callout> : null}

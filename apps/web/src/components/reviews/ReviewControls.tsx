@@ -149,7 +149,7 @@ const REPORT_REASONS = [
   "Something else",
 ];
 
-/** Report a review to WSUSA admins (one report per person). */
+/** Flag a review for WSUSA admins (one flag per person). "Report" is for concerns (/report), never for reviews. */
 export function ReportReviewButton({ reviewId, reported }: { reviewId: string; reported: boolean }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState(REPORT_REASONS[0]);
@@ -163,7 +163,7 @@ export function ReportReviewButton({ reviewId, reported }: { reviewId: string; r
   if (done) {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-ink-3">
-        <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Reported
+        <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Flagged
       </span>
     );
   }
@@ -184,16 +184,16 @@ export function ReportReviewButton({ reviewId, reported }: { reviewId: string; r
       }
       setDone(true);
       setOpen(false);
-      toast.success("Thanks — WSUSA admins will take a look", { description: "The reviewer isn't told who reported it." });
+      toast.success("Thanks — WSUSA admins will take a look", { description: "The reviewer isn't told who flagged it." });
     });
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-ink-3" onClick={() => setOpen(true)}>
-        <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Report
+        <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Flag
       </Button>
-      <DialogContent title="Report this review" description="Reports go to WSUSA admins only. They'll decide whether the review stays up.">
+      <DialogContent title="Flag this review" description="Flags go to WSUSA admins only. They'll decide whether the review stays up.">
         <form onSubmit={submit}>
           <fieldset>
             <legend className="text-sm font-medium text-ink">What&rsquo;s wrong with it?</legend>
@@ -222,7 +222,7 @@ export function ReportReviewButton({ reviewId, reported }: { reviewId: string; r
               Cancel
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Send report
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Flag review
             </Button>
           </DialogFooter>
         </form>

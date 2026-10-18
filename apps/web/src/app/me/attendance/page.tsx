@@ -11,7 +11,7 @@ import { liveOccurrencesForUser } from "@/lib/domain/attendance";
 import { loadPersonAttendance, MY_HISTORY_LIMIT, type ClubRef, type MyAttendanceRow } from "@/lib/attendance/queries";
 import { pct } from "@/lib/attendance/matrix";
 import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
-import { METHOD_LABEL } from "@/lib/attendance/rules";
+import { CHECKIN_METHODS, METHOD_LABEL } from "@/lib/attendance/rules";
 import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink, buttonClasses } from "@/components/ui/button";
@@ -28,7 +28,7 @@ export const metadata: Metadata = { title: "My attendance" };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const SHOW = 200;
-const METHODS: CheckInMethod[] = ["QR", "SELF", "MANUAL"];
+const METHODS: CheckInMethod[] = CHECKIN_METHODS;
 
 /**
  * Every event you've checked into across Weber State clubs: totals, a card
@@ -99,7 +99,8 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
         }
       />
 
-      {live.length ? <LiveCheckinPrompt occurrences={live} className="mb-8" /> : null}
+      {/* Always mounted, so its "You're checked in!" card survives the refresh that empties `live`. */}
+      <LiveCheckinPrompt occurrences={live} className="mb-8" />
 
       {rows.length === 0 ? (
         <EmptyState

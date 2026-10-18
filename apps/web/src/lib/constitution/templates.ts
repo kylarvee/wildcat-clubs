@@ -1,5 +1,6 @@
 import type { ClubType, JoinPolicy, SuccessionMethod } from "@prisma/client";
 import { DEFAULT_SUCCESSION, isSuccessionMethod } from "@/lib/roles/pipeline";
+import { CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/lib/labels/clubs";
 
 /**
  * The default Constitution and Bylaws for Weber State clubs, written to match
@@ -91,12 +92,7 @@ function departmentPhrase(name: string) {
   return /^(department|school|division|program|office)\b/i.test(n) || /\b(department|school|program)$/i.test(n) ? `the ${n}` : `the ${n} department`;
 }
 
-const TYPE_LABEL: Record<ClubType, string> = {
-  SPONSORED: "Sponsored",
-  AFFILIATE: "Affiliate",
-  REGISTERED: "Registered",
-  COLLEGE_AMBASSADORS: "College Ambassadors",
-};
+const TYPE_LABEL: Record<ClubType, string> = CLUB_TYPE_LABEL;
 
 // ─── Shared choice lists ─────────────────────────────────────────────────────
 
@@ -112,8 +108,8 @@ export const SUCCESSION_OPTIONS: (ChoiceOption & { value: SuccessionMethod })[] 
 const LEGACY_SUCCESSION: Record<string, SuccessionMethod> = { SENIORITY: "ADVISOR_PRESIDENT", LEADERSHIP_VOTE: "SELF_SELECT" };
 
 export const JOIN_OPTIONS: (ChoiceOption & { value: JoinPolicy })[] = [
-  { value: "OPEN", label: "Open membership", description: "Students become members as soon as they register or check in at an event." },
-  { value: "APPROVAL", label: "Leader approval", description: "Join requests wait until a leader with the Members permission approves them." },
+  { value: "OPEN", label: JOIN_POLICY_LABEL.OPEN, description: "Students become members as soon as they register or check in at an event." },
+  { value: "APPROVAL", label: JOIN_POLICY_LABEL.APPROVAL, description: "Join requests wait until a leader with the Members permission approves them." },
 ];
 
 const MEMBER_VOTE_OPTIONS: ChoiceOption[] = [

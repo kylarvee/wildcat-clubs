@@ -138,9 +138,9 @@ export function KeepReviewButton({ reviewId, reports }: { reviewId: string; repo
       label="Keep"
       icon={<Check className="h-4 w-4" aria-hidden />}
       title="Keep this review up?"
-      description={`It stays on the club page. Its ${reports === 1 ? "report is" : `${reports} reports are`} cleared and the task closes.`}
+      description={`It stays on the club page. Its ${reports === 1 ? "flag is" : `${reports} flags are`} cleared and the task closes.`}
       confirmLabel="Keep review"
-      success="Review kept — reports cleared"
+      success="Review kept — flags cleared"
       action={() => keepReviewAction(reviewId)}
     />
   );

@@ -103,7 +103,7 @@ export function requestTotals(requests: RequestMoney[]) {
 
 /** Problem with a partial approval amount, or null when it's fine. */
 export function partialAmountProblem(requestedCents: number, approvedCents: number): string | null {
-  if (!Number.isFinite(approvedCents) || approvedCents <= 0) return "Enter the amount you're approving. To approve nothing, choose Deny instead.";
+  if (!Number.isFinite(approvedCents) || approvedCents <= 0) return "Enter the amount you're approving. To approve nothing, choose Don't approve instead.";
   if (approvedCents >= requestedCents) return "A partial approval has to be less than the amount requested. To approve everything, choose Approve instead.";
   return null;
 }

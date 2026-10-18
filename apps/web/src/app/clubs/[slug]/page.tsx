@@ -140,9 +140,13 @@ export default async function ClubPage({ params, searchParams }: Props) {
         {retired ? (
           <Callout tone="info" icon={<Archive />} title={`${club.name} is retired`} className="mb-8">
             It wound down{club.retiredAt ? ` on ${fmtLongDate(club.retiredAt)}` : ""}. Its history, officers and documents stay here for the record. Want to bring it back? Contact{" "}
-            <a href={`mailto:${office.email}`} className="font-medium underline underline-offset-2">
-              {office.name}
-            </a>
+            {office.email ? (
+              <a href={`mailto:${office.email}`} className="font-medium underline underline-offset-2">
+                {office.name}
+              </a>
+            ) : (
+              <span className="font-medium">{office.name}</span>
+            )}
             .
           </Callout>
         ) : null}
@@ -190,7 +194,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
             {isPublic ? (
               <PageSection
                 id="events"
-                title="Upcoming events"
+                title="Coming up"
                 action={
                   // The club's own calendar is in the hero; /calendar isn't filtered to this club.
                   <Link href="#club-calendar" className="text-sm font-medium text-brand-600 hover:underline">
@@ -203,10 +207,10 @@ export default async function ClubPage({ params, searchParams }: Props) {
                 ) : (
                   <div className="flex items-center gap-3 rounded-[var(--radius-card)] border border-dashed border-line-2 bg-surface px-5 py-6 text-sm text-ink-3">
                     <CalendarX2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    <span>{retired ? "This club no longer holds events." : "Nothing on the calendar right now. Subscribe to hear when something's scheduled."}</span>
+                    <span>{retired ? "This club no longer holds events." : "Nothing on the calendar right now. Follow the club to hear when something's scheduled."}</span>
                   </div>
                 )}
-                {!user && events.length ? <p className="mt-2 text-xs text-ink-3">Some events are for Weber State students or members only — log in to see everything you can attend.</p> : null}
+                {!user && events.length ? <p className="mt-2 text-xs text-ink-3">Some events are for Weber State students or members only — sign in to see everything you can attend.</p> : null}
               </PageSection>
             ) : null}
 

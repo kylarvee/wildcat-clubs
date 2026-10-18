@@ -5,6 +5,7 @@ import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
 import { capabilitiesByClub, clubCapabilityHolders } from "@/lib/authz/people";
+import { tasksAwaitingGrade } from "@/lib/authz/requirements";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -12,15 +13,17 @@ import { campusDate } from "@/lib/time";
 
 /**
  * Tasks — the single "ball in your court" inbox. Approvals, requirements,
- * invoices, club assignments and personal to-dos all live here, so nobody has
- * to check five places to know what's waiting on them.
+ * tests, invoices, club assignments and personal to-dos all live here, so
+ * nobody has to check five places to know what's waiting on them.
  *
  * System tasks carry a source (sourceType + sourceId). When the underlying
  * thing is decided anywhere, the deciding domain function calls resolveTasks()
  * and the task closes for everyone it was assigned to.
  *
  * People close only the kinds they own (PERSONAL, CLUB). APPROVAL,
- * REQUIREMENT and INVOICE tasks close themselves when the thing is done.
+ * REQUIREMENT, TEST and INVOICE tasks close themselves when the thing is done.
+ * REQUIREMENT is only what WSUSA requires (lib/domain/requirements); a test
+ * someone assigned that isn't a requirement, like a club quiz, is TEST.
  *
  * Required tasks are the ones WSUSA requires (officer and member
  * requirements, WSUSA-assigned tests and forms). The creating domain function
@@ -47,8 +50,8 @@ export type NewTask = {
 };
 
 /** Kinds that close on their own once the underlying thing is decided or done. */
-export const SELF_CLOSING_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "INVOICE"];
-export const TASK_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "INVOICE", "CLUB", "PERSONAL"];
+export const SELF_CLOSING_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "TEST", "INVOICE"];
+export const TASK_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "TEST", "INVOICE", "CLUB", "PERSONAL"];
 
 export async function createTask(t: NewTask, tx: Tx = db) {
   return tx.task.create({
@@ -99,7 +102,10 @@ const taskInclude = {
   assignee: { select: { name: true, handle: true } },
 } satisfies Prisma.TaskInclude;
 
-export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
+export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskInclude }> & {
+  /** A test handed in by the deadline and waiting for a grader (lib/authz/requirements): not overdue. */
+  awaitingGrade?: boolean;
+};
 
 export type ListTasksOpts = {
   status?: "OPEN" | "DONE";
@@ -112,7 +118,8 @@ export type ListTasksOpts = {
 
 /**
  * Your inbox. Open tasks come required first, then soonest-due (undated
- * last); done tasks come most recently finished first.
+ * last); done tasks come most recently finished first. Open tests handed in
+ * on time and waiting for a grader are marked `awaitingGrade`.
  */
 export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): Promise<TaskRow[]> {
   assertSignedIn(actor);
@@ -121,7 +128,7 @@ export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): 
   const filters: Prisma.TaskWhereInput[] = [await taskScopeFor(actor), { status }];
   if (kinds?.length) filters.push({ kind: { in: kinds } });
   if (opts.clubId) filters.push({ clubId: opts.clubId });
-  return db.task.findMany({
+  const rows: TaskRow[] = await db.task.findMany({
     where: { AND: filters },
     orderBy:
       status === "OPEN"
@@ -130,6 +137,9 @@ export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): 
     take: opts.take ?? 100,
     include: taskInclude,
   });
+  if (status !== "OPEN") return rows;
+  const waiting = await tasksAwaitingGrade(rows);
+  return waiting.size ? rows.map((t) => (waiting.has(t.id) ? { ...t, awaitingGrade: true } : t)) : rows;
 }
 
 export async function countOpenTasks(actor: Actor) {
@@ -236,7 +246,7 @@ async function assertCanAssign(actor: Actor, clubId: string) {
   if (!access) throw notFound("Club");
   if (access.clubStatus === "RETIRED" || access.clubStatus === "REJECTED") throw forbidden("This club is read-only.");
   if (!access.isLeader) throw forbidden("Only club leaders can assign tasks.");
-  if (access.suspended) throw forbidden("Your leadership permissions are paused until you finish your required training or test.");
+  if (access.suspended) throw forbidden("Your leadership permissions are paused until you finish your overdue WSUSA requirement.");
   return access;
 }
 

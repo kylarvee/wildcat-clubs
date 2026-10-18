@@ -24,7 +24,7 @@ export function RequirementsOverview({ rows, pausedLeaders, now }: { rows: Requi
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 id="dash-req-title" className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-ink">
-            <ShieldAlert className="h-5 w-5 text-danger" aria-hidden /> What WSUSA requires
+            <ShieldAlert className="h-5 w-5 text-danger" aria-hidden /> WSUSA requirements
           </h2>
           <Link href="/admin/requirements" className="inline-flex items-center gap-1 rounded-md text-sm font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-brand">
             Requirements <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -52,6 +52,7 @@ export function RequirementsOverview({ rows, pausedLeaders, now }: { rows: Requi
                     </span>
                     <span className={r.overdue ? "font-semibold text-danger" : undefined}>
                       {r.open ? `${r.open} to go` : "Everyone's done"}
+                      {r.waiting ? ` · ${r.waiting} waiting for grading` : ""}
                       {r.overdue ? ` · ${r.overdue} overdue` : r.nextDue ? ` · next due ${fmtDate(r.nextDue, "MMM d")}` : ""}
                     </span>
                   </div>
@@ -71,7 +72,7 @@ export function RequirementsOverview({ rows, pausedLeaders, now }: { rows: Requi
         {pausedLeaders ? (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-danger-50 px-3.5 py-3">
             <p className="text-sm font-semibold text-danger">
-              {pausedLeaders} student {pausedLeaders === 1 ? "leader has" : "leaders have"} paused permissions
+              {pausedLeaders} student {pausedLeaders === 1 ? "leader has" : "leaders have"} permissions paused
             </p>
             <Link href="/admin/requirements?state=paused" className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-surface px-3 text-sm font-semibold text-danger hover:bg-danger-50 focus-visible:outline-2 focus-visible:outline-danger">
               See who

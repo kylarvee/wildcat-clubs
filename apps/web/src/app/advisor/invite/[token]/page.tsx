@@ -44,7 +44,7 @@ export default async function AdvisorInvitePage({ params }: { params: Promise<{ 
       <p className="mb-2 text-sm font-medium text-brand">Advisor invitation</p>
       <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">Will you advise {club.name}?</h1>
       <p className="mt-2 text-ink-2">
-        {invite.invitedBy.name} invited {emailMatches ? "you" : invite.name} on {fmtLongDate(invite.createdAt)} to be this club&apos;s faculty/staff advisor.
+        {invite.invitedBy.name} invited {emailMatches ? "you" : invite.name} on {fmtLongDate(invite.createdAt)} to be this club&apos;s faculty or staff advisor.
       </p>
 
       <div className="mt-6 space-y-6">

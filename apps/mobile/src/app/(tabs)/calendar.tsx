@@ -97,7 +97,7 @@ function Agenda({ userId }: { userId: string }) {
           <EmptyView
             icon="calendar"
             title="Nothing on your calendar yet"
-            body="Register for a club or subscribe to its calendar, and its events show up here."
+            body="Register for a club or follow it, and its events show up here."
             action="Browse clubs"
             onAction={() => router.push('/clubs')}
           />

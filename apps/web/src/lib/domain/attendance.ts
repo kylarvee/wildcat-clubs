@@ -15,7 +15,7 @@ import { reopenRequirementTasks, requirementSourceId } from "@/lib/domain/requir
 import { resolveTasks } from "@/lib/domain/tasks";
 import { reviewEligibility } from "@/lib/metrics";
 import { checkinPass, checkinPath, checkinToken, isCheckinPass, tokenWindow, verifyCheckinToken, verifyScanProof } from "@/lib/attendance/token";
-import { blockMessage, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, whenLabel, windowMessage, type WindowState } from "@/lib/attendance/rules";
+import { allowsTapCheckIn, blockMessage, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, whenLabel, windowMessage, type WindowState } from "@/lib/attendance/rules";
 import {
   activeClubIdsFor,
   occurrenceByCode,
@@ -33,9 +33,11 @@ import {
  * THE ATTENDANCE TOOL — the only way attendance enters the data lake.
  *
  *   QR scan         rotating token on the leader's screen → method QR
- *   Event code      the code alone (typed from the event's screen, or for online
- *                   events the app's "check in?" pop-up) → SELF, for members of
- *                   the host/co-host clubs. In-person codes are only shown at the event.
+ *   Typed code      the code alone, typed from the event's screen → SELF, for
+ *                   members of the host/co-host clubs. In-person codes are only
+ *                   shown at the event; university events have no host club.
+ *   One tap         online events only: the "check in?" prompt on the web or in
+ *                   the app (via "web-popup" / "mobile-popup") → TAP, same members
  *   Manual add      a leader with "attendance" (admins for university events) → MANUAL
  *
  * Checking in also: auto-enrolls students in the host club (open club →
@@ -45,7 +47,8 @@ import {
  * Attendance rows written here.
  */
 
-export type CheckInVia = "web" | "mobile-scan" | "mobile-popup";
+/** Where a check-in came from. The "-popup" ones are the one-tap prompt. */
+export type CheckInVia = "web" | "web-popup" | "mobile-scan" | "mobile-popup";
 export type MembershipOutcome = "MEMBER" | "JOINED" | "REQUESTED" | "NONE";
 
 export type CheckInResult = {
@@ -58,14 +61,14 @@ export type CheckInResult = {
   membership: MembershipOutcome;
   /** Progress toward leaving a review of the host club (null for university events). */
   reviewProgress: { eligible: boolean; attended: number; required: number } | null;
-  /** Officer requirements this check-in fulfilled ("Officer Training — Fall"). */
+  /** WSUSA requirements this check-in fulfilled ("Club Officer Training"). */
   requirementsMet: string[];
 };
 
 const CheckInInput = z.object({
   code: z.string().trim().min(1, "Enter the check-in code.").max(32),
   token: z.string().trim().max(80).nullish(),
-  via: z.enum(["web", "mobile-scan", "mobile-popup"]).default("web"),
+  via: z.enum(["web", "web-popup", "mobile-scan", "mobile-popup"]).default("web"),
 });
 
 const codeNotFound = (code: string) => new DomainError("NOT_FOUND", codeNotFoundMessage(code));
@@ -141,7 +144,7 @@ export type CheckinPreview =
   | {
       found: false;
       message: string;
-      /** The code is real, but this viewer may not see the event (yet): log in, or scan the QR at the event. */
+      /** The code is real, but this viewer may not see the event (yet): sign in, or scan the QR at the event. */
       hidden?: boolean;
     }
   | {
@@ -203,7 +206,7 @@ export async function checkinPreview(actor: Actor | null, rawCode: string, token
       hidden: true,
       message: actor
         ? "This event is for its clubs' members. If you're there, scan the QR code on the screen to check in."
-        : "This event isn't public. Log in to see it and check in.",
+        : "This event isn't public. Sign in to see it and check in.",
     };
   }
 
@@ -226,11 +229,11 @@ export async function checkinPreview(actor: Actor | null, rawCode: string, token
   return done(decision.ok ? null : blockMessage(decision.reason, rotate));
 }
 
-// ─── Check in (QR / self) ───────────────────────────────────────────────────
+// ─── Check in (QR, typed code, one tap) ─────────────────────────────────────
 
 /**
  * Checks the signed-in person in. Called by the web check-in page, the
- * mobile app (scan or "check in?" pop-up) and the dashboard prompt.
+ * mobile app (scan, typed code or "check in?" pop-up) and the web prompt.
  * Re-checking in is harmless: it returns status "ALREADY".
  */
 export async function checkIn(actor: Actor | null, input: unknown): Promise<CheckInResult> {
@@ -274,6 +277,8 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
     scanValid: token ? verifyScanProof(occ.checkinSecret, token, now.getTime(), rotate) : false,
     scanPresented: Boolean(token),
     isParticipatingMember: await isActiveMemberOfAny(actor.id, participatingClubIds(occ)),
+    tapped: via === "web-popup" || via === "mobile-popup",
+    tapAllowed: allowsTapCheckIn(occ.event),
   });
   if (!decision.ok) throw forbidden(blockMessage(decision.reason, rotate));
 
@@ -310,6 +315,7 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
     entityId: attendance.id,
     clubId,
     data: { occurrenceId: occ.id, eventId: occ.event.id, title: occ.event.title, method: decision.method, via },
+    // Feeds still filter by viewer: on a profile only the person, admins and the club's attendance holders see check-ins.
     isPublic: true,
   });
 
@@ -398,7 +404,7 @@ export async function removeAttendance(actor: Actor | null, attendanceId: string
     clubId: row.clubId,
     data: { occurrenceId: row.occurrenceId, eventId: row.occurrence.event.id, userId: row.userId, method: row.method, title: row.occurrence.event.title },
   });
-  // A removed training check-in can un-meet an officer requirement: reopen the task if so.
+  // A removed training check-in can un-meet a WSUSA requirement: reopen the task if so.
   await reopenRequirementTasks(row.userId);
   return { name: row.user.name };
 }

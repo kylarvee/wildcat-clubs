@@ -81,7 +81,7 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
   },
   "checkin.opensMinutesBefore": {
     label: "Check-in opens",
-    help: "Minutes before an event starts that the QR code and self check-in begin working.",
+    help: "Minutes before an event starts that people can begin checking in.",
     unit: "minutes",
     min: 0,
     max: 240,
@@ -102,7 +102,7 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
   },
   "ai.assistantEnabled": {
     label: "Ask Claude assistant",
-    help: "The in-app assistant that helps students, leaders and administrators set things up and answers questions about the platform.",
+    help: "Ask Wildcat Clubs, the in-app assistant that helps students, leaders and administrators set things up and answers questions about the platform.",
   },
   "ai.gradingEnabled": {
     label: "Grading assist",
@@ -135,6 +135,10 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
   "wsusa.reviewers": {
     label: "Reviewers",
     help: "The people founders can contact about a submission.",
+  },
+  "platform.supportEmail": {
+    label: "Help email",
+    help: "Settings tells people to write here when they need someone to step in, like undoing a graduation marked by mistake or fixing a retired profile.",
   },
   "app.iosUrl": {
     label: "App Store link",

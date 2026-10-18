@@ -23,13 +23,14 @@ import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { ReinstateForm } from "@/components/founding/admin/ReinstateForm";
 import { GoogleAccountVerification } from "@/components/founding/admin/GoogleAccountVerification";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
-import { JOIN_LABEL, SCOPE_LABEL, STATUS_LABEL, STATUS_TONE, SUCCESSION_LABEL, TYPE_LABEL } from "@/components/founding/copy";
+import { SUCCESSION_LABEL } from "@/components/founding/copy";
+import { CLUB_SCOPE_LABEL as SCOPE_LABEL, CLUB_STATUS_LABEL as STATUS_LABEL, CLUB_STATUS_TONE as STATUS_TONE, CLUB_TYPE_LABEL as TYPE_LABEL, JOIN_POLICY_LABEL as JOIN_LABEL, JOIN_POLICY_SHORT } from "@/lib/labels/clubs";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   // Metadata resolves before the admin layout's redirect, so only admins get the club's name.
-  if (!can(await getCurrentUser(), "admin.clubs")) return { title: "Club review" };
+  if (!can(await getCurrentUser(), "admin.clubs")) return { title: "Club approvals" };
   const club = await db.club.findUnique({ where: { id: (await params).id }, select: { name: true } });
-  return { title: club ? `Review · ${club.name}` : "Club review" };
+  return { title: club ? `${club.name} · Club approvals` : "Club approvals" };
 }
 
 const DECISION_LABEL: Record<ClubDecisionAction, string> = {
@@ -100,7 +101,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
   return (
     <div className="space-y-6">
       <Link href="/admin/clubs" className="inline-flex items-center gap-1.5 text-sm text-ink-3 hover:text-ink">
-        <ArrowLeft className="h-4 w-4" aria-hidden /> Club reviews
+        <ArrowLeft className="h-4 w-4" aria-hidden /> Club approvals
       </Link>
 
       <div className="flex flex-wrap items-start gap-4">
@@ -231,7 +232,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                     <p className="text-sm text-ink-2">
                       Uploaded by {d.createdBy.name} on {fmtLongDate(d.createdAt)}. On approval: primary way leaders are chosen,{" "}
                       <span className="font-medium">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod].split(" — ")[0] : "(unchanged)"}</span>; joining is{" "}
-                      <span className="font-medium">{s.joinPolicy ? JOIN_LABEL[s.joinPolicy].split(" — ")[0].toLowerCase() : "(unchanged)"}</span>.
+                      <span className="font-medium">{s.joinPolicy ? JOIN_POLICY_SHORT[s.joinPolicy].toLowerCase() : "(unchanged)"}</span>.
                     </p>
                     {s.note ? <p className="whitespace-pre-line text-sm text-ink-2">“{s.note}”</p> : null}
                     <DocumentDecision docId={d.id} label={`Custom ${label}`} />

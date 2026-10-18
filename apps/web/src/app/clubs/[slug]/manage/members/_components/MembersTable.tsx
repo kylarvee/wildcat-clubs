@@ -24,8 +24,8 @@ type SortKey = "name" | "joined" | "attended" | "last";
 
 const FILTERS: { key: Filter; label: string; test: (r: MemberRow) => boolean }[] = [
   { key: "current", label: "All members", test: (r) => r.status === "ACTIVE" },
-  { key: "active", label: "Active", test: (r) => r.status === "ACTIVE" && r.active },
-  { key: "inactive", label: "Inactive", test: (r) => r.status === "ACTIVE" && !r.active },
+  { key: "active", label: "Attending", test: (r) => r.status === "ACTIVE" && r.active },
+  { key: "inactive", label: "Not attending lately", test: (r) => r.status === "ACTIVE" && !r.active },
   { key: "leaders", label: "Leaders", test: (r) => r.status === "ACTIVE" && r.roles.length > 0 },
   { key: "alumni", label: "Alumni", test: (r) => r.status === "ALUMNI" },
   { key: "former", label: "Former", test: (r) => r.status === "LEFT" || r.status === "REMOVED" },
@@ -99,7 +99,7 @@ export function MembersTable({
 
   const statusCell = (r: MemberRow) =>
     r.status === "ACTIVE" ? (
-      <Badge tone={r.active ? "success" : "neutral"}>{r.active ? "Active" : "Inactive"}</Badge>
+      <Badge tone={r.active ? "success" : "neutral"}>{r.active ? "Attending" : "Not attending lately"}</Badge>
     ) : (
       <Badge tone={STATUS_BADGE[r.status]?.tone ?? "neutral"}>{STATUS_BADGE[r.status]?.label ?? r.status}</Badge>
     );
@@ -184,7 +184,17 @@ export function MembersTable({
       {shown.length === 0 ? (
         <EmptyState
           icon={<Users />}
-          title={q ? `No one matches “${q}”` : filter === "current" ? "No members yet" : `No ${FILTERS.find((f) => f.key === filter)!.label.toLowerCase()} members`}
+          title={
+            q
+              ? `No one matches “${q}”`
+              : filter === "current"
+                ? "No members yet"
+                : filter === "active"
+                  ? "No one has attended lately"
+                  : filter === "inactive"
+                    ? "Nobody has drifted away"
+                    : `No ${FILTERS.find((f) => f.key === filter)!.label.toLowerCase()} members`
+          }
           description={
             q
               ? "Try a different name or clear the search."
@@ -278,7 +288,7 @@ export function MembersTable({
             </Table>
           </div>
           <p className="text-xs text-ink-3">
-            Showing {shown.length} of {counts[filter]}. &ldquo;Active&rdquo; means they checked in within {activeRule.windowDays} days or at one of the club&apos;s last {activeRule.recentEvents} events.
+            Showing {shown.length} of {counts[filter]}. &ldquo;Attending&rdquo; means they checked in within {activeRule.windowDays} days or at one of the club&apos;s last {activeRule.recentEvents} events.
           </p>
         </>
       )}

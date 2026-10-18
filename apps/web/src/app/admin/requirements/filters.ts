@@ -4,7 +4,7 @@ import type { ComplianceRow, ComplianceState } from "@/lib/domain/requirements";
 /** Compliance filters, read from the URL so the page, its links and the CSV all agree. */
 export type ComplianceFilter = { club: string; state: "" | ComplianceState | "paused"; req: string; role: "" | ClubRole; q: string };
 
-const STATES = ["met", "due", "overdue", "paused"] as const;
+const STATES = ["met", "due", "review", "overdue", "paused"] as const;
 const ROLES = ["AMBASSADOR", "OFFICER", "VP", "PRESIDENT"] as const;
 
 export function parseFilter(sp: Record<string, string | string[] | undefined>): ComplianceFilter {

@@ -2,6 +2,7 @@ import "server-only";
 import type { TaskKind } from "@prisma/client";
 import { differenceInCalendarDays } from "date-fns";
 import { CAPABILITIES, type Capability } from "@/lib/authz";
+import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
 import type { TaskRow } from "@/lib/domain/tasks";
 import { fmtDate, fmtLongDate, inCampusTime } from "@/lib/time";
 import { SELF_CLOSING } from "@/components/tasks/labels";
@@ -20,8 +21,10 @@ export type TaskItem = {
   href: string | null;
   status: "OPEN" | "DONE" | "CANCELLED";
   club: { name: string; slug: string; logoColor: string; logoUrl: string | null } | null;
-  /** "Due tomorrow", "Overdue · Oct 14" … */
+  /** "Due tomorrow", "Overdue · Oct 14" … (null while it waits for grading). */
   due: { label: string; overdue: boolean; soon: boolean; iso: string; dateInput: string } | null;
+  /** Handed in on time and waiting for a grader: "Submitted — waiting for grading", shown instead of the due date. */
+  waiting: string | null;
   /** Who handed you a club task ("From Priya Patel"). */
   from: string | null;
   /** Club tasks for a whole capability: "Everyone with Budget & funding". */
@@ -55,6 +58,7 @@ export function dueInfo(dueAt: Date | null, now: Date): TaskItem["due"] {
 export function toTaskItem(t: TaskRow, viewerId: string, now: Date): TaskItem {
   const cap = t.capability && t.capability in CAPABILITIES ? CAPABILITIES[t.capability as Capability].label : null;
   const done = t.status === "DONE" && t.completedAt;
+  const waiting = t.status === "OPEN" && t.awaitingGrade ? AWAITING_GRADE_LABEL : null;
   return {
     id: t.id,
     kind: t.kind,
@@ -64,7 +68,8 @@ export function toTaskItem(t: TaskRow, viewerId: string, now: Date): TaskItem {
     href: t.href && !/^\/tasks(\?|$)/.test(t.href) ? t.href : null,
     status: t.status,
     club: t.club,
-    due: t.status === "OPEN" ? dueInfo(t.dueAt, now) : null,
+    due: t.status === "OPEN" && !waiting ? dueInfo(t.dueAt, now) : null,
+    waiting,
     from: t.kind === "CLUB" && t.createdBy && t.createdById !== viewerId ? t.createdBy.name : null,
     forGroup: t.assigneeType === "CLUB" && t.kind === "CLUB" && cap ? `Everyone with ${cap}` : null,
     assigneeName: t.assigneeType === "USER" && t.assigneeId !== viewerId ? (t.assignee?.name ?? null) : t.assigneeType === "CLUB" && cap ? `Everyone with ${cap}` : null,

@@ -7,7 +7,7 @@ import { can } from "@/lib/authz";
 import { platformSummary } from "@/lib/metrics";
 import { fmtAgo, fmtDate, fmtLongDate } from "@/lib/time";
 import { atRiskClubs, clubCounts, recentPlatformActivity, waitingOnWsusa, type AtRiskClub, type Queue } from "@/lib/analytics/admin";
-import { CLUB_TYPE_NAMES } from "@/lib/analytics/club-table";
+import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL as CLUB_TYPE_NAMES, STANDING_HINT, STANDING_LABEL } from "@/lib/labels/clubs";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -45,9 +45,9 @@ export default async function AdminOverviewPage() {
   const yearTotal = summary.monthlyCheckins.reduce((n, m) => n + m.checkins, 0);
 
   const stages: BarItem[] = [
-    { key: "active", label: "Active on their record", value: onRecord, href: "/admin/analytics?status=active" },
-    { key: "pilot", label: "In their pilot period", value: summary.pilotClubs, href: "/admin/analytics?status=pilot" },
-    { key: "inactive", label: "Inactive", value: summary.inactiveClubs, href: "/admin/analytics?status=inactive" },
+    { key: "active", label: STANDING_LABEL.active, value: onRecord, href: "/admin/analytics?status=active" },
+    { key: "pilot", label: STANDING_LABEL.pilot, value: summary.pilotClubs, href: "/admin/analytics?status=pilot" },
+    { key: "inactive", label: STANDING_LABEL.inactive, value: summary.inactiveClubs, href: "/admin/analytics?status=inactive" },
     {
       key: "founding",
       label: "In founding",
@@ -55,8 +55,8 @@ export default async function AdminOverviewPage() {
       hint: foundingHint(counts.byStatus),
       href: "/admin/analytics?status=founding",
     },
-    { key: "retired", label: "Retired", value: counts.byStatus.RETIRED ?? 0, href: "/admin/analytics?status=retired" },
-    { key: "rejected", label: "Not approved", value: counts.byStatus.REJECTED ?? 0, href: "/admin/analytics?status=rejected" },
+    { key: "retired", label: CLUB_STATUS_LABEL.RETIRED, value: counts.byStatus.RETIRED ?? 0, href: "/admin/analytics?status=retired" },
+    { key: "rejected", label: CLUB_STATUS_LABEL.REJECTED, value: counts.byStatus.REJECTED ?? 0, href: "/admin/analytics?status=rejected" },
   ];
   const types: BarItem[] = (Object.keys(CLUB_TYPE_NAMES) as (keyof typeof CLUB_TYPE_NAMES)[])
     .map((t) => ({ key: t, label: CLUB_TYPE_NAMES[t], value: counts.approvedByType[t] ?? 0, href: `/admin/analytics?status=approved&type=${t}` }))
@@ -86,9 +86,9 @@ export default async function AdminOverviewPage() {
           {term} at a glance
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Active clubs" value={fmt(summary.activeClubs)} hint={summary.pilotClubs ? `${fmt(onRecord)} on their record, ${fmt(summary.pilotClubs)} in pilot` : "Meeting the activity bar"} />
-          <Stat label="In pilot period" value={fmt(summary.pilotClubs)} hint="New clubs, active until the pilot ends" />
-          <Stat label="Inactive clubs" value={fmt(summary.inactiveClubs)} hint="Approved, but below the bar" />
+          <Stat label="Active clubs" value={fmt(onRecord)} hint={STANDING_HINT.active} />
+          <Stat label="Clubs in pilot period" value={fmt(summary.pilotClubs)} hint="New clubs, counted as active until it ends" />
+          <Stat label="Inactive clubs" value={fmt(summary.inactiveClubs)} hint="Approved, but below WSUSA's activity standard" />
           <Stat label="Students showing up" value={fmt(summary.activeStudents)} hint={`Active in a club · ${pctOf(summary.activeStudents, summary.students)} of ${fmt(summary.students)} students`} />
           <Stat label="Check-ins" value={fmt(summary.checkinsThisTerm)} hint={`${term} so far`} />
           <Stat label="Events held" value={fmt(summary.eventsThisTerm)} hint="With at least one check-in" />
@@ -173,12 +173,9 @@ export default async function AdminOverviewPage() {
                 <p className="min-w-0 flex-1 text-ink-2">
                   <span className="font-medium text-ink">{f.actor?.name ?? "Wildcat Clubs"}</span> {f.text}
                   {f.club ? (
-                    <>
-                      {" "}
-                      <Link href={`/admin/analytics/${f.club.id}`} className="font-medium text-ink hover:text-brand-600 hover:underline">
-                        {f.club.name}
-                      </Link>
-                    </>
+                    <Link href={`/admin/analytics/${f.club.id}`} className="block text-xs font-medium text-ink-3 hover:text-brand-600 hover:underline">
+                      {f.club.name}
+                    </Link>
                   ) : null}
                 </p>
                 <time dateTime={f.at.toISOString()} title={fmtLongDate(f.at)} className="shrink-0 text-xs text-ink-3">
@@ -199,7 +196,7 @@ export default async function AdminOverviewPage() {
 
 function foundingHint(byStatus: Partial<Record<string, number>>) {
   const parts = [
-    byStatus.SUBMITTED ? `${byStatus.SUBMITTED} waiting on WSUSA` : null,
+    byStatus.SUBMITTED ? `${byStatus.SUBMITTED} in WSUSA review` : null,
     byStatus.CHANGES_REQUESTED ? `${byStatus.CHANGES_REQUESTED} sent back for changes` : null,
     byStatus.DRAFT ? `${byStatus.DRAFT} ${byStatus.DRAFT === 1 ? "draft" : "drafts"}` : null,
   ].filter(Boolean);

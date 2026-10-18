@@ -116,7 +116,7 @@ export default async function MembersPage({ params }: { params: Promise<{ slug: 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {/* Registered students and the active ones among them, as on the club page; the table below also lists advisors. */}
         <Stat label="Members" value={registered} hint="Registered students" />
-        <Stat label="Active" value={activeIds.length} hint={`Checked in within ${activeRule.windowDays} days or at one of the last ${activeRule.recentEvents} events`} />
+        <Stat label="Attending members" value={activeIds.length} hint={`Checked in within ${activeRule.windowDays} days or at one of the last ${activeRule.recentEvents} events`} />
         <Stat label="Leaders" value={current.filter((r) => r.roles.length > 0).length} />
         <Stat label="Alumni" value={rows.filter((r) => r.status === "ALUMNI").length} />
       </div>

@@ -76,7 +76,7 @@ export async function SiteHeader() {
                 Browse clubs
               </Link>
               <Link href="/login" className={buttonClasses("primary", "sm")}>
-                Log in
+                Sign in
               </Link>
             </>
           )}

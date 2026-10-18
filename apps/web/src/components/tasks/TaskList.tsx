@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, CheckCircle2, Hourglass, Loader2, MoreHorizontal, Pencil, ShieldAlert, Trash2, Undo2, UserRound, Users, XCircle } from "lucide-react";
+import { ArrowRight, CalendarClock, CheckCircle2, ClipboardPen, Hourglass, Loader2, MoreHorizontal, Pencil, ShieldAlert, Trash2, Undo2, UserRound, Users, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClubLogo } from "@/components/ui/avatar";
@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { toast } from "@/components/ui/misc";
 import { PersonalTaskDialog } from "@/components/tasks/PersonalTaskDialog";
-import { KIND_LABEL, KIND_TONE, REQUIRED_LABEL, SELF_CLOSING_NOTE } from "@/components/tasks/labels";
+import { AWAITING_GRADE_NOTE, KIND_TONE, REQUIRED_LABEL, SELF_CLOSING_NOTE, taskKindLabel } from "@/components/tasks/labels";
 import { cancelClubTaskAction, deletePersonalTaskAction, setTaskDoneAction } from "@/app/tasks/actions";
 import type { TaskItem } from "@/components/tasks/items";
 
@@ -58,7 +58,7 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
   const [editing, setEditing] = useState(false);
   const [confirm, setConfirm] = useState<null | "delete" | "withdraw">(null);
   const done = task.status === "DONE";
-  const note = SELF_CLOSING_NOTE[task.kind];
+  const note = task.waiting ? AWAITING_GRADE_NOTE : SELF_CLOSING_NOTE[task.kind];
 
   function toggle(next: boolean) {
     // Leaving the current tab (open → done or back) hides the row at once.
@@ -120,8 +120,8 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
             <span className="sr-only">Done</span>
           </span>
         ) : (
-          <span className={cn("flex h-5 w-5 items-center justify-center", task.required ? "text-danger" : "text-ink-3")} title={note}>
-            {task.required ? <ShieldAlert className="h-4 w-4" aria-hidden /> : <Hourglass className="h-4 w-4" aria-hidden />}
+          <span className={cn("flex h-5 w-5 items-center justify-center", task.required ? "text-danger" : task.kind === "TEST" ? "text-info" : "text-ink-3")} title={note}>
+            {task.required ? <ShieldAlert className="h-4 w-4" aria-hidden /> : task.kind === "TEST" ? <ClipboardPen className="h-4 w-4" aria-hidden /> : <Hourglass className="h-4 w-4" aria-hidden />}
             {/* The full rows spell the note out below; compact rows only have this. */}
             {compact ? <span className="sr-only">{note}</span> : null}
           </span>
@@ -191,7 +191,7 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
               {compact ? "Required" : REQUIRED_LABEL}
             </Badge>
           ) : (
-            <Badge tone={KIND_TONE[task.kind]}>{KIND_LABEL[task.kind]}</Badge>
+            <Badge tone={KIND_TONE[task.kind]}>{taskKindLabel(task)}</Badge>
           )}
           {showClub && task.club ? (
             <Link href={`/clubs/${task.club.slug}`} className="inline-flex min-w-0 items-center gap-1.5 hover:text-brand-600 hover:underline">
@@ -199,7 +199,12 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
               <span className="truncate">{task.club.name}</span>
             </Link>
           ) : null}
-          {task.due ? (
+          {task.waiting ? (
+            <span className="inline-flex items-center gap-1 font-medium text-info">
+              <Hourglass className="h-3.5 w-3.5" aria-hidden />
+              {task.waiting}
+            </span>
+          ) : task.due ? (
             <span className={cn("inline-flex items-center gap-1", task.due.overdue ? "font-medium text-danger" : task.due.soon ? "font-medium text-warning" : "")}>
               <CalendarClock className="h-3.5 w-3.5" aria-hidden />
               <time dateTime={task.due.iso}>{task.due.label}</time>

@@ -3,20 +3,17 @@
 import Link from "next/link";
 import { BadgeCheck, Check, ChevronRight, PartyPopper, Smartphone, Star, UserPlus } from "lucide-react";
 import type { CheckInResult } from "@/lib/domain/attendance";
-import type { CheckInMethod } from "@prisma/client";
+import { METHOD_LABEL } from "@/lib/attendance/rules";
 import { fmtTime } from "@/lib/time";
 import { buttonClasses } from "@/components/ui/button";
 import { ProgressBar } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
-
 
 /**
  * What someone sees right after checking in: the confirmation, what happened
  * with their membership, how close they are to leaving a review, and (for
  * people without the app yet) where to get it.
  */
-const METHOD_PHRASE: Record<CheckInMethod, string> = { QR: "QR scan", SELF: "event code", MANUAL: "added by a leader" };
-
 export function CheckInSuccess({
   result,
   showGetApp,
@@ -24,7 +21,7 @@ export function CheckInSuccess({
   className,
 }: {
   result: Pick<CheckInResult, "status" | "method" | "checkedInAt" | "occurrence" | "club" | "membership" | "reviewProgress" | "requirementsMet">;
-  /** For people who haven't installed the app yet. */
+  /** From shouldPromptForApp (lib/clubs/queries): the app is in a store and this person hasn't got it. */
   showGetApp?: boolean;
   /** Inline version for prompts on other pages. */
   compact?: boolean;
@@ -51,7 +48,7 @@ export function CheckInSuccess({
             <span className="font-semibold text-ink">{occurrence.title}</span>
             <span className="text-ink-3">
               {" "}
-              · {METHOD_PHRASE[result.method]} at {fmtTime(result.checkedInAt)}
+              · {METHOD_LABEL[result.method]} at {fmtTime(result.checkedInAt)}
             </span>
           </p>
         </div>
@@ -68,7 +65,7 @@ export function CheckInSuccess({
         </Outcome>
       ) : null}
       {result.requirementsMet.length ? (
-        <Outcome icon={<BadgeCheck />} tone="success" title="Officer requirement complete">
+        <Outcome icon={<BadgeCheck />} tone="success" title="WSUSA requirement complete">
           This counts for {result.requirementsMet.join(", ")}.
         </Outcome>
       ) : null}

@@ -29,13 +29,16 @@ export default async function CheckinCodeEntry({ searchParams }: { searchParams:
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
-      {live.length ? <LiveCheckinPrompt occurrences={live} className="mb-6" /> : null}
+      {/* Always mounted, so its "You're checked in!" card survives the refresh that empties `live`. */}
+      <LiveCheckinPrompt occurrences={live} className="mb-6" />
       <Card className="p-6 sm:p-8">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand">
           <KeyRound className="h-6 w-6" aria-hidden />
         </div>
         <h1 className="mt-4 text-2xl font-bold tracking-tight">Check in with a code</h1>
-        <p className="mt-1.5 text-ink-2">Type the {CODE_LENGTH}-character code shown under the QR code at the event.</p>
+        <p className="mt-1.5 text-ink-2">
+          Type the {CODE_LENGTH}-character code from the event&apos;s check-in screen. It works for members of the clubs hosting the event; everyone else scans the QR code.
+        </p>
         <form method="get" action="/checkin" className="mt-6 space-y-3" noValidate>
           <label htmlFor="checkin-code" className="sr-only">
             Check-in code

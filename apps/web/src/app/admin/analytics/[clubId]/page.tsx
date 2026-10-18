@@ -13,8 +13,8 @@ import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
 import { FUNDING_STATUS_LABEL, FUNDING_STATUS_TONE, sourceName } from "@/lib/funding/labels";
 import { clubConnections, connectionCounts } from "@/lib/analytics/network";
 import { averageRate, fundingSummary, membershipGrowthFor, seatCoverage, termWindow, type FundingSummary, type SeatCoverage } from "@/lib/analytics/clubs";
-import { CLUB_TYPE_NAMES, stageOf } from "@/lib/analytics/club-table";
-import { CLUB_SCOPE_LABEL } from "@/components/clubs/labels";
+import { stageOf } from "@/lib/analytics/club-table";
+import { CLUB_SCOPE_LABEL, CLUB_STATUS_LABEL, CLUB_TYPE_LABEL as CLUB_TYPE_NAMES, STANDING_LABEL } from "@/lib/labels/clubs";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -166,8 +166,8 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
           Key numbers
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Registered members" value={fmt(registered)} hint={registered < cfg["activity.clubMinMembers"] ? `Below the ${cfg["activity.clubMinMembers"]} needed to count as active` : "Active memberships"} />
-          <Stat label="Active members" value={fmt(active)} hint={registered ? `${pct(active / registered)} of registered came lately` : "Came to an event lately"} />
+          <Stat label="Registered members" value={fmt(registered)} hint={registered < cfg["activity.clubMinMembers"] ? `Below the ${cfg["activity.clubMinMembers"]} needed to count as active` : "Everyone who has joined"} />
+          <Stat label="Attending members" value={fmt(active)} hint={registered ? `${pct(active / registered)} of registered came lately` : "Came to an event lately"} />
           <Stat label="Retention" value={pct(m?.retentionRate)} hint="Last full month vs. the one before" />
           <Stat label="Avg. attendance" value={pct(avgTerm)} hint={heldTerm ? `Of members, across ${heldTerm} ${heldTerm === 1 ? "event" : "events"} in ${termName}` : `No events with check-ins in ${termName}`} />
           <Stat label="Events held" value={fmt(activity.heldEventsCurrentTerm)} hint={`In ${termName} · ${cfg["activity.clubMinEvents"]} needed per term`} />
@@ -295,20 +295,20 @@ function StandingCallout({
 }) {
   if (status === "RETIRED")
     return (
-      <Callout tone="info" title="Retired">
+      <Callout tone="info" title={CLUB_STATUS_LABEL.RETIRED}>
         {retiredAt ? `Retired on ${fmtLongDate(retiredAt)}. ` : ""}Its history stays on record; the numbers below cover the time it was running.
       </Callout>
     );
   if (status !== "APPROVED") return <Callout tone="info">{activity.reasons[0] ?? "This club isn't approved."}</Callout>;
   if (activity.inPilot)
     return (
-      <Callout tone="info" title="In its pilot period">
+      <Callout tone="info" title={STANDING_LABEL.pilot}>
         {activity.reasons[0]} After that it needs {minEvents} events with check-ins in a term and {minMembers} registered members.
       </Callout>
     );
   if (!activity.active)
     return (
-      <Callout tone="warning" title="Inactive">
+      <Callout tone="warning" title={STANDING_LABEL.inactive}>
         <ul className="list-disc space-y-0.5 pl-4">
           {activity.reasons.map((r) => (
             <li key={r}>{r}</li>
@@ -320,7 +320,7 @@ function StandingCallout({
   const prev = activity.previousTermName ?? "last term";
   const events = activity.heldEventsCurrentTerm >= minEvents ? `${activity.heldEventsCurrentTerm} events with check-ins in ${cur}` : `${activity.heldEventsPreviousTerm} events with check-ins in ${prev}`;
   return (
-    <Callout tone="success" title="Active">
+    <Callout tone="success" title={STANDING_LABEL.active}>
       Meeting the bar with {events} and {activity.registeredMembers} registered members (needs {minEvents} and {minMembers}).
     </Callout>
   );
@@ -407,7 +407,7 @@ function FundingCard({ funding, club }: { funding: FundingSummary; club: { colle
             <dl className="grid grid-cols-3 gap-2">
               <MiniStat label="Requested" value={fmtMoney(funding.requestedCents)} hint={`${funding.counts.submitted} ${funding.counts.submitted === 1 ? "request" : "requests"}`} />
               <MiniStat label="Approved" value={fmtMoney(funding.approvedCents)} hint={funding.counts.denied ? `${funding.counts.denied} not approved` : `${funding.counts.approved} decided`} />
-              <MiniStat label="In review" value={fmtMoney(funding.pendingCents)} hint={`${funding.counts.pending} waiting`} />
+              <MiniStat label="In WSUSA review" value={fmtMoney(funding.pendingCents)} hint={`${funding.counts.pending} waiting`} />
             </dl>
             {funding.bySource.length > 1 ? (
               <div>

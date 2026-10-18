@@ -98,7 +98,6 @@ export default async function AdminTrainingsPage({ searchParams }: { searchParam
         mode="university"
         club={null}
         basePath="/admin/trainings"
-        ideas={data.ideas}
         incoming={[]}
         outgoing={[]}
         buildings={data.buildings}

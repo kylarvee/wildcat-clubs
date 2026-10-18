@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getConfig } from "@/lib/config";
 import type { Actor } from "@/lib/auth/session";
 import { isAdmin, ROLE_RANK, type ClubAccess } from "@/lib/authz";
 import { visibleEventsWhere } from "@/lib/authz/events";
@@ -226,10 +227,25 @@ export const viewerClubStates = cache(async (userId: string): Promise<Map<string
   return map;
 });
 
-/** Should a "get the mobile app" prompt appear after this person registers? */
-export async function shouldPromptForApp(userId: string): Promise<boolean> {
-  const u = await db.user.findUnique({ where: { id: userId }, select: { hasMobileApp: true, appPromptDismissedAt: true } });
-  return Boolean(u && !u.hasMobileApp && !u.appPromptDismissedAt);
+/**
+ * Should this person see a "Get the app" prompt? The one rule for all of them:
+ * the "You're in!" dialog, the dashboard card, the check-in success screen and
+ * Settings. Only once the app is in a store (a sysadmin set app.iosUrl or
+ * app.androidUrl), only for active accounts that haven't signed in on the app,
+ * and not within 30 days of "Not now" (User.appPromptDismissedAt). Settings
+ * passes `ignoreSnooze`, since people open it on purpose.
+ */
+export async function shouldPromptForApp(userId: string, opts: { ignoreSnooze?: boolean; now?: Date } = {}): Promise<boolean> {
+  const SNOOZE_DAYS = 30;
+  const [u, cfg] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { hasMobileApp: true, appPromptDismissedAt: true, status: true } }),
+    getConfig(),
+  ]);
+  if (!u || u.status !== "ACTIVE" || u.hasMobileApp) return false;
+  if (!cfg["app.iosUrl"].trim() && !cfg["app.androidUrl"].trim()) return false;
+  if (!u.appPromptDismissedAt || opts.ignoreSnooze) return true;
+  const now = opts.now ?? new Date();
+  return now.getTime() - u.appPromptDismissedAt.getTime() >= SNOOZE_DAYS * 86_400_000;
 }
 
 // ─── Clubs list ───────────────────────────────────────────────────────────────
@@ -331,7 +347,8 @@ export async function listClubs(params: ClubListParams, viewer: Actor | null, op
     if (params.category && c.category !== params.category) return false;
     if (params.scope && c.scope !== params.scope) return false;
     if (params.college && c.college?.slug !== params.college) return false;
-    if (params.status === "active" && !c.metrics.isActive) return false;
+    // "Active" means the Active standing: clubs in their pilot period have their own filter.
+    if (params.status === "active" && (!c.metrics.isActive || c.metrics.inPilot)) return false;
     if (params.status === "pilot" && !c.metrics.inPilot) return false;
     if (params.status === "inactive" && c.metrics.isActive) return false;
     if (params.mine) {
@@ -502,16 +519,18 @@ export async function clubUpcomingEvents(clubId: string, viewer: Actor | null, l
 }
 
 /**
- * How often a club meets, from its regular meetings in the Events Builder
+ * How often a club meets, from its repeating events in the Events Builder
  * ("Every Wednesday · 6:00 PM · NB 150"), so nobody types a meeting schedule
- * twice. Only repeating MEETING events still running, that the viewer may see.
+ * twice. Any repeating event counts as a meeting (a weekly Practice too), as
+ * long as it's still running and the viewer may see it. With more than one,
+ * each line starts with the event's title.
  */
 export async function clubMeetingPattern(clubId: string, viewer: Actor | null): Promise<string[]> {
   const now = new Date();
   const rows = await db.event.findMany({
     where: {
       AND: [
-        { clubId, kind: "MEETING", status: "SCHEDULED", recurrence: { not: "NONE" }, OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gt: now } }] },
+        { clubId, status: "SCHEDULED", recurrence: { not: "NONE" }, OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gt: now } }] },
         // Still has a meeting ahead (a series with a count can end without an until date).
         { occurrences: { some: { startsAt: { gt: now }, status: "SCHEDULED" } } },
         await visibleEventsWhere(viewer),
@@ -519,13 +538,14 @@ export async function clubMeetingPattern(clubId: string, viewer: Actor | null): 
     },
     orderBy: { startsAt: "asc" },
     take: 3,
-    select: { startsAt: true, allDay: true, recurrence: true, recurrenceInterval: true, recurrenceWeekdays: true, locationType: true, room: true, address: true, virtualUrl: true, building: { select: { name: true, code: true } } },
+    select: { title: true, startsAt: true, allDay: true, recurrence: true, recurrenceInterval: true, recurrenceWeekdays: true, locationType: true, room: true, address: true, virtualUrl: true, building: { select: { name: true, code: true } } },
   });
   return rows.flatMap((e) => {
     if (!e.startsAt) return [];
     const when = e.allDay ? "all day" : fmtTime(e.startsAt);
     const where = shortLocationText(e);
-    return [[describeRepeat({ startsAt: e.startsAt, recurrence: e.recurrence, interval: e.recurrenceInterval, weekdays: e.recurrenceWeekdays }), when, where].filter(Boolean).join(" · ")];
+    const repeat = describeRepeat({ startsAt: e.startsAt, recurrence: e.recurrence, interval: e.recurrenceInterval, weekdays: e.recurrenceWeekdays });
+    return [[rows.length > 1 ? e.title : null, repeat, when, where].filter(Boolean).join(" · ")];
   });
 }
 

@@ -10,7 +10,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const links = [
     { href: "/admin", label: "Overview", exact: true },
     { href: "/admin/analytics", label: "Club analytics" },
-    { href: "/admin/clubs", label: "Club reviews" },
+    { href: "/admin/clubs", label: "Club approvals" },
     { href: "/admin/funding", label: "Funding" },
     { href: "/admin/policies", label: "Policies" },
     { href: "/admin/tests", label: "Tests" },

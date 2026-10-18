@@ -7,6 +7,7 @@ import type { MClubDetail, MOccurrence } from '@/api/types';
 import { useSession } from '@/auth/session';
 
 import { Button } from '@/components/Button';
+import { Badge } from '@/components/Badge';
 import { Card, Divider, SectionHeader } from '@/components/Card';
 import { CheckinSheet } from '@/components/CheckinSheet';
 import { ClubLogo } from '@/components/ClubLogo';
@@ -26,7 +27,7 @@ import { radius, space, useColors } from '@/theme';
 
 type Notice = { tone: 'success' | 'info' | 'danger' | 'warning'; text: string } | null;
 
-/** A club: who they are, Register / Subscribe, what's coming up, and your attendance. */
+/** A club: who they are, Register / Follow, what's coming up, and your attendance. */
 export default function ClubScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const { user, status, refreshMe } = useSession();
@@ -57,7 +58,7 @@ export default function ClubScreen() {
         if (action === 'join') {
           setNotice(
             r.joinStatus === 'PENDING' || r.joinStatus === 'ALREADY_PENDING'
-              ? { tone: 'info', text: `Request sent. ${possessive(club.name)} leaders approve new members — you'll get a notification when they decide.` }
+              ? { tone: 'info', text: `Request pending. ${possessive(club.name)} leaders approve new members — you'll get a notification when they decide.` }
               : { tone: 'success', text: `You're in! Welcome to ${club.name}. Its events are on your calendar now.` },
           );
           void refresh();
@@ -103,6 +104,9 @@ export default function ClubScreen() {
   // Many clubs open their about text with an "About <club>" heading; the section already says so.
   const about = club.about.replace(new RegExp(`^about\\s+(us|${club.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\s*\\n`, 'i'), '').trim();
   const founding = club.status !== 'APPROVED' && !retired;
+  // Activity standing, in the web's words; only shown when it isn't plain "Active".
+  const m = data.metrics;
+  const standing = !founding && !retired && m.hasMetrics ? (m.inPilot ? 'Pilot period' : !m.isActive ? 'Inactive' : null) : null;
 
   const signInToJoin = () => {
     wantsJoin.current = true;
@@ -139,6 +143,7 @@ export default function ClubScreen() {
               {club.focus}
             </Text>
           ) : null}
+          {standing ? <Badge label={standing} tone={standing === 'Inactive' ? 'warning' : 'neutral'} /> : null}
         </View>
       </View>
       {club.shortDescription ? <Text style={styles.short}>{club.shortDescription}</Text> : null}
@@ -171,7 +176,7 @@ export default function ClubScreen() {
 
       {data.metrics.hasMetrics ? (
         <View style={styles.stats} accessibilityRole="summary">
-          <Stat label="Active" value={String(data.metrics.activeMembers)} hint="members" />
+          <Stat label="Attending" value={String(data.metrics.activeMembers)} hint="members" />
           <Stat label="Registered" value={String(data.metrics.registeredMembers)} hint="members" />
           <Stat label="Rating" value={data.metrics.avgRating != null && data.metrics.reviewCount ? `★ ${data.metrics.avgRating.toFixed(1)}` : '—'} hint={data.metrics.reviewCount ? `${data.metrics.reviewCount} reviews` : 'No reviews yet'} />
           <Stat label="Retention" value={pct(data.metrics.retentionRate)} hint="Month to month" />
@@ -180,7 +185,7 @@ export default function ClubScreen() {
 
       {!founding ? (
         <>
-          <SectionHeader title="Upcoming events" />
+          <SectionHeader title="Coming up" />
           {data.upcoming.length ? (
             <Card style={styles.flush}>
               {data.upcoming.map((e, i) => (
@@ -191,7 +196,7 @@ export default function ClubScreen() {
               ))}
             </Card>
           ) : (
-            <EmptyView icon="calendar" title={retired ? 'No more events' : 'Nothing scheduled yet'} body={retired ? undefined : "Subscribe to hear when something's on the calendar."} />
+            <EmptyView icon="calendar" title={retired ? 'No more events' : 'Nothing scheduled yet'} body={retired ? undefined : "Follow the club to hear when something's on the calendar."} />
           )}
         </>
       ) : null}
@@ -309,13 +314,13 @@ function Actions({ data, busy, onSignIn, onJoin, onLeave, onToggleSubscribe }: {
         <Icon name="subscribe" size={22} color={c.ink2} />
         <View style={styles.flex}>
           <Text variant="label" nativeID="sub-label">
-            Show events on my calendar
+            Follow this calendar
           </Text>
           <Text variant="small" tone="ink3">
-            {v.subscribed ? 'On — its events are on your calendar.' : v.isMember ? "Off — its events aren't on your calendar." : 'Follow the club without joining.'}
+            {v.subscribed ? 'Following — its events are on your calendar.' : v.isMember ? "Not following — its events aren't on your calendar." : 'See its events on your calendar without joining.'}
           </Text>
         </View>
-        <Toggle value={v.subscribed} onValueChange={onToggleSubscribe} disabled={busy === 'subscribe' || busy === 'unsubscribe'} accessibilityLabel="Show this club's events on my calendar" />
+        <Toggle value={v.subscribed} onValueChange={onToggleSubscribe} disabled={busy === 'subscribe' || busy === 'unsubscribe'} accessibilityLabel={`Follow ${possessive(club.name)} calendar`} />
       </View>
     </View>
   );
@@ -334,7 +339,7 @@ function AttendanceCard({ data }: { data: MClubDetail }) {
           <View style={styles.statsRow}>
             <Stat label="Events" value={String(a.attended)} style={styles.third} />
             <Stat label="Rate" value={member ? pct(a.rate) : '—'} hint={member && a.heldSinceJoined ? `of ${a.heldSinceJoined} held` : undefined} style={styles.third} />
-            <Stat label="Status" value={member ? (a.active ? 'Active' : 'Not active') : 'Guest'} style={styles.third} />
+            <Stat label="Status" value={member ? (a.active ? 'Attending' : 'Not attending lately') : data.viewer.isPending ? 'Request pending' : 'Guest'} style={styles.third} />
           </View>
         )}
         {a.lastAttendedAt ? (
@@ -365,7 +370,8 @@ function Stat({ label, value, hint, style }: { label: string; value: string; hin
       <Text variant="caption" tone="ink3" numberOfLines={1}>
         {label.toUpperCase()}
       </Text>
-      <Text variant="heading" numberOfLines={1}>
+      {/* Two lines, so "Not attending lately" fits a third of a phone screen. */}
+      <Text variant="heading" numberOfLines={2}>
         {value}
       </Text>
       {hint ? (

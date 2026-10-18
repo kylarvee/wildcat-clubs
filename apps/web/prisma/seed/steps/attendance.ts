@@ -20,18 +20,29 @@ function checkinAt(ctx: Ctx, occ: Occ): Date {
   return at > ctx.NOW ? new Date(ctx.NOW.getTime() - ctx.rng.int(30, 600) * 1000) : at;
 }
 
-function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, at?: Date) {
+/**
+ * One check-in, by the platform's rules (lib/attendance/rules decideMethod).
+ * The typed code (SELF) and the one-tap prompt (TAP) are only for members of
+ * the host or an approved co-host club, so never at a university event, which
+ * has no host club; everyone else scans the QR code. Someone joining by
+ * checking in wasn't a member yet, so they scanned it too. Online events have
+ * nothing to scan in the room, so members there use the one-tap prompt. Now
+ * and then a leader adds someone by hand (MANUAL).
+ */
+function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, at?: Date, joining = false) {
   if (occ.attendees.has(userId)) return;
   const { rng } = ctx;
   const r = rng.next();
   const when = at ?? checkinAt(ctx, occ);
-  let method: "QR" | "SELF" | "MANUAL" = r < 0.78 ? "QR" : r < 0.95 ? "SELF" : "MANUAL";
-  if (method === "SELF" && !ev.allowSelfCheckIn) method = "QR";
+  const clubs = club ? [club, ...ev.cohosts.filter((c) => c.status === "APPROVED").map((c) => ctx.clubById.get(c.clubId)!)] : [];
+  const member = !joining && clubs.some((c) => ctx.memberAt(c, userId, when) || ctx.rolesAt(c, userId, when).length > 0);
+  const online = ev.locationType === "VIRTUAL";
+  let method: "QR" | "SELF" | "TAP" | "MANUAL" = joining ? "QR" : r >= 0.95 ? "MANUAL" : !member ? "QR" : online ? "TAP" : r < 0.78 ? "QR" : "SELF";
   let recordedById: string | null = null;
   if (method === "MANUAL") {
     const holders = club ? ctx.capabilityHoldersAt(club, "attendance", occ.startsAt).filter((u) => u !== userId) : [ctx.p("alex").id];
     if (holders.length) recordedById = rng.pick(holders);
-    else method = "QR";
+    else method = member && online ? "TAP" : "QR";
   }
   occ.attendees.set(userId, { id: ctx.id(), at: when, method, recordedById });
 }
@@ -57,7 +68,7 @@ const pastOccs = (ctx: Ctx, ev: Ev, skip: Set<string>) =>
 
 export function buildAttendance(ctx: Ctx) {
   const { rng, NOW } = ctx;
-  const live = new Set([ctx.refs.liveEventId, ctx.refs.buildEventId, ctx.refs.laterEventId]);
+  const live = new Set([ctx.refs.liveEventId, ctx.refs.buildEventId, ctx.refs.laterEventId, ctx.refs.onlineEventId]);
   const G = 2.5;
 
   // 1. Members who joined by checking in: their join is their first check-in.
@@ -75,7 +86,7 @@ export function buildAttendance(ctx: Ctx) {
       m.joinedAt = at;
       m.requestedAt = at;
       if (m.endedAt && m.endedAt <= at) m.endedAt = addDays(at, 21);
-      record(ctx, club, hit.e, hit.o, m.userId, at);
+      record(ctx, club, hit.e, hit.o, m.userId, at, true);
     }
   }
 
@@ -163,6 +174,8 @@ export function buildAttendance(ctx: Ctx) {
   };
   liveCheckins("service", ctx.refs.liveEventId, 9, [ctx.p("maya").id, ctx.p("frank").id]);
   liveCheckins("robotics", ctx.refs.buildEventId, 12, [ctx.p("priya").id, ctx.p("vanessa").id]);
+  // Online: a few members already tapped "Check in"; Maya hasn't, so her prompt shows.
+  liveCheckins("premed", ctx.refs.onlineEventId, 6, [ctx.p("maya").id]);
 
   // 5. Persona guarantees.
   const maya = ctx.p("maya").id;

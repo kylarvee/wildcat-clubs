@@ -1,19 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { CohostStatus } from "@prisma/client";
-import { CalendarPlus, Check, Handshake, Lightbulb, Loader2, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Handshake, Loader2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog, Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
-import { Input, Label, Textarea } from "@/components/ui/form";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/misc";
 import { fmtDate, fmtRange } from "@/lib/time";
-import { addIdeaAction, decideCohostAction, deleteEventAction, updateIdeaAction } from "@/app/events/actions";
-
-export type IdeaRow = { id: string; title: string; notes: string; createdByName: string; createdAt: string };
+import { decideCohostAction } from "@/app/events/actions";
 
 export type IncomingCohost = {
   id: string;
@@ -37,181 +33,6 @@ export type OutgoingCohost = {
 
 const COHOST_TONE: Record<CohostStatus, "warning" | "success" | "danger"> = { PENDING: "warning", APPROVED: "success", DECLINED: "danger" };
 const COHOST_LABEL: Record<CohostStatus, string> = { PENDING: "Waiting", APPROVED: "Accepted", DECLINED: "Declined" };
-
-// ─── Ideas ───────────────────────────────────────────────────────────────────
-
-export function IdeasPanel({
-  clubId,
-  ideas,
-  basePath,
-  onSchedule,
-}: {
-  clubId: string | null;
-  ideas: IdeaRow[];
-  basePath: string;
-  onSchedule: (idea: IdeaRow) => void;
-}) {
-  const id = useId();
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [showNotes, setShowNotes] = useState(false);
-  const [adding, startAdding] = useTransition();
-  const [editing, setEditing] = useState<IdeaRow | null>(null);
-
-  function add(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
-    startAdding(async () => {
-      const res = await addIdeaAction({ clubId, title: title.trim(), notes });
-      if (!res.ok) return void toast.error(res.error);
-      setTitle("");
-      setNotes("");
-      setShowNotes(false);
-      toast.success("Idea saved");
-    });
-  }
-
-  return (
-    <div className="space-y-4">
-      <form onSubmit={add} className="space-y-2" aria-label="Add an idea">
-        <Label htmlFor={`${id}-t`} className="sr-only">
-          New idea
-        </Label>
-        <div className="flex gap-2">
-          <Input id={`${id}-t`} value={title} maxLength={140} placeholder="Jot down an idea…" onChange={(e) => setTitle(e.target.value)} />
-          <Button type="submit" disabled={adding || !title.trim()} aria-label="Add idea">
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
-        </div>
-        {showNotes ? (
-          <Textarea aria-label="Notes" rows={3} maxLength={5000} value={notes} placeholder="Notes: who to ask, rough budget, links…" onChange={(e) => setNotes(e.target.value)} />
-        ) : (
-          <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={() => setShowNotes(true)}>
-            + Add notes
-          </button>
-        )}
-      </form>
-
-      {ideas.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line-2 px-4 py-6 text-center">
-          <Lightbulb className="mx-auto mb-2 h-6 w-6 text-ink-3" aria-hidden />
-          <p className="text-sm font-medium text-ink">No ideas yet</p>
-          <p className="mt-1 text-xs text-ink-3">Keep a running list — a guest speaker, a social, a service day — and add it to the calendar when it&apos;s ready.</p>
-        </div>
-      ) : (
-        <ul className="space-y-2">
-          {ideas.map((idea) => (
-            <li key={idea.id} className="rounded-xl border border-line bg-surface p-3 shadow-[var(--shadow-card)]">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium leading-snug text-ink">{idea.title}</p>
-                  {idea.notes ? <p className="mt-0.5 line-clamp-2 whitespace-pre-line text-xs text-ink-3">{idea.notes}</p> : null}
-                  <p className="mt-1 text-[11px] text-ink-3">
-                    {idea.createdByName} · {fmtDate(idea.createdAt, "MMM d")}
-                  </p>
-                </div>
-                <IdeaMenu idea={idea} basePath={basePath} onEdit={() => setEditing(idea)} />
-              </div>
-              <Button variant="secondary" size="sm" className="mt-2 w-full" onClick={() => onSchedule(idea)}>
-                <CalendarPlus className="h-4 w-4" /> Add to calendar
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <EditIdeaDialog idea={editing} onClose={() => setEditing(null)} />
-    </div>
-  );
-}
-
-function IdeaMenu({ idea, basePath, onEdit }: { idea: IdeaRow; basePath: string; onEdit: () => void }) {
-  const [confirm, setConfirm] = useState(false);
-  const [pending, start] = useTransition();
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`More for ${idea.title}`} disabled={pending}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onSelect={onEdit}>
-            <Pencil className="h-4 w-4" /> Edit idea
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={`${basePath}/${idea.id}`}>
-              <CalendarPlus className="h-4 w-4" /> Open in full editor
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem danger onSelect={() => setConfirm(true)}>
-            <Trash2 className="h-4 w-4" /> Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ConfirmDialog
-        open={confirm}
-        onOpenChange={setConfirm}
-        title="Delete this idea?"
-        description={`“${idea.title}” will be removed from the list.`}
-        confirmLabel="Delete"
-        danger
-        onConfirm={() =>
-          start(async () => {
-            const res = await deleteEventAction(idea.id);
-            if (res.ok) toast.success("Idea deleted");
-            else toast.error(res.error);
-          })
-        }
-      />
-    </>
-  );
-}
-
-function EditIdeaDialog({ idea, onClose }: { idea: IdeaRow | null; onClose: () => void }) {
-  const id = useId();
-  const [pending, start] = useTransition();
-  return (
-    <Dialog open={idea !== null} onOpenChange={(o) => !o && onClose()}>
-      {idea ? (
-        <DialogContent title="Edit idea">
-          <form
-            key={idea.id}
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = new FormData(e.currentTarget);
-              start(async () => {
-                const res = await updateIdeaAction(idea.id, { title: String(f.get("title") ?? ""), notes: String(f.get("notes") ?? "") });
-                if (!res.ok) return void toast.error(res.error);
-                toast.success("Idea updated");
-                onClose();
-              });
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor={`${id}-t`}>Title</Label>
-              <Input id={`${id}-t`} name="title" defaultValue={idea.title} required maxLength={140} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`${id}-n`}>Notes</Label>
-              <Textarea id={`${id}-n`} name="notes" defaultValue={idea.notes} rows={5} maxLength={5000} />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={pending}>
-                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      ) : null}
-    </Dialog>
-  );
-}
 
 // ─── Co-host requests ────────────────────────────────────────────────────────
 

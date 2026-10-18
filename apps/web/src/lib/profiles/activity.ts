@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, isAdmin, ROLE_LABEL } from "@/lib/authz";
 import { END_REASON_LABEL } from "@/lib/roles/labels";
+import type { PublicAction } from "@/lib/lake/actions";
 
 /**
  * A person's public activity, as plain sentences for their profile:
@@ -15,6 +16,9 @@ import { END_REASON_LABEL } from "@/lib/roles/labels";
  * attendance privacy rule: only the person, their club's attendance holders
  * and advisors, and admins see them. Clubs still in founding show only to the
  * person themself and admins.
+ *
+ * The actions it reads are typed against lib/lake/actions: only actions that
+ * are public by default there can be listed, since this feed reads public rows.
  */
 
 export type ActivityPart = string | { href: string; label: string };
@@ -31,8 +35,12 @@ type Row = {
   club: { name: string; slug: string; status: string } | null;
 };
 
-const SELF_ACTIONS = ["membership.joined", "review.created", "attendance.checkin"];
-const ABOUT_ACTIONS = ["role.assigned", "role.ended", "project.added", "user.graduated"];
+/** Things the person did themself. */
+const SELF_ACTIONS: PublicAction[] = ["membership.joined", "review.created", "attendance.checkin"];
+/** Things that happened to them (data.userId is the person), whoever did them. */
+const ABOUT_ACTIONS: PublicAction[] = ["role.assigned", "role.ended", "project.added", "user.graduated"];
+const WON: PublicAction = "election.applied";
+const APPROVED: PublicAction = "membership.approved";
 const LISTED = new Set(["APPROVED", "RETIRED"]);
 const NEAR_MS = 2 * 60_000;
 
@@ -64,8 +72,8 @@ export async function profileActivity(
       OR: [
         { actorId: person.id, action: { in: SELF_ACTIONS } },
         ...ABOUT_ACTIONS.map((action) => ({ action, data: { path: ["userId"], equals: person.id } })),
-        { action: "election.applied", data: { path: ["winnerId"], equals: person.id } },
-        ...(memberships.length ? [{ action: "membership.approved", entityId: { in: memberships.map((m) => m.id) } }] : []),
+        { action: WON, data: { path: ["winnerId"], equals: person.id } },
+        ...(memberships.length ? [{ action: APPROVED, entityId: { in: memberships.map((m) => m.id) } }] : []),
       ],
     },
     orderBy: [{ at: "desc" }, { id: "desc" }],

@@ -204,8 +204,8 @@ export function ClubBrowser({
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect label="Status" value={params.status ?? ""} onChange={(v) => go({ status: (v || null) as StatusFilter | null })}>
-            <option value="">Any status</option>
+          <FilterSelect label="Standing" value={params.status ?? ""} onChange={(v) => go({ status: (v || null) as StatusFilter | null })}>
+            <option value="">Any standing</option>
             {STATUS_FILTERS.map((s) => (
               <option key={s} value={s}>
                 {STATUS_FILTER_LABEL[s]}

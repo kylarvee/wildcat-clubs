@@ -33,7 +33,8 @@ export async function ClubAttendanceRecord({ clubId, userId, showLivePrompt = tr
 
   return (
     <div className={cn("space-y-3", className)}>
-      {live.length ? <LiveCheckinPrompt occurrences={live} /> : null}
+      {/* Always mounted, so its "You're checked in!" card survives the refresh that empties `live`. */}
+      <LiveCheckinPrompt occurrences={live} />
       <Card className="p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-ink">Your attendance</h2>

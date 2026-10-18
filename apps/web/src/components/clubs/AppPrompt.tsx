@@ -9,8 +9,10 @@ import { dismissAppPromptAction } from "@/app/clubs/[slug]/actions";
 
 /**
  * After someone registers for a club we celebrate and suggest the mobile app
- * (that's where check-in and reminders live). Shown once per page visit, and
- * never again after "Not now" or once they've signed in on the app.
+ * (that's where check-in and reminders live). The page decides with
+ * shouldPromptForApp (lib/clubs/queries): only once the app is in a store,
+ * never for people who've signed in on it, and not for 30 days after "Not now".
+ * Shown at most once per page visit.
  */
 
 type AppPromptApi = {

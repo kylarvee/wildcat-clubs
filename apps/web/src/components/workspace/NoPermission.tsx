@@ -8,7 +8,7 @@ export function NoPermission({ what = "this tool", suspended }: { what?: string;
       title={`You don't have access to ${what}`}
       description={
         suspended
-          ? "Your leadership permissions are paused until you finish your required officer training or test. Check your tasks."
+          ? "Your leadership permissions are paused until you finish your overdue WSUSA requirement. Check your tasks."
           : "Ask your club's president or advisor to add this permission to your role."
       }
     />

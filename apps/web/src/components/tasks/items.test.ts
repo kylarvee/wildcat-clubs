@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/authz", () => ({ CAPABILITIES: { budget: { label: "Budget & funding", description: "" } } }));
 
 import { campusDate } from "@/lib/time";
-import { dueInfo, groupJoinRequests } from "./items";
+import { dueInfo, groupJoinRequests, toTaskItem } from "./items";
+import { taskKindLabel } from "./labels";
 
 describe("task due dates (campus time)", () => {
   const now = campusDate(2026, 10, 16, 9, 0); // Friday 9:00 AM in Ogden
@@ -55,5 +56,37 @@ describe("groupJoinRequests", () => {
 
   it("leaves a single request alone", () => {
     expect(groupJoinRequests([row("a")], "me", now)[0].title).toBe("Person a asked to join Wildcat Robotics");
+  });
+});
+
+describe("tests waiting for grading", () => {
+  const now = campusDate(2026, 10, 22, 9, 0);
+  const task = (over: Record<string, unknown> = {}) =>
+    ({
+      id: "t", kind: "REQUIREMENT", title: "Pass: Club Officer Policy Test", description: null, assigneeType: "USER", assigneeId: "me", clubId: "c1", club: null,
+      capability: null, href: "/tests/x", dueAt: campusDate(2026, 10, 21, 18, 0), required: true, status: "OPEN", sourceType: "requirement", sourceId: "r:me",
+      createdById: null, createdBy: null, createdAt: now, completedAt: null, completedById: null, completedBy: null, assignee: null, ...over,
+    }) as unknown as Parameters<typeof toTaskItem>[0];
+
+  it("say so instead of reading overdue", () => {
+    const item = toTaskItem(task({ awaitingGrade: true }), "me", now);
+    expect(item.waiting).toBe("Submitted — waiting for grading");
+    expect(item.due).toBeNull();
+  });
+
+  it("read overdue as usual once nothing is waiting", () => {
+    const item = toTaskItem(task(), "me", now);
+    expect(item.waiting).toBeNull();
+    expect(item.due?.overdue).toBe(true);
+  });
+});
+
+describe("taskKindLabel", () => {
+  const club = { name: "Wildcat Robotics" };
+  it("calls a club's test a Club test, and its form a Club form", () => {
+    expect(taskKindLabel({ kind: "TEST", title: "Take: Event Safety Quiz", club })).toBe("Club test");
+    expect(taskKindLabel({ kind: "TEST", title: "Fill out: Trip Sign-up", club })).toBe("Club form");
+    expect(taskKindLabel({ kind: "TEST", title: "Take: Funding Rules Refresher", club: null })).toBe("Test");
+    expect(taskKindLabel({ kind: "REQUIREMENT", title: "Pass: Club Officer Policy Test", club })).toBe("Requirement");
   });
 });

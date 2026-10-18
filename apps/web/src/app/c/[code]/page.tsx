@@ -8,6 +8,7 @@ import { getConfig } from "@/lib/config";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { reviewEligibility } from "@/lib/metrics";
 import { checkinPreview } from "@/lib/domain/attendance";
+import { shouldPromptForApp } from "@/lib/clubs/queries";
 import { normalizeCode } from "@/lib/attendance/rules";
 import { CHECKIN_PASS_MAX_AGE_MS } from "@/lib/attendance/token";
 import { Card } from "@/components/ui/card";
@@ -59,7 +60,7 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand">
             {actor ? <QrCode className="h-6 w-6" aria-hidden /> : <Lock className="h-6 w-6" aria-hidden />}
           </div>
-          <h1 className="mt-4 text-xl font-bold tracking-tight">{actor ? "Scan the QR code shown at the event" : "Log in to check in"}</h1>
+          <h1 className="mt-4 text-xl font-bold tracking-tight">{actor ? "Scan the QR code shown at the event" : "Sign in to check in"}</h1>
           <p className="mt-1.5 text-ink-2">{preview.message}</p>
           {actor ? null : (
             <div className="mt-6">
@@ -94,7 +95,7 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
   const rotate = cfg["checkin.qrRotateSeconds"];
   const passMinutes = Math.round(CHECKIN_PASS_MAX_AGE_MS / 60_000);
 
-  // ── Signed out: log in, then land back here and finish automatically. ──
+  // ── Signed out: sign in, then land back here and finish automatically. ──
   if (!actor) {
     const next = `/c/${occurrence.code}?${preview.pass ? `t=${encodeURIComponent(preview.pass)}&` : ""}go=1`;
     return (
@@ -108,15 +109,15 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
               </Callout>
             ) : (
               <>
-                <p className="text-ink-2">Log in with your {INSTITUTION.shortName} account to check in.</p>
+                <p className="text-ink-2">Sign in with your {INSTITUTION.shortName} account to check in.</p>
                 <LoginToCheckIn next={next} />
                 {preview.scan === "LIVE" ? (
                   <Callout tone="success" icon={<QrCode />}>
-                    Your scan is saved for {passMinutes} minutes while you log in — you&apos;ll be checked in as soon as you&apos;re back.
+                    Your scan is saved for {passMinutes} minutes while you sign in — you&apos;ll be checked in as soon as you&apos;re back.
                   </Callout>
                 ) : preview.scan === "EXPIRED" ? (
                   <Callout tone="warning" icon={<QrCode />}>
-                    This QR code has expired (it changes every {rotate} seconds). After you log in, scan the code on the screen again.
+                    This QR code has expired (it changes every {rotate} seconds). After you sign in, scan the code on the screen again.
                   </Callout>
                 ) : null}
               </>
@@ -127,8 +128,7 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
     );
   }
 
-  const me = await db.user.findUnique({ where: { id: actor.id }, select: { hasMobileApp: true } });
-  const showGetApp = !me?.hasMobileApp;
+  const showGetApp = await shouldPromptForApp(actor.id);
 
   // ── Already on the list. ──
   if (preview.existing) {
@@ -215,7 +215,7 @@ export default async function CheckInPage({ params, searchParams }: { params: Pr
   );
 }
 
-/** The big log-in button; `next` brings them back here to finish. */
+/** The big sign-in button; `next` brings them back here to finish. */
 function LoginToCheckIn({ next }: { next: string }) {
   return (
     <div className="space-y-3">
@@ -223,10 +223,10 @@ function LoginToCheckIn({ next }: { next: string }) {
         href={`/login?next=${encodeURIComponent(next)}`}
         className="flex h-16 w-full items-center justify-center rounded-2xl bg-brand text-lg font-semibold text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
       >
-        Log in to check in
+        Sign in to check in
       </Link>
       <p className="text-center text-sm text-ink-3">
-        Use your @{INSTITUTION.studentEmailDomain} account. First time on {PLATFORM.name}? Logging in creates your account.
+        Use your @{INSTITUTION.studentEmailDomain} account. First time on {PLATFORM.name}? Signing in creates your account.
       </p>
     </div>
   );

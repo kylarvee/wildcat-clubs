@@ -76,7 +76,7 @@ export async function ClubResources({ clubId, clubSlug, viewer, canManageFiles }
                 </a>
               ) : d.fileLocked && !d.contentHtml ? (
                 <span className="inline-flex items-center gap-1.5 text-xs text-ink-3">
-                  <Lock className="h-3.5 w-3.5" aria-hidden="true" /> {viewer ? "Members only" : "Log in to view"}
+                  <Lock className="h-3.5 w-3.5" aria-hidden="true" /> {viewer ? "Members only" : "Sign in to view"}
                 </span>
               ) : null}
             </div>

@@ -15,7 +15,8 @@ import { saveConfigAction } from "@/app/system/actions";
 
 export type RuleField =
   | { kind: "int"; key: ConfigKey; label: string; help: string; unit: string; min: number; max: number; value: number; defaultValue: number }
-  | { kind: "url"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string };
+  | { kind: "url"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string }
+  | { kind: "email"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string };
 
 /** Which plain-words summary to show above the fields (computed from what's typed, so edits preview live). */
 export type RuleSummary = "activity" | "reviews" | "checkin" | null;
@@ -24,6 +25,7 @@ type Values = Record<string, string>;
 
 function fieldError(f: RuleField, raw: string): string | null {
   const v = raw.trim();
+  if (f.kind === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : "Enter an email address, like wsusa@weber.edu.";
   if (f.kind === "url") {
     if (v === "") return null;
     return /^https:\/\/[^\s]+\.[^\s]+$/i.test(v) ? null : "Paste the full link, starting with https://";
@@ -126,9 +128,9 @@ export function RulesSection({
                         setValues((s) => ({ ...s, [f.key]: v }));
                         if (err) setErrors((s) => ({ ...s, [f.key]: null }));
                       }}
-                      inputMode={f.kind === "int" ? "numeric" : "url"}
-                      type={f.kind === "int" ? "text" : "url"}
-                      placeholder={f.kind === "url" ? f.placeholder : undefined}
+                      inputMode={f.kind === "int" ? "numeric" : f.kind}
+                      type={f.kind === "int" ? "text" : f.kind}
+                      placeholder={f.kind === "int" ? undefined : f.placeholder}
                       autoComplete="off"
                       aria-invalid={err ? true : undefined}
                       aria-describedby={`${fid}-help ${fid}-meta`}

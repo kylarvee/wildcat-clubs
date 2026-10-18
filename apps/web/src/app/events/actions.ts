@@ -35,18 +35,6 @@ export async function moveEventAction(eventId: string, input: { startsAt: string
   return run((a) => events.moveEvent(a, eventId, input), eventId);
 }
 
-export async function addIdeaAction(input: events.IdeaInput) {
-  return run((a) => events.addIdea(a, input));
-}
-
-export async function updateIdeaAction(eventId: string, input: { title: string; notes?: string | null }) {
-  return run((a) => events.updateIdea(a, eventId, input), eventId);
-}
-
-export async function scheduleIdeaAction(eventId: string, input: events.ScheduleInput) {
-  return run((a) => events.scheduleIdea(a, eventId, input), eventId);
-}
-
 export async function cancelEventAction(eventId: string, reason?: string | null) {
   return run((a) => events.cancelEvent(a, eventId, reason), eventId);
 }

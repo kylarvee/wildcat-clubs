@@ -29,5 +29,3 @@ export async function loadAttendees(occurrenceId: string) {
   for (const r of roles) rolesByUser.set(r.userId, [...(rolesByUser.get(r.userId) ?? []), `${r.position?.name ?? ROLE_LABEL[r.role]}, ${r.club.name}`]);
   return { occ, rolesByUser };
 }
-
-export const METHOD_LABEL = { QR: "QR scan", SELF: "Event code", MANUAL: "Added by staff" } as const;

@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import QRCode from "qrcode";
-import { BellRing, CalendarDays, CheckCircle2, FlaskConical, Hand, QrCode, ScanLine, Smartphone } from "lucide-react";
+import { BellRing, CalendarDays, CheckCircle2, FlaskConical, Globe, Hand, QrCode, ScanLine, Smartphone } from "lucide-react";
+import { personasEnabled } from "@/lib/auth/google";
 import { getCurrentUser } from "@/lib/auth/session";
+import { can } from "@/lib/authz";
 import { getConfig } from "@/lib/config";
 import { db } from "@/lib/db";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
@@ -66,12 +68,12 @@ const FEATURES = [
   {
     icon: ScanLine,
     title: "Scan in at meetings",
-    body: "Leaders put a QR code on screen. Point your phone at it and you're checked in — no sign-in sheet, no lines. New to the club? Your first scan registers you.",
+    body: "Leaders put a QR code on screen. Point your phone at it and you're checked in — no sign-in sheet, no lines. New to the club? Your first check-in signs you up, or asks to join if the club approves members first.",
   },
   {
     icon: Hand,
-    title: "Check in from the club page",
-    body: "During an event, open the club in the app and tap the check-in prompt. Just browsing? Skip it — nothing is recorded unless you tap.",
+    title: "One tap for online events",
+    body: "When a club meets online, open it in the app during the event and tap Check in. Nothing is recorded unless you tap.",
   },
   {
     icon: BellRing,
@@ -81,20 +83,32 @@ const FEATURES = [
   {
     icon: CalendarDays,
     title: "Your clubs and calendar",
-    body: "Every club you're in and every event you're subscribed to, in one list — plus your attendance record.",
+    body: "Events from every club you're in or follow, in one list — plus your attendance record.",
   },
 ];
 
+/**
+ * /get-the-app. With a store link set (System settings → Mobile app links):
+ * the store buttons. Until then the app is only a test build, so everyone sees
+ * that it's on its way and what it will do, and only sysadmins get the steps
+ * to run the test build. The app prompts elsewhere stay hidden meanwhile
+ * (shouldPromptForApp).
+ */
 export default async function GetTheAppPage() {
-  const [user, cfg, url] = await Promise.all([getCurrentUser(), getConfig(), pageUrl()]);
+  const [user, cfg] = await Promise.all([getCurrentUser(), getConfig()]);
   const iosUrl = cfg["app.iosUrl"].trim();
   const androidUrl = cfg["app.androidUrl"].trim();
   const inStores = Boolean(iosUrl || androidUrl);
   const hasApp = user ? Boolean((await db.user.findUnique({ where: { id: user.id }, select: { hasMobileApp: true } }))?.hasMobileApp) : false;
+  const showTestBuild = !inStores && can(user, "system.config");
 
-  // Plain SVG from the qrcode library, shown as an image (never injected as HTML).
-  const qrSvg = await QRCode.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M", color: { dark: "#17131cff", light: "#ffffffff" } });
-  const qrSrc = `data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`;
+  // The QR code opens this page on a phone, which only helps once there's an app to download.
+  let qrSrc: string | null = null;
+  if (inStores) {
+    // Plain SVG from the qrcode library, shown as an image (never injected as HTML).
+    const qrSvg = await QRCode.toString(await pageUrl(), { type: "svg", margin: 1, errorCorrectionLevel: "M", color: { dark: "#17131cff", light: "#ffffffff" } });
+    qrSrc = `data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`;
+  }
 
   return (
     <div>
@@ -107,11 +121,13 @@ export default async function GetTheAppPage() {
         <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:py-16">
           <div>
             <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-brand-100 ring-1 ring-inset ring-white/15">
-              <Smartphone className="h-3.5 w-3.5" aria-hidden="true" /> {PLATFORM.name} for iPhone and Android
+              <Smartphone className="h-3.5 w-3.5" aria-hidden="true" /> {inStores ? `${PLATFORM.name} for iPhone and Android` : "Coming to iPhone and Android"}
             </p>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-balance sm:text-5xl">Your clubs, in your pocket.</h1>
+            <h1 className="mt-4 text-3xl font-bold tracking-tight text-balance sm:text-5xl">{inStores ? "Your clubs, in your pocket." : "The app is on its way."}</h1>
             <p className="mt-4 max-w-xl text-lg leading-relaxed text-brand-100 text-pretty">
-              Check in to meetings with a two-second scan, get reminders before events, and never miss an announcement. Sign in with the same {INSTITUTION.shortName} account you use here.
+              {inStores
+                ? `Check in to meetings with a two-second scan, get reminders before events, and never miss an announcement. Sign in with the same ${INSTITUTION.shortName} account you use here.`
+                : `The ${PLATFORM.name} app isn't in the App Store or Google Play yet. Once it is, you'll check in to meetings with a two-second scan, get reminders before events, and see announcements as soon as they're posted.`}
             </p>
             {inStores ? (
               <div className="mt-7 flex flex-wrap gap-3">
@@ -120,7 +136,7 @@ export default async function GetTheAppPage() {
               </div>
             ) : (
               <p className="mt-7 inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-white ring-1 ring-inset ring-white/15">
-                <FlaskConical className="h-4 w-4 shrink-0" aria-hidden="true" /> The app is in testing — see below for how to try it today.
+                <Globe className="h-4 w-4 shrink-0" aria-hidden="true" /> Until then, everything works here on the web, check-in included.
               </p>
             )}
             {user && hasApp ? (
@@ -131,20 +147,24 @@ export default async function GetTheAppPage() {
           </div>
 
           {/* Only useful on a computer: a phone can't scan its own screen. */}
-          <div className="hidden w-64 rounded-2xl bg-white p-5 text-center text-ink shadow-[var(--shadow-pop)] md:block lg:w-72">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={qrSrc} alt="QR code that opens this page on your phone" width={224} height={224} className="mx-auto h-auto w-full max-w-[224px]" />
-            <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-semibold">
-              <QrCode className="h-4 w-4 text-brand" aria-hidden="true" /> On your computer?
-            </p>
-            <p className="mt-1 text-xs leading-snug text-ink-3">Point your phone&rsquo;s camera here to open this page there{inStores ? " and download the app" : ""}.</p>
-          </div>
+          {qrSrc ? (
+            <div className="hidden w-64 rounded-2xl bg-white p-5 text-center text-ink shadow-[var(--shadow-pop)] md:block lg:w-72">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qrSrc} alt="QR code that opens this page on your phone" width={224} height={224} className="mx-auto h-auto w-full max-w-[224px]" />
+              <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-semibold">
+                <QrCode className="h-4 w-4 text-brand" aria-hidden="true" /> On your computer?
+              </p>
+              <p className="mt-1 text-xs leading-snug text-ink-3">Point your phone&rsquo;s camera here to open this page there and download the app.</p>
+            </div>
+          ) : null}
         </div>
       </section>
 
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-        <h2 className="text-2xl font-bold tracking-tight">What the app does</h2>
-        <p className="mt-1 text-ink-2">The app is the quick, on-the-go side of {PLATFORM.name}. Bigger jobs — running a club, budgets, the constitution builder — stay on the web.</p>
+        <h2 className="text-2xl font-bold tracking-tight">{inStores ? "What the app does" : "What it will do"}</h2>
+        <p className="mt-1 text-ink-2">
+          {inStores ? "The app is" : "It'll be"} the quick, on-the-go side of {PLATFORM.name}. Bigger jobs — running a club, budgets, the constitution builder — stay on the web.
+        </p>
         <ul className="mt-6 grid gap-4 sm:grid-cols-2">
           {FEATURES.map((f) => (
             <li key={f.title} className="flex gap-4 rounded-[var(--radius-card)] border border-line bg-surface p-5 shadow-[var(--shadow-card)]">
@@ -159,16 +179,20 @@ export default async function GetTheAppPage() {
           ))}
         </ul>
 
-        {!inStores ? (
+        {showTestBuild ? (
           <section aria-labelledby="try-it" className="mt-12 rounded-[var(--radius-card)] border border-line bg-surface p-6 shadow-[var(--shadow-card)] sm:p-8">
             <div className="flex items-start gap-3">
               <FlaskConical className="mt-1 h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
               <div>
                 <h2 id="try-it" className="text-xl font-bold tracking-tight">
-                  Try it now with Expo Go
+                  Try the test build with Expo Go
                 </h2>
                 <p className="mt-1 text-ink-2">
-                  The app isn&rsquo;t in the App Store or Google Play yet. While it&rsquo;s in testing, you can run it through Expo Go, a free app for trying apps before they launch.
+                  Only system administrators see this. Everyone else sees that the app is on its way, and no app prompts, until you add a store link in{" "}
+                  <Link href="/system#app" className="font-medium text-brand-600 hover:underline">
+                    System settings
+                  </Link>
+                  .
                 </p>
               </div>
             </div>
@@ -186,44 +210,63 @@ export default async function GetTheAppPage() {
                   </a>
                 </div>
               </li>
-              <li className="rounded-xl bg-muted/70 p-4">
+              <li className="min-w-0 rounded-xl bg-muted/70 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-brand">Step 2</p>
-                <p className="mt-1 font-semibold text-ink">Open the test link</p>
+                <p className="mt-1 font-semibold text-ink">Start it from the repository</p>
                 <p className="mt-1 text-sm text-ink-2">
-                  Ask the {PLATFORM.name} team at{" "}
-                  <a href={`mailto:${PLATFORM.supportEmail}?subject=${encodeURIComponent("Wildcat Clubs app test link")}`} className="font-medium text-brand-600 hover:underline">
-                    {PLATFORM.supportEmail}
-                  </a>{" "}
-                  for the current test link or QR code. Opening it on your phone launches the app in Expo Go.
+                  Point it at this server. On a phone, &ldquo;localhost&rdquo; means the phone itself, so for a server on your computer use the computer&rsquo;s network address.
                 </p>
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-[#1d1923] px-3 py-2 font-mono text-xs text-[#f4f2f7]">
+                  <code>{"cd apps/mobile\nnpm install\nEXPO_PUBLIC_API_URL=http://192.168.1.23:3100 \\\n  npx expo start"}</code>
+                </pre>
               </li>
               <li className="rounded-xl bg-muted/70 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-brand">Step 3</p>
-                <p className="mt-1 font-semibold text-ink">Sign in</p>
+                <p className="mt-1 font-semibold text-ink">Scan and sign in</p>
                 <p className="mt-1 text-sm text-ink-2">
-                  Use your <span className="font-medium">@{INSTITUTION.studentEmailDomain}</span> (or <span className="font-medium">@{INSTITUTION.staffEmailDomain}</span>) account. Your clubs and calendar are already there.
+                  With your phone on the same Wi-Fi, scan the QR code Expo prints (the Camera app on iPhone, Expo Go on Android).{" "}
+                  {personasEnabled()
+                    ? "Then sign in as a test persona: Weber State Google sign-in needs a development build."
+                    : "This server only allows Weber State Google sign-in, which needs a development build rather than Expo Go."}
                 </p>
               </li>
             </ol>
-            <details className="mt-6 rounded-xl border border-line px-4 py-3 text-sm">
-              <summary className="cursor-pointer font-medium text-ink">Running the app yourself (for developers)</summary>
-              <div className="mt-3 space-y-2 text-ink-2">
-                <p>From the repository, start the Expo dev server and scan the QR code it prints with Expo Go (your phone and computer need to be on the same network):</p>
-                <pre className="overflow-x-auto rounded-lg bg-[#1d1923] px-3 py-2 font-mono text-xs text-[#f4f2f7]">
-                  <code>{"cd apps/mobile\nnpm install\nnpx expo start"}</code>
-                </pre>
-              </div>
-            </details>
+            <p className="mt-4 text-sm text-ink-3">
+              The full steps, including development builds, are in <code className="font-mono text-xs">apps/mobile/README.md</code>.
+            </p>
           </section>
         ) : null}
 
-        <Callout tone="brand" className="mt-10" icon={<Smartphone />} title="No phone handy?">
-          Everything in the app also works on the web. Leaders can add you to a meeting&rsquo;s attendance by hand, and you can follow your clubs from{" "}
-          <Link href={user ? "/dashboard" : "/clubs"} className="font-medium underline underline-offset-2">
-            {user ? "your dashboard" : "the clubs list"}
-          </Link>
-          .
-        </Callout>
+        {inStores ? (
+          <Callout tone="brand" className="mt-10" icon={<Smartphone />} title="No phone handy?">
+            Everything in the app also works on the web. Leaders can add you to a meeting&rsquo;s attendance by hand, and you can follow your clubs from{" "}
+            <Link href={user ? "/dashboard" : "/clubs"} className="font-medium underline underline-offset-2">
+              {user ? "your dashboard" : "the clubs list"}
+            </Link>
+            .
+          </Callout>
+        ) : (
+          <Callout tone="brand" className="mt-10" icon={<ScanLine />} title="You don't need the app to check in">
+            At a meeting, point your phone&rsquo;s camera at the QR code on screen. It opens the check-in page in your browser, and one tap checks you in.{" "}
+            {user ? (
+              <>
+                Your clubs and calendar are on{" "}
+                <Link href="/dashboard" className="font-medium underline underline-offset-2">
+                  your dashboard
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                Find a club on{" "}
+                <Link href="/clubs" className="font-medium underline underline-offset-2">
+                  the clubs list
+                </Link>
+                .
+              </>
+            )}
+          </Callout>
+        )}
       </div>
     </div>
   );

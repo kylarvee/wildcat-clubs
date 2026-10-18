@@ -81,7 +81,6 @@ export async function EventEmbedCard({ eventId, viewer, signInHref }: { eventId:
             {e.title}
           </Link>
           {cancelled ? <Badge tone="danger">Cancelled</Badge> : past ? <Badge>Past event</Badge> : null}
-          {e.status === "DRAFT" ? <Badge tone="warning">Draft</Badge> : null}
           {e.visibility === "MEMBERS" ? <Badge tone="brand">Members only</Badge> : e.visibility === "UNIVERSITY" ? <Badge tone="info">Weber State only</Badge> : null}
         </div>
         <p className="flex items-start gap-1.5 text-sm text-ink-2">

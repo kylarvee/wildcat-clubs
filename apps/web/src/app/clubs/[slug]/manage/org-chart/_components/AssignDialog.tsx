@@ -20,7 +20,7 @@ type Step = "person" | "permissions" | "review";
 /**
  * Put someone in a seat: pick an active member → set their permissions
  * (officers and ambassadors; pre-filled from the seat's defaults) → see the
- * officer requirements that come with it → choose who they replace if the
+ * WSUSA requirements that come with it → choose who they replace if the
  * seat is full → confirm.
  */
 export function AssignDialog({ ctx, seat, people, requirements }: { ctx: ToolContext; seat: SeatInfo; people: PickerPerson[]; requirements: RequirementLike[] }) {
@@ -142,7 +142,7 @@ export function AssignDialog({ ctx, seat, people, requirements }: { ctx: ToolCon
             ) : null}
 
             <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">Officer requirements that come with this role</p>
+              <p className="mb-1.5 text-sm font-medium text-ink">WSUSA requirements that come with this role</p>
               <RequirementList requirements={requirements} roleLabel={seat.roleLabel} />
               {requirements.length ? <p className="mt-2 text-xs text-ink-3">Anything {first} has already completed counts automatically. They&apos;ll get a task for the rest.</p> : null}
             </div>

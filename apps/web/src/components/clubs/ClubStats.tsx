@@ -7,7 +7,7 @@ import { fmtLongDate } from "@/lib/time";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
 import { RetentionChart, type RetentionPointView } from "@/components/clubs/RetentionChart";
-import { pct } from "@/components/clubs/labels";
+import { CLUB_STATUS_LABEL, STANDING_HINT, STANDING_LABEL, pct, standingOf } from "@/components/clubs/labels";
 
 const view = (p: RetentionPoint): RetentionPointView => ({ label: p.label, rate: p.rate, attendees: p.attendees, retained: p.retained, previousAttendees: p.previousAttendees, inProgress: p.inProgress });
 
@@ -36,23 +36,22 @@ export async function ClubStats({ clubId, clubName, retired }: { clubId: string;
     getConfig(),
   ]);
 
+  const standing = standingOf(activity);
   const status = retired
-    ? { value: "Retired", hint: "History is kept on record", tone: "muted" as const }
-    : activity.active
-      ? activity.inPilot
-        ? { value: "Pilot period", hint: activity.pilotEndsAt ? `New club — counts as active through ${fmtLongDate(activity.pilotEndsAt)}` : "New club — counts as active while it gets going", tone: "good" as const }
-        : { value: "Active", hint: `${activity.heldEventsCurrentTerm} ${activity.heldEventsCurrentTerm === 1 ? "event" : "events"} held this term`, tone: "good" as const }
-      : activity.reasons.length
-        ? { value: "Inactive", hint: activity.reasons[0], tone: "muted" as const }
-        : { value: "—", hint: "Not enough history yet", tone: "muted" as const };
+    ? { value: CLUB_STATUS_LABEL.RETIRED, hint: "History is kept on record", tone: "muted" as const }
+    : standing === "pilot"
+      ? { value: STANDING_LABEL.pilot, hint: activity.pilotEndsAt ? `New club — counts as active through ${fmtLongDate(activity.pilotEndsAt)}` : "New club — counts as active while it gets going", tone: "good" as const }
+      : standing === "active"
+        ? { value: STANDING_LABEL.active, hint: `${activity.heldEventsCurrentTerm} ${activity.heldEventsCurrentTerm === 1 ? "event" : "events"} held this term`, tone: "good" as const }
+        : { value: STANDING_LABEL.inactive, hint: activity.reasons[0] ?? STANDING_HINT.inactive, tone: "muted" as const };
 
   return (
     <Card className="p-4 sm:p-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile icon={<UserCheck />} label="Active members" value={activity.activeMembers.toLocaleString("en-US")} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
+        <Tile icon={<UserCheck />} label="Attending members" value={activity.activeMembers.toLocaleString("en-US")} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
         <Tile icon={<Users />} label="Registered members" value={activity.registeredMembers.toLocaleString("en-US")} hint="Students who've joined" />
         <Tile icon={<Repeat />} label="Retention" value={pct(metrics.retentionRate)} hint="Last month's attendees who came back" />
-        <Tile icon={<Activity />} label="Club status" value={status.value} hint={status.hint} tone={status.tone} />
+        <Tile icon={<Activity />} label="Activity standing" value={status.value} hint={status.hint} tone={status.tone} />
       </div>
       <div className="mt-5 border-t border-line pt-4">
         <RetentionChart month={month.map(view)} quarter={quarter.map(view)} clubName={clubName} />

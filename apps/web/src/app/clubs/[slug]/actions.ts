@@ -17,7 +17,7 @@ export async function leaveClubAction(clubId: string) {
   return result;
 }
 
-/** "Not now" on the get-the-app prompt. */
+/** "Not now" on the "You're in!" app prompt: snoozes every app prompt for 30 days (shouldPromptForApp). */
 export async function dismissAppPromptAction() {
   return act((actor) => dismissAppPrompt(actor));
 }

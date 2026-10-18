@@ -14,15 +14,16 @@ import { registerClub, setClubSubscription } from "@/app/clubs/actions";
 import { leaveClubAction } from "@/app/clubs/[slug]/actions";
 
 /**
- * Register / Subscribe / Leave controls, shared by club cards and the club
- * page hero. State comes from the server; clicks update optimistically and
- * settle to whatever the server re-renders (useOptimistic), so a failed
- * request snaps back on its own.
+ * Register / Follow / Leave controls, shared by club cards and the club
+ * page hero. Following a club's calendar is the CalendarSubscription row
+ * (calendar feeds keep the word "Subscribe"). State comes from the server;
+ * clicks update optimistically and settle to whatever the server re-renders
+ * (useOptimistic), so a failed request snaps back on its own.
  */
 
 export type MembershipView = { member: boolean; pending: boolean };
 
-/** Log in, then come back to the club page; `then` finishes the click there (?register=1 / ?subscribe=1). */
+/** Sign in, then come back to the club page; `then` finishes the click there (?register=1 / ?subscribe=1). */
 export function loginHref(slug: string, then?: "register" | "subscribe") {
   return `/login?next=${encodeURIComponent(`/clubs/${slug}${then ? `?${then}=1` : ""}`)}`;
 }
@@ -71,7 +72,7 @@ export function RegisterButton({ clubId, clubName, slug, gated, member, pending,
           if (!celebrate(clubName)) toast.success(`You're in! Welcome to ${clubName}.`, { description: "Their events are on your calendar now." });
           break;
         case "PENDING":
-          toast.success("Request sent", { description: `A ${clubName} leader will review it, and we'll let you know.` });
+          toast.success("Request pending", { description: `A ${clubName} leader will review it, and we'll let you know.` });
           break;
         case "ALREADY_MEMBER":
           toast(`You're already a member of ${clubName}.`);
@@ -154,11 +155,11 @@ export function SubscribeToggle({ clubId, clubName, slug, subscribed, signedIn, 
       const r = await setClubSubscription(clubId, next);
       after?.();
       if (!r.ok) toast.error(r.error);
-      else toast.success(next ? `${clubName} is on your calendar` : `${clubName} is off your calendar`);
+      else toast.success(next ? `You're following ${clubName}'s calendar` : `You unfollowed ${clubName}'s calendar`);
     });
   }
 
-  // Signed-out visitors who clicked "Log in to add this calendar" come back with
+  // Signed-out visitors who clicked "Sign in to follow this calendar" come back with
   // ?subscribe=1 (only the hero switch links there). Read from the URL so the page
   // needn't pass it down.
   useEffect(() => {
@@ -167,7 +168,7 @@ export function SubscribeToggle({ clubId, clubName, slug, subscribed, signedIn, 
     ran.current = true;
     const strip = () => stripParam(router, "subscribe");
     if (subscribed) {
-      toast(`${clubName} is already on your calendar.`);
+      toast(`You already follow ${clubName}'s calendar.`);
       strip();
     } else {
       toggle(true, strip);
@@ -180,18 +181,22 @@ export function SubscribeToggle({ clubId, clubName, slug, subscribed, signedIn, 
     if (!signedIn) {
       return (
         <Link href={loginHref(slug, "subscribe")} className={cn("inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline", className)}>
-          <CalendarPlus className="h-4 w-4" aria-hidden="true" /> Log in to add this calendar to yours
+          <CalendarPlus className="h-4 w-4" aria-hidden="true" /> Sign in to follow this calendar
         </Link>
       );
     }
     return (
       <div className={cn("flex items-center gap-3 rounded-xl border border-line bg-surface/80 px-3 py-2", className)}>
         <CalendarPlus className="h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
-        <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-          <span className="block text-sm font-medium text-ink">On my calendar</span>
-          <span className="block text-xs text-ink-3">{on ? "Their events show on your calendar and feeds" : "Follow their events without joining"}</span>
-        </label>
-        <Switch id={id} checked={on} onCheckedChange={toggle} disabled={busy} aria-label={`Show ${clubName} events on my calendar`} />
+        <div className="min-w-0 flex-1">
+          <label htmlFor={id} className="block cursor-pointer text-sm font-medium text-ink">
+            Follow this calendar
+          </label>
+          <p id={`${id}-hint`} className="text-xs text-ink-3">
+            {on ? "Following: its events show on your calendar and feeds" : "See its events on your calendar without joining"}
+          </p>
+        </div>
+        <Switch id={id} checked={on} onCheckedChange={toggle} disabled={busy} aria-describedby={`${id}-hint`} />
       </div>
     );
   }
@@ -204,11 +209,13 @@ export function SubscribeToggle({ clubId, clubName, slug, subscribed, signedIn, 
       onClick={() => toggle(!on)}
       disabled={busy}
       aria-pressed={on}
-      aria-label={on ? `Unsubscribe from ${clubName}'s calendar` : `Subscribe to ${clubName}'s calendar`}
+      // Starts with the visible word, so voice control ("click Follow") still finds it.
+      aria-label={`${on ? "Following" : "Follow"} ${clubName}'s calendar`}
+      title={on ? `Unfollow ${clubName}'s calendar` : undefined}
       className={className}
     >
       {on ? <BellRing className="h-4 w-4" aria-hidden="true" /> : <Bell className="h-4 w-4" aria-hidden="true" />}
-      {on ? "Subscribed" : "Subscribe"}
+      {on ? "Following" : "Follow"}
     </Button>
   );
 }

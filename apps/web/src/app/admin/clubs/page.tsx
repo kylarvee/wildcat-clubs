@@ -21,9 +21,10 @@ import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
 import { StartAmbassadorProgram } from "@/components/founding/admin/StartAmbassadorProgram";
 import { ChooseAdvisorDialog } from "@/components/ambassadors/ChooseAdvisorDialog";
-import { JOIN_LABEL, STATUS_LABEL, STATUS_TONE, SUCCESSION_LABEL, TYPE_LABEL } from "@/components/founding/copy";
+import { SUCCESSION_LABEL } from "@/components/founding/copy";
+import { CLUB_STATUS_LABEL as STATUS_LABEL, CLUB_STATUS_TONE as STATUS_TONE, CLUB_TYPE_LABEL as TYPE_LABEL, JOIN_POLICY_LABEL as JOIN_LABEL } from "@/lib/labels/clubs";
 
-export const metadata: Metadata = { title: "Club reviews" };
+export const metadata: Metadata = { title: "Club approvals" };
 
 const TABS = [
   { key: "submissions", label: "Submissions" },
@@ -53,8 +54,8 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
 
   return (
     <div>
-      <PageHeader title="Club reviews" description="New clubs waiting for WSUSA recognition, department requests, custom constitutions, and every club's status." />
-      <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-line" aria-label="Review queues">
+      <PageHeader title="Club approvals" description="New clubs waiting for WSUSA recognition, department requests, custom constitutions, and every club's status." />
+      <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-line" aria-label="Approval queues">
         {TABS.map((t) => (
           <Link
             key={t.key}
@@ -93,7 +94,7 @@ async function Submissions() {
       decisions: { where: { action: "CHANGES_REQUESTED" }, select: { id: true } },
     },
   });
-  if (!clubs.length) return <EmptyState title="No clubs waiting for review" description="New submissions show up here, oldest first." />;
+  if (!clubs.length) return <EmptyState title="No clubs in WSUSA review" description="New submissions show up here, oldest first." />;
   return (
     <Table>
       <THead>

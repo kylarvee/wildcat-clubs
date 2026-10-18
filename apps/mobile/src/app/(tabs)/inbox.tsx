@@ -18,11 +18,11 @@ import { space, useColors } from '@/theme';
 export default function InboxScreen() {
   const { status, user } = useSession();
   if (status === 'loading') return <LoadingView />;
-  if (!user) return <SignInPrompt icon="inbox" title="Your notifications" body="Sign in to see join approvals, new announcements, event reminders and more." />;
+  if (!user) return <SignInPrompt icon="bell" title="Your notifications" body="Sign in to see join approvals, new announcements, event reminders and more." />;
   return <Inbox userId={user.id} />;
 }
 
-/** Notifications, unread first. Tapping one marks it read and opens what it's about. */
+/** The Notifications tab (route `inbox`): unread first. Tapping one marks it read and opens what it's about. */
 function Inbox({ userId }: { userId: string }) {
   const c = useColors();
   const navigation = useNavigation();

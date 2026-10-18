@@ -7,6 +7,7 @@ import type { Capability, ClubAccess } from "@/lib/authz";
 import { getConfig } from "@/lib/config";
 import { db } from "@/lib/db";
 import { clubActivity } from "@/lib/metrics";
+import { STANDING_HINT, STANDING_LABEL, STANDING_TONE, standingOf } from "@/lib/labels/clubs";
 import { DAY_MS, fmtLongDate, fmtRange } from "@/lib/time";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -34,7 +35,8 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
   const now = new Date();
   const base = `/clubs/${club.slug}/manage`;
   const [activity, cfg, pendingJoins, pendingCohosts, upcoming, tasks, taskCount] = await Promise.all([
-    clubActivity(club.id, now),
+    // Same call as the workspace header's standing, so the two always agree (and share one computation).
+    clubActivity(club.id),
     getConfig(),
     db.membership.count({ where: { clubId: club.id, status: "PENDING" } }),
     db.eventCohost.count({ where: { clubId: club.id, status: "PENDING" } }),
@@ -54,27 +56,23 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
 
   // Registered members come from lib/metrics (students only), so this matches the club page.
   const members = activity.registeredMembers;
-  const statusLabel = activity.inPilot ? "Pilot period" : activity.active ? "Active" : "Inactive";
-  const statusHint = activity.inPilot && activity.pilotEndsAt ? `Counts as active through ${fmtLongDate(activity.pilotEndsAt)}` : activity.active ? "Meeting WSUSA's activity standard" : "Not meeting the activity standard yet";
+  const standing = standingOf(activity);
+  const standingHint = standing === "pilot" && activity.pilotEndsAt ? `Counts as active through ${fmtLongDate(activity.pilotEndsAt)}` : STANDING_HINT[standing];
   const next = upcoming[0];
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Members" value={members} hint={pendingJoins ? `${pendingJoins} waiting to join` : "Registered members"} />
-        <Stat label="Active members" value={activity.activeMembers} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
-        <Stat label="Next 30 days" value={upcoming.length} hint={next ? `Next: ${next.event.title}` : "No events scheduled"} />
+        <Stat label="Attending members" value={activity.activeMembers} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
+        <Stat label="Coming up" value={upcoming.length} hint={next ? `In the next 30 days. Next: ${next.event.title}` : "Nothing in the next 30 days"} />
         <Stat label="Open to-dos" value={taskCount} hint={taskCount ? "Waiting on your leaders" : "All caught up"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-6">
           <Card>
-            <CardHeader
-              title="Club status"
-              action={<Badge tone={activity.inPilot ? "info" : activity.active ? "success" : "warning"}>{statusLabel}</Badge>}
-              description={statusHint}
-            />
+            <CardHeader title="Activity standing" action={<Badge tone={STANDING_TONE[standing]}>{STANDING_LABEL[standing]}</Badge>} description={standingHint} />
             <CardBody className="space-y-2 text-sm">
               <p className="text-ink-2">
                 {activity.heldEventsCurrentTerm} event{activity.heldEventsCurrentTerm === 1 ? "" : "s"} held this term · {activity.heldEventsPreviousTerm} last term · {members} registered members

@@ -17,12 +17,12 @@ type Decision = "APPROVE" | "PARTIAL" | "DENY";
 const OPTIONS: { value: Decision; label: string; hint: (requested: string) => string; icon: typeof CheckCircle2 }[] = [
   { value: "APPROVE", label: "Approve", hint: (r) => `Grant the full ${r}.`, icon: CheckCircle2 },
   { value: "PARTIAL", label: "Partly approve", hint: () => "Grant a smaller amount and explain what it covers.", icon: Scale },
-  { value: "DENY", label: "Deny", hint: () => "Grant nothing and tell the club why.", icon: CircleSlash },
+  { value: "DENY", label: "Don't approve", hint: () => "Grant nothing and tell the club why.", icon: CircleSlash },
 ];
 
 /**
  * WSUSA's decision on a submitted request: approve in full, approve part of
- * it (amount + note), or deny (note). The club's budget holders hear right
+ * it (amount + note), or not approve it (note). The club's budget holders hear right
  * away; the approval task closes for every admin.
  */
 export function DecisionPanel({ requestId, clubName, title, requestedCents, sourceLabel }: { requestId: string; clubName: string; title: string; requestedCents: number; sourceLabel: string }) {
@@ -52,9 +52,9 @@ export function DecisionPanel({ requestId, clubName, title, requestedCents, sour
       ? `Approve ${requested} for ${clubName}?`
       : decision === "PARTIAL"
         ? `Approve ${Number.isFinite(amountCents) ? fmtMoney(amountCents) : "part"} of ${requested}?`
-        : `Deny “${title}”?`;
+        : `Don't approve “${title}”?`;
   const submitLabel =
-    decision === "APPROVE" ? `Approve ${requested}` : decision === "PARTIAL" ? `Approve ${Number.isFinite(amountCents) && amountCents > 0 ? fmtMoney(amountCents) : "part"}` : "Deny request";
+    decision === "APPROVE" ? `Approve ${requested}` : decision === "PARTIAL" ? `Approve ${Number.isFinite(amountCents) && amountCents > 0 ? fmtMoney(amountCents) : "part"}` : "Don't approve";
 
   return (
     <form
@@ -160,7 +160,7 @@ export function DecisionPanel({ requestId, clubName, title, requestedCents, sour
             ? `${clubName} will see your note. Their cost lines unlock so they can change them and ask again.`
             : `From ${sourceLabel}. ${clubName} is notified right away; next, create the invoice so the money moves through the university finance system.`
         }
-        confirmLabel={decision === "DENY" ? "Deny request" : "Approve"}
+        confirmLabel={decision === "DENY" ? "Don't approve" : "Approve"}
         danger={decision === "DENY"}
         onConfirm={() => {
           void run(
@@ -171,7 +171,7 @@ export function DecisionPanel({ requestId, clubName, title, requestedCents, sour
                 amount: decision === "PARTIAL" ? Number(amount) : null,
                 note: note.trim() || null,
               }),
-            { success: decision === "DENY" ? "Request denied. The club has been told." : "Decision saved. The club has been told." },
+            { success: decision === "DENY" ? "Marked not approved. The club has been told." : "Decision saved. The club has been told." },
           );
         }}
       />

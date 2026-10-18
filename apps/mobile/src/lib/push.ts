@@ -29,7 +29,7 @@ export function pushProjectId(): string | null {
 export function pushUnavailableReason(): string | null {
   if (Platform.OS === 'web') return 'Push notifications come through the phone app, not the web preview.';
   if (Platform.OS === 'android' && isRunningInExpoGo()) return "Expo Go on Android can't receive push notifications. A development or store build can.";
-  if (!pushProjectId()) return "This build isn't linked to an EAS project yet, so it can't receive push notifications. Your inbox still updates.";
+  if (!pushProjectId()) return "This build isn't linked to an EAS project yet, so it can't receive push notifications. Your notifications in the app still update.";
   return null;
 }
 

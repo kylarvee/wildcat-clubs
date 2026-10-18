@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import FullCalendar from "@fullcalendar/react";
@@ -21,22 +20,15 @@ import { cn } from "@/components/ui/cn";
 import { CalendarToolbar, calendarSource, campusNow, isNarrowScreen, OccurrenceDetails, useIsClient, type ViewName } from "@/components/calendar/shared";
 import { WhenFields } from "@/components/events/WhenFields";
 import { LocationFields, EMPTY_LOCATION, type BuildingOption, type LocationValue } from "@/components/events/LocationFields";
-import { CohostPanel, type IdeaRow, type IncomingCohost, type OutgoingCohost } from "@/components/events/BuilderPanels";
+import { CohostPanel, type IncomingCohost, type OutgoingCohost } from "@/components/events/BuilderPanels";
 import { defaultWhen, toSchedule, whenFrom, type WhenValue } from "@/components/events/when";
 import { EVENT_KINDS, KIND_LABEL, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { fromFakeUtc, fromInputs } from "@/lib/events/wallclock";
 import { fmtDate, fmtTime } from "@/lib/time";
 import type { CalendarEventProps, TermJson } from "@/lib/events/types";
-import {
-  cancelOccurrenceAction,
-  createEventAction,
-  moveEventAction,
-  restoreOccurrenceAction,
-  scheduleIdeaAction,
-  setOccurrenceRoomAction,
-} from "@/app/events/actions";
+import { cancelOccurrenceAction, createEventAction, moveEventAction, restoreOccurrenceAction, setOccurrenceRoomAction } from "@/app/events/actions";
 
-export type { IdeaRow, IncomingCohost, OutgoingCohost } from "@/components/events/BuilderPanels";
+export type { IncomingCohost, OutgoingCohost } from "@/components/events/BuilderPanels";
 
 export type EventsBuilderProps = {
   /** "university" = admin trainings and university events (clubId null). */
@@ -44,13 +36,11 @@ export type EventsBuilderProps = {
   club: { id: string; slug: string; name: string } | null;
   /** The builder's own URL (editor pages live at `${basePath}/new` and `${basePath}/<id>`). */
   basePath: string;
-  ideas: IdeaRow[];
   incoming: IncomingCohost[];
   outgoing: OutgoingCohost[];
   buildings: BuildingOption[];
   terms: TermJson[];
   googleLive: boolean;
-  initialTab?: "ideas" | "cohosts";
   /** Campus date to open on ("2026-10-20"). */
   initialDate?: string;
 };
@@ -59,13 +49,13 @@ type Selected = { title: string; p: CalendarEventProps };
 type QuickState = { when: WhenValue; title: string; kind: EventKind; visibility: Visibility; location: LocationValue };
 
 /**
- * The Events Builder: a Google-Calendar-like editable calendar plus the idea
- * list and co-host inbox. Select a time to quick-create, click a meeting for
+ * The Events Builder: a Google-Calendar-like editable calendar plus the
+ * co-host inbox. Select a time to quick-create, click a meeting for
  * details and actions, drag one-time events to reschedule. Club mode needs
  * the "events" capability; university mode (admin trainings) needs admin.trainings.
  */
 export function EventsBuilder(props: EventsBuilderProps) {
-  const { mode, club, basePath, ideas, incoming, outgoing, buildings, terms, googleLive } = props;
+  const { mode, club, basePath, incoming, outgoing, buildings, terms, googleLive } = props;
   const isClient = useIsClient();
   const isClub = mode === "club" && club !== null;
   const [api, setApi] = useState<CalendarApi | null>(null);
@@ -152,7 +142,7 @@ export function EventsBuilder(props: EventsBuilderProps) {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
-      {/* The calendar comes first on phones; on wide screens the idea/co-host panel sits on the left, like Google Calendar. */}
+      {/* The calendar comes first on phones; on wide screens the co-host panel sits on the left, like Google Calendar. */}
       <div className="order-1 min-w-0 xl:order-2">
         {!isClient ? (
           <div aria-hidden className="space-y-3">

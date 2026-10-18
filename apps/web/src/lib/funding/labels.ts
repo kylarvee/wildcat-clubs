@@ -8,7 +8,7 @@ export const SOURCE_ORDER: FundingSource[] = ["UNIVERSITY", "WSUSA", "COLLEGE", 
 
 export const FUNDING_STATUS_LABEL: Record<FundingStatus, string> = {
   DRAFT: "Draft",
-  SUBMITTED: "In review",
+  SUBMITTED: "In WSUSA review",
   APPROVED: "Approved",
   PARTIALLY_APPROVED: "Partly approved",
   DENIED: "Not approved",

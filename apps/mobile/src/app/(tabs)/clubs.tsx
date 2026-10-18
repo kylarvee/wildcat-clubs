@@ -93,10 +93,12 @@ export default function ClubsScreen() {
 function ClubRow({ club }: { club: MClubListItem }) {
   const c = useColors();
   const v = club.viewer;
-  const status = v?.leader ? 'Leader' : v?.member ? 'Member' : v?.pending ? 'Requested' : v?.subscribed ? 'Following' : null;
+  const status = v?.leader ? 'Leader' : v?.member ? 'Member' : v?.pending ? 'Request pending' : v?.subscribed ? 'Following' : null;
   const m = club.metrics;
+  // Standing, in the web's words; only shown when it isn't plain "Active".
+  const standing = m.hasMetrics && m.inPilot ? 'Pilot period' : m.hasMetrics && !m.isActive ? 'Inactive' : null;
   const facts = [
-    m.hasMetrics ? `${m.activeMembers} active` : null,
+    m.hasMetrics ? `${m.activeMembers} attending` : null,
     m.avgRating != null && m.reviewCount > 0 ? `★ ${m.avgRating.toFixed(1)}` : null,
     club.placement,
   ].filter(Boolean);
@@ -106,7 +108,7 @@ function ClubRow({ club }: { club: MClubListItem }) {
     <Pressable
       onPress={() => router.push({ pathname: '/club/[slug]', params: { slug: club.slug } })}
       accessibilityRole="button"
-      accessibilityLabel={[club.name, status, club.shortDescription, foundIn, ...(club.reasons ?? []), facts.join(', ')].filter(Boolean).join('. ')}
+      accessibilityLabel={[club.name, status, standing, club.shortDescription, foundIn, ...(club.reasons ?? []), facts.join(', ')].filter(Boolean).join('. ')}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.surfaceAlt }]}>
       <ClubLogo name={club.name} logoUrl={club.logoUrl} color={club.logoColor} size={48} />
       <View style={styles.body}>
@@ -114,7 +116,7 @@ function ClubRow({ club }: { club: MClubListItem }) {
           <Text variant="label" numberOfLines={1} style={styles.flex}>
             {club.name}
           </Text>
-          {status ? <Badge label={status} tone={status === 'Requested' ? 'warning' : status === 'Following' ? 'neutral' : 'brand'} /> : null}
+          {status ? <Badge label={status} tone={status === 'Request pending' ? 'warning' : status === 'Following' ? 'neutral' : 'brand'} /> : null}
         </View>
         {club.shortDescription ? (
           <Text variant="small" tone="ink2" numberOfLines={2}>
@@ -148,7 +150,7 @@ function ClubRow({ club }: { club: MClubListItem }) {
         <Text variant="caption" tone="ink3" numberOfLines={1}>
           {facts.join(' · ')}
         </Text>
-        {m.hasMetrics && (m.inPilot || !m.isActive) ? <Badge label={m.inPilot ? 'New club' : 'Not active right now'} tone="neutral" /> : null}
+        {standing ? <Badge label={standing} tone={standing === 'Inactive' ? 'warning' : 'neutral'} /> : null}
       </View>
     </Pressable>
   );

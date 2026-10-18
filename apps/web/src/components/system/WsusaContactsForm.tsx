@@ -29,8 +29,8 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 /**
  * The WSUSA office and reviewers founders and funding requesters see. They
- * ship as placeholders, so the section stays flagged until a sysadmin saves
- * or confirms them.
+ * ship with what weber.edu publishes (lib/config), which WSUSA hasn't
+ * confirmed, so the section stays flagged until a sysadmin saves or confirms them.
  */
 export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged }: { office: Office; reviewers: Reviewer[]; placeholder: boolean; lastChanged: string | null }) {
   const [savedOffice, setSavedOffice] = useState(() => toDraft(office));
@@ -141,7 +141,7 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
             WSUSA contacts
             {flagged ? (
               <Badge tone="warning">
-                <TriangleAlert className="h-3 w-3" aria-hidden /> Placeholder
+                <TriangleAlert className="h-3 w-3" aria-hidden /> Not confirmed
               </Badge>
             ) : (
               <Badge tone="success">
@@ -155,8 +155,10 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
       <form ref={formRef} onSubmit={submit} noValidate aria-busy={pending}>
         <div className="space-y-6 px-5 py-4">
           {flagged ? (
-            <Callout tone="warning" title="Placeholder details — confirm them with WSUSA before launch">
-              <p>These shipped with the platform and nobody has checked them yet. Confirm the office location, hours, email, phone number and reviewers with WSUSA, then save your corrections.</p>
+            <Callout tone="warning" title="Not confirmed with WSUSA yet">
+              <p>
+                These came from Student Involvement &amp; Leadership&apos;s pages on weber.edu. Check the office, hours, email, phone number, reviewers and review time with WSUSA, then save your corrections, or confirm them as they are.
+              </p>
               {!dirty ? (
                 <Button size="sm" variant="outline" className="mt-2 bg-surface" onClick={confirm} disabled={confirming}>
                   {confirming ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <BadgeCheck className="h-4 w-4" aria-hidden />}

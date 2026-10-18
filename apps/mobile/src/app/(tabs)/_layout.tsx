@@ -12,7 +12,7 @@ function tabIcon(name: IconName) {
   return TabIcon;
 }
 
-/** Six tabs: Home, Scan, Clubs, Calendar, Inbox, Me. */
+/** Six tabs: Home, Scan, Clubs, Calendar, Notifications (the `inbox` route), Me. */
 export default function TabsLayout() {
   const c = useColors();
   const { me, status } = useSession();
@@ -45,10 +45,10 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="inbox"
         options={{
-          title: 'Inbox',
-          tabBarIcon: tabIcon('inbox'),
+          title: 'Notifications',
+          tabBarIcon: tabIcon('bell'),
           tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined,
-          tabBarAccessibilityLabel: unread > 0 ? `Inbox, ${unread} unread` : 'Inbox',
+          tabBarAccessibilityLabel: unread > 0 ? `Notifications, ${unread} unread` : 'Notifications',
         }}
       />
       <Tabs.Screen name="me" options={{ title: 'Me', tabBarIcon: tabIcon('me') }} />

@@ -42,7 +42,7 @@ export function requestTimeline(r: TimelineInput): TimelineStep[] {
       steps.push({ key: "decision", label: "WSUSA decides", state: "upcoming", tone: "neutral", at: null });
       break;
     case "SUBMITTED":
-      steps.push({ key: "decision", label: "Waiting for a decision", state: "current", tone: "neutral", at: null, detail: "WSUSA staff are reviewing it." });
+      steps.push({ key: "decision", label: "In WSUSA review", state: "current", tone: "neutral", at: null, detail: "WSUSA staff are reviewing it." });
       break;
     case "APPROVED":
       steps.push({ key: "decision", label: "Approved", state: "done", tone: "success", at: r.decidedAt, by: r.decidedBy });

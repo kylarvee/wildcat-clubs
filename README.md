@@ -37,7 +37,7 @@ npm --prefix apps/web run db:reset
 npm --prefix apps/web run dev -- --port 3100
 ```
 
-Open http://localhost:3100 and log in as any **test persona** (new student, member, officer, VP,
+Open http://localhost:3100 and sign in as any **test persona** (new student, member, officer, VP,
 president, ambassador, founder, alumni, advisor, invited advisor, admin, sysadmin). Each is a seeded
 account with real history — see `apps/web/prisma/seed/PERSONAS.md` for what to try with each.
 

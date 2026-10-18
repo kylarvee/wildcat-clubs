@@ -430,7 +430,7 @@ export async function updateNotificationSettings(actor: Actor | null, input: unk
   return v;
 }
 
-/** "Not now" on the get-the-app prompt — permanent for this person. */
+/** "Not now" on a get-the-app prompt. The prompts stay away for 30 days from this time (lib/clubs/queries shouldPromptForApp). */
 export async function dismissAppPrompt(actor: Actor | null) {
   assertSignedIn(actor);
   await db.user.update({ where: { id: actor.id }, data: { appPromptDismissedAt: new Date() } });
@@ -466,9 +466,9 @@ async function graduate(userId: string, graduatedAt: Date, byId: string) {
   const ended = await endAllRolesForUser(user.id, "GRADUATED", byId);
   const [, tasks] = await db.$transaction([
     db.user.update({ where: { id: user.id }, data: { status: "ALUMNI", graduatedAt } }),
-    // Officer requirements and club to-dos belong to roles and memberships that just ended.
+    // WSUSA requirements, club tests and club to-dos belong to roles and memberships that just ended.
     db.task.updateMany({
-      where: { assigneeType: "USER", assigneeId: user.id, status: "OPEN", kind: { in: ["REQUIREMENT", "CLUB"] } },
+      where: { assigneeType: "USER", assigneeId: user.id, status: "OPEN", kind: { in: ["REQUIREMENT", "TEST", "CLUB"] } },
       data: { status: "CANCELLED", completedAt: new Date(), completedById: byId },
     }),
   ]);

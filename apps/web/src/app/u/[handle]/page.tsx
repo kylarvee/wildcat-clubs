@@ -359,7 +359,7 @@ function SignedOut({ handle }: { handle: string }) {
           To protect student information, profiles are only visible when you&apos;re signed in with a Weber State account — @{INSTITUTION.studentEmailDomain} for students or @{INSTITUTION.staffEmailDomain} for faculty and staff.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <ButtonLink href={`/login?next=${encodeURIComponent(next)}`}>Log in to see this profile</ButtonLink>
+          <ButtonLink href={`/login?next=${encodeURIComponent(next)}`}>Sign in to see this profile</ButtonLink>
           <ButtonLink href="/clubs" variant="outline">
             Browse clubs
           </ButtonLink>

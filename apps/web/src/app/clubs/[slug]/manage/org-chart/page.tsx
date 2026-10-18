@@ -50,6 +50,10 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
   ]);
   const holders = data.seats.flatMap((s) => s.holders);
   const training = club.status === "APPROVED" ? await trainingStatusFor(holders, club.approvedAt) : new Map<string, "pending" | "overdue">();
+  // A requirement that's a form reads "Fill out", not "Pass".
+  const formIds = new Set(
+    requirements.length ? (await db.roleRequirement.findMany({ where: { id: { in: requirements.map((r) => r.id) }, test: { isForm: true } }, select: { id: true } })).map((r) => r.id) : [],
+  );
 
   const ctx: ToolContext = {
     slug: club.slug,
@@ -128,7 +132,11 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
             Presidents, vice presidents, advisors and WSUSA administrators assign roles.{canEditSeats ? " You can edit seats and responsibilities." : ""}
           </Callout>
         ) : access.role === "VP" && !full ? (
-          <Callout tone="info">As Vice President you can assign officers and ambassadors. Presidents and vice presidents are named by the President or the advisor.</Callout>
+          <Callout tone="info">
+            {club.type === "COLLEGE_AMBASSADORS"
+              ? "As Vice President you can assign officers and ambassadors. Presidents and vice presidents are named by the President or the advisor."
+              : "As Vice President you can assign officers and set the permissions of a college ambassador placed here. Presidents and vice presidents are named by the President or the advisor, and only the college's ambassador program fills the College Ambassador seat."}
+          </Callout>
         ) : null}
 
         {data.seats.length === 0 ? (
@@ -243,7 +251,7 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
                               triggerClassName="w-full"
                             />
                           ) : null}
-                          <AssignDialog ctx={ctx} seat={info} people={people} requirements={requirements.filter((r) => r.appliesTo.includes(s.role))} />
+                          <AssignDialog ctx={ctx} seat={info} people={people} requirements={requirements.filter((r) => r.appliesTo.includes(s.role)).map((r) => ({ ...r, isForm: formIds.has(r.id) }))} />
                         </div>
                       ) : null
                     }

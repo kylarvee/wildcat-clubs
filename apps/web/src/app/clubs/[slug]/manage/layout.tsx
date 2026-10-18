@@ -2,21 +2,26 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { ROLE_LABEL } from "@/lib/authz";
+import { clubActivity } from "@/lib/metrics";
+import { CLUB_STATUS_LABEL, CLUB_STATUS_TONE, STANDING_HINT, STANDING_LABEL, STANDING_TONE, standingOf } from "@/lib/labels/clubs";
 import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/layout";
 import { WorkspaceNav, type WorkspaceLink } from "@/components/workspace/WorkspaceNav";
+import { PausedBanner } from "@/components/roles/PausedBanner";
 
-const STATUS_TONE = { DRAFT: "neutral", SUBMITTED: "info", CHANGES_REQUESTED: "warning", APPROVED: "success", REJECTED: "danger", RETIRED: "neutral" } as const;
-const STATUS_LABEL = { DRAFT: "Draft", SUBMITTED: "In WSUSA review", CHANGES_REQUESTED: "Changes requested", APPROVED: "Active", REJECTED: "Not approved", RETIRED: "Retired" } as const;
-
-/** The club workspace: every leadership tool for one club, gated per capability by lib/authz. */
+/**
+ * The club workspace: every leadership tool for one club, gated per capability by lib/authz.
+ * The header states two separate facts: WSUSA recognition (Club.status) and, once approved,
+ * the activity standing from lib/metrics — an approved club can still be inactive.
+ */
 export default async function ManageLayout({ children, params }: { children: React.ReactNode; params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const { club, access } = await loadClubWorkspace(slug);
+  const { user, club, access } = await loadClubWorkspace(slug);
   const base = `/clubs/${club.slug}/manage`;
   const has = (c: Parameters<typeof access.capabilities.has>[0]) => access.capabilities.has(c);
   const approved = club.status === "APPROVED";
+  const standing = approved ? standingOf(await clubActivity(club.id)) : null;
 
   const links: WorkspaceLink[] = [
     { key: "overview", label: "Overview", href: base },
@@ -44,12 +49,27 @@ export default async function ManageLayout({ children, params }: { children: Rea
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <ClubLogo name={club.name} src={club.logoUrl} color={club.logoColor} size="md" />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-bold tracking-tight">{club.name}</h1>
-            <Badge tone={STATUS_TONE[club.status]}>{STATUS_LABEL[club.status]}</Badge>
-          </div>
-          <p className="text-sm text-ink-3">
+        <div className="min-w-[12rem] flex-1">
+          <h1 className="text-xl font-bold tracking-tight text-balance">{club.name}</h1>
+          <dl className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <div className="flex items-center gap-1.5">
+              <dt className="text-ink-3">Recognition</dt>
+              <dd>
+                <Badge tone={CLUB_STATUS_TONE[club.status]}>{CLUB_STATUS_LABEL[club.status]}</Badge>
+              </dd>
+            </div>
+            {standing ? (
+              <div className="flex items-center gap-1.5">
+                <dt className="text-ink-3">Standing</dt>
+                <dd>
+                  <Badge tone={STANDING_TONE[standing]} title={STANDING_HINT[standing]}>
+                    {STANDING_LABEL[standing]}
+                  </Badge>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="mt-1 text-sm text-ink-3">
             {access.viaPlatform ? `Viewing as ${access.viaPlatform === "SYSADMIN" ? "system administrator" : "administrator"}` : `You're ${access.role ? ROLE_LABEL[access.role] : "a leader"}`}
           </p>
         </div>
@@ -59,11 +79,8 @@ export default async function ManageLayout({ children, params }: { children: Rea
           </Link>
         ) : null}
       </div>
-      {access.suspended ? (
-        <Callout tone="warning" className="mb-6" title="Your leadership permissions are paused">
-          You have an overdue officer requirement. Finish it from <Link href="/tasks" className="underline">your tasks</Link> and your permissions come back right away.
-        </Callout>
-      ) : null}
+      {/* Names what's overdue for their role here and how to clear it. */}
+      {access.suspended ? <PausedBanner actor={user} clubId={club.id} className="mb-6" /> : null}
       {club.status === "RETIRED" ? (
         <Callout tone="info" className="mb-6" title="This club is retired">
           Its history, roles and files are kept. Only an administrator can reinstate it.

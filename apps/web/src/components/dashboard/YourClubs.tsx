@@ -5,13 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/dashboard/Panel";
 import { meetingLabel } from "@/components/dashboard/format";
+import { CLUB_STATUS_LABEL, CLUB_STATUS_TONE } from "@/lib/labels/clubs";
 import type { DashClub } from "@/app/dashboard/data";
 
-const STATUS_BADGE: Partial<Record<DashClub["status"], string>> = {
-  DRAFT: "Draft",
-  CHANGES_REQUESTED: "Changes requested",
-  SUBMITTED: "In WSUSA review",
-};
+/** Clubs still being founded say where WSUSA's review stands; approved clubs need no badge here. */
+const FOUNDING: ReadonlySet<DashClub["status"]> = new Set<DashClub["status"]>(["DRAFT", "SUBMITTED", "CHANGES_REQUESTED"]);
 
 /**
  * "Your clubs": the switchboard to every club you're in. Clubs you lead or
@@ -44,7 +42,7 @@ export function YourClubs({ clubs, now, canCreate, alumni, faculty = false }: { 
                             {r}
                           </span>
                         ))}
-                        {STATUS_BADGE[c.status] ? <Badge tone="info">{STATUS_BADGE[c.status]}</Badge> : null}
+                        {FOUNDING.has(c.status) ? <Badge tone={CLUB_STATUS_TONE[c.status]}>{CLUB_STATUS_LABEL[c.status]}</Badge> : null}
                       </div>
                       {c.status === "APPROVED" ? <NextMeeting at={c.nextMeeting} now={now} className="mt-1.5 text-ink-2" /> : null}
                       <Link

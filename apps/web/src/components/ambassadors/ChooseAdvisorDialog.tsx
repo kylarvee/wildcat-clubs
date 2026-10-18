@@ -9,7 +9,7 @@ import { PersonPicker, type PickerPerson } from "@/components/roles/PersonPicker
 import { useRunAction } from "@/components/roles/useRunAction";
 import { setAmbassadorAdvisorAction } from "./actions";
 
-/** WSUSA picks the faculty or staff member who advises a college's ambassador program (admin → Club reviews → Ambassador programs). */
+/** WSUSA picks the faculty or staff member who advises a college's ambassador program (admin → Club approvals → Ambassador programs). */
 export function ChooseAdvisorDialog({
   orgId,
   orgName,

@@ -53,7 +53,8 @@ export type OccurrenceSummary = {
   place: string | null;
   visibility: Visibility;
   cancelled: boolean;
-  allowSelfCheckIn: boolean;
+  /** Online, so members get the one-tap "Check in" (rules.allowsTapCheckIn); in person needs the QR code or the posted code. */
+  allowTapCheckIn: boolean;
   opensAt: Date;
   closesAt: Date;
   windowState: WindowState;
@@ -101,8 +102,7 @@ export function toOccurrenceSummary(o: OccurrenceRow, cfg: WindowConfig, now: Da
     place: placeLabel(o.event, o.roomOverride),
     visibility: o.event.visibility,
     cancelled: o.status !== "SCHEDULED" || o.event.status !== "SCHEDULED",
-    /** True only for online events (rules.allowsTapCheckIn): in person needs the QR code or the posted code. */
-    allowSelfCheckIn: allowsTapCheckIn(o.event),
+    allowTapCheckIn: allowsTapCheckIn(o.event),
     opensAt: w.opensAt,
     closesAt: w.closesAt,
     windowState: windowState(w, now),
@@ -111,20 +111,20 @@ export function toOccurrenceSummary(o: OccurrenceRow, cfg: WindowConfig, now: Da
   };
 }
 
-/** Host + approved co-hosts: the clubs whose members may self check-in. */
+/** Host + approved co-hosts: the clubs whose members may check in with the code (or one tap). */
 export function participatingClubIds(o: Pick<OccurrenceRow, "event">): string[] {
   return [...new Set([o.event.clubId, ...o.event.cohosts.map((c) => c.club.id)].filter((x): x is string => Boolean(x)))];
 }
 
 /**
  * Occurrences a club hosts or is an approved co-host of. By default this is
- * the history rule lib/metrics uses (any non-draft event, so past meetings of
- * an event cancelled later still count); `live` limits it to events still on.
+ * the history rule lib/metrics uses (any event, so past meetings of an event
+ * cancelled later still count); `live` limits it to events still on.
  */
 export function clubOccurrencesWhere(clubId: string, opts: { live?: boolean } = {}): Prisma.EventOccurrenceWhereInput {
   return {
     status: "SCHEDULED",
-    event: { status: opts.live ? "SCHEDULED" : { not: "DRAFT" }, OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }] },
+    event: { ...(opts.live ? { status: "SCHEDULED" as const } : {}), OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }] },
   };
 }
 
@@ -136,7 +136,7 @@ export async function occurrenceByCode(code: string) {
   return db.eventOccurrence.findUnique({ where: { checkinCode: code }, include: occurrenceInclude });
 }
 
-/** Clubs where someone counts as a member for self check-in: active membership or a current role. */
+/** Clubs where someone counts as a member for a typed code or one tap: active membership or a current role. */
 export async function activeClubIdsFor(userId: string): Promise<string[]> {
   const [m, r] = await Promise.all([
     db.membership.findMany({ where: { userId, status: "ACTIVE" }, select: { clubId: true } }),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { API_TOOLS, findTool, TOOLS, validateCall } from "@/lib/ai/tools";
+import { SYSTEM_PROMPT } from "@/lib/ai/knowledge";
 import { buildView, REFUSAL_PLACEHOLDER } from "@/lib/ai/view";
 import { Thread, type StoredRow } from "@/lib/ai/conversations";
 
@@ -13,6 +14,13 @@ describe("tool registry", () => {
       expect(findTool(n)?.kind).toBe("write");
     }
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("names only tools that exist in the guide", () => {
+    // Tool names are the guide's only snake_case words: join_club, search_clubs, my_profile…
+    const named = [...new Set(SYSTEM_PROMPT.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [])];
+    expect(named.length).toBeGreaterThan(5);
+    expect(named.filter((n) => !TOOLS.some((t) => t.name === n))).toEqual([]);
   });
 
   it("never touches complaints or ballots", () => {

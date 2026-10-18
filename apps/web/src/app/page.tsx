@@ -73,7 +73,7 @@ export default async function Home() {
             <CalendarSearch className="h-8 w-8 text-ink-3" aria-hidden="true" />
             <p className="mt-3 font-medium text-ink">No public events in the next two weeks</p>
             <p className="mt-1 max-w-md text-sm text-ink-3">
-              {user ? "Your clubs' members-only events are on your calendar." : "Clubs post campus-only and members-only events too — log in to see everything you can go to."}
+              {user ? "Your clubs' members-only events are on your calendar." : "Clubs post campus-only and members-only events too — sign in to see everything you can go to."}
             </p>
           </div>
         )}

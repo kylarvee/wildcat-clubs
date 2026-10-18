@@ -3,8 +3,10 @@ import type { ClubRole, RoleRequirement } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { can, getClubAccess } from "@/lib/authz";
-import { periodStartFor, requirementStatus } from "@/lib/authz/requirements";
+import { can, getClubAccess, ROLE_RANK } from "@/lib/authz";
+import { periodStartFor, requirementStatus, tasksAwaitingGrade } from "@/lib/authz/requirements";
+import type { RequirementState } from "@/lib/authz/requirement-rules";
+import { missingDetails } from "@/lib/details/rules";
 import { logActivity } from "@/lib/lake/activity";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createTask } from "@/lib/domain/tasks";
@@ -61,14 +63,15 @@ function requirementHref(r: Want["requirement"]) {
   return "/tasks";
 }
 
-function requirementTitle(r: Want["requirement"], isForm: boolean) {
+/** What to do, as the task title says it. Member details still missing a field are filled in; complete ones are confirmed. */
+function requirementTitle(r: Want["requirement"], isForm: boolean, detailsMissing = false) {
   if (r.kind === "TRAINING") return `Attend: ${r.name}`;
-  if (r.kind === "PROFILE") return `Confirm: ${r.name}`;
+  if (r.kind === "PROFILE") return `${detailsMissing ? "Fill in" : "Confirm"}: ${r.name}`;
   return isForm ? `Fill out: ${r.name}` : `Pass: ${r.name}`;
 }
 
 /** Task titles start with what to do; notifications drop it. */
-const ACTION_PREFIX = /^(Pass|Attend|Fill out|Confirm): /;
+const ACTION_PREFIX = /^(Pass|Attend|Fill out|Fill in|Confirm): /;
 
 /** A person's current seats a requirement can reach: leader roles, plus memberships (students only). */
 async function seatsFor(userId: string): Promise<Seat[]> {
@@ -120,6 +123,9 @@ export async function syncUserRequirements(userId: string, opts: { notify?: Noti
 
   const testIds = [...new Set([...wants.values()].map((w) => w.requirement.testId).filter((id): id is string => Boolean(id)))];
   const forms = new Set(testIds.length ? (await db.test.findMany({ where: { id: { in: testIds }, isForm: true }, select: { id: true } })).map((t) => t.id) : []);
+  // Member details still missing a field read "Fill in", complete ones "Confirm".
+  const person = [...wants.values()].some((w) => w.requirement.kind === "PROFILE") ? await db.user.findUnique({ where: { id: userId }, select: { kind: true, details: true } }) : null;
+  const detailsMissing = Boolean(person && missingDetails(person.details, person.kind).length);
 
   const openTasks = await db.task.findMany({
     where: { sourceType: "requirement", assigneeId: userId, status: "OPEN" },
@@ -141,7 +147,7 @@ export async function syncUserRequirements(userId: string, opts: { notify?: Noti
   const opened: Want[] = [];
   for (const [reqId, w] of wants) {
     const href = requirementHref(w.requirement);
-    const title = requirementTitle(w.requirement, Boolean(w.requirement.testId && forms.has(w.requirement.testId)));
+    const title = requirementTitle(w.requirement, Boolean(w.requirement.testId && forms.has(w.requirement.testId)), detailsMissing);
     // A leader's task names the club whose permissions it gates; a member-wide one is WSUSA's, not any club's.
     const clubId = w.gates ? w.clubId : null;
     const existing = openByReq.get(reqId);
@@ -181,12 +187,12 @@ export async function syncUserRequirements(userId: string, opts: { notify?: Noti
     await notify({
       userIds: [userId],
       kind: "requirement.assigned",
-      title: !gates ? "Required by WSUSA" : opts.notify === "new-role" ? "Your new role has required training" : "Officer requirement to finish",
+      title: !gates ? "Required by WSUSA" : opts.notify === "new-role" ? "Your new role has WSUSA requirements" : opened.length === 1 ? "A WSUSA requirement to finish" : "WSUSA requirements to finish",
       body: !gates
         ? `WSUSA asks every club member to finish ${names}${soonest > now ? ` by ${fmtDate(soonest, "MMM d")}` : ""}.`
         : soonest <= now
-          ? `Finish ${names} to turn your leadership permissions back on.`
-          : `Finish ${names} by ${fmtDate(soonest, "MMM d")} to keep your leadership permissions active.`,
+          ? `Finish ${names} to turn your permissions back on.`
+          : `Finish ${names} by ${fmtDate(soonest, "MMM d")} to keep your permissions on.`,
       href: "/tasks",
     });
   }
@@ -260,15 +266,18 @@ async function requirementGates(requirementId: string, userId: string): Promise<
 /**
  * Tells people once when a requirement deadline passes: leaders that their
  * permissions paused, members that it's overdue. Idempotent: skips anyone
- * already told about that task.
+ * already told about that task. A test handed in on time that's still
+ * waiting for a grader isn't overdue, so nobody hears about it.
  */
 export async function notifyOverdueRequirements(now: Date = new Date()): Promise<{ notified: number }> {
   const overdue = await db.task.findMany({
     where: { sourceType: "requirement", status: "OPEN", dueAt: { lt: now }, assigneeId: { not: null } },
-    select: { id: true, assigneeId: true, title: true, href: true, createdAt: true, dueAt: true, sourceId: true },
+    select: { id: true, status: true, sourceType: true, assigneeId: true, title: true, href: true, createdAt: true, dueAt: true, sourceId: true, club: { select: { name: true } } },
   });
+  const waiting = await tasksAwaitingGrade(overdue, now);
   let notified = 0;
   for (const t of overdue) {
+    if (waiting.has(t.id)) continue;
     const already = await db.notification.count({ where: { userId: t.assigneeId!, kind: "requirement.overdue", href: t.href, createdAt: { gte: t.dueAt ?? t.createdAt } } });
     if (already) continue;
     const name = t.title.replace(ACTION_PREFIX, "");
@@ -276,8 +285,8 @@ export async function notifyOverdueRequirements(now: Date = new Date()): Promise
     await notify({
       userIds: [t.assigneeId!],
       kind: "requirement.overdue",
-      title: gates ? "Your leadership permissions are paused" : "A WSUSA requirement is overdue",
-      body: gates ? `${name} is overdue. Your title stays; your permissions come back as soon as it's done.` : `${name} was due ${fmtDate(t.dueAt ?? now, "MMM d")}. WSUSA requires it, so please finish it as soon as you can.`,
+      title: gates ? `Permissions paused${t.club ? ` in ${t.club.name}` : ""}` : "A WSUSA requirement is overdue",
+      body: gates ? `${name} is overdue. Your title stays, and your permissions come back as soon as it's done.` : `${name} was due ${fmtDate(t.dueAt ?? now, "MMM d")}. WSUSA requires it, so please finish it as soon as you can.`,
       href: t.href ?? "/tasks",
     });
     notified++;
@@ -401,17 +410,20 @@ export async function listRequirementsForAdmin() {
 
 /**
  * Open requirement tasks per requirement, across everyone it applies to
- * (members included): how many people still owe it and how many are late.
+ * (members included): how many people still owe it, how many are late, and
+ * how many handed it in on time and are waiting for grading (not late).
  */
-export async function openRequirementCounts(now: Date = new Date()): Promise<Map<string, { open: number; overdue: number }>> {
-  const rows = await db.task.findMany({ where: { sourceType: "requirement", status: "OPEN" }, select: { sourceId: true, dueAt: true } });
-  const out = new Map<string, { open: number; overdue: number }>();
+export async function openRequirementCounts(now: Date = new Date()): Promise<Map<string, { open: number; overdue: number; waiting: number }>> {
+  const rows = await db.task.findMany({ where: { sourceType: "requirement", status: "OPEN" }, select: { id: true, status: true, sourceType: true, sourceId: true, assigneeId: true, dueAt: true } });
+  const waiting = await tasksAwaitingGrade(rows, now);
+  const out = new Map<string, { open: number; overdue: number; waiting: number }>();
   for (const r of rows) {
     const id = r.sourceId?.split(":")[0];
     if (!id) continue;
-    const c = out.get(id) ?? { open: 0, overdue: 0 };
+    const c = out.get(id) ?? { open: 0, overdue: 0, waiting: 0 };
     c.open++;
-    if (r.dueAt && r.dueAt < now) c.overdue++;
+    if (waiting.has(r.id)) c.waiting++;
+    else if (r.dueAt && r.dueAt < now) c.overdue++;
     out.set(id, c);
   }
   return out;
@@ -426,7 +438,8 @@ export async function requirementTargets() {
   return { tests, events: [...events.filter((e) => e.kind === "TRAINING"), ...events.filter((e) => e.kind !== "TRAINING")] };
 }
 
-export type ComplianceState = "met" | "due" | "overdue";
+/** "review": handed in on time and waiting for grading (not met yet, not overdue). */
+export type ComplianceState = RequirementState;
 export type ComplianceCell = { state: ComplianceState; dueAt: Date };
 export type ComplianceRow = {
   key: string;
@@ -477,13 +490,62 @@ export async function requirementCompliance(now: Date = new Date(), opts: { club
       list.slice(i, i + 12).map(async ([key, a]) => {
         const status = await requirementStatus(a.user.id, a.role, { assignmentStartedAt: a.startedAt, clubApprovedAt: a.club.approvedAt, at: now });
         const cells: Record<string, ComplianceCell> = {};
-        for (const it of status.items) cells[it.requirement.id] = { state: it.met ? "met" : it.overdue ? "overdue" : "due", dueAt: it.dueAt };
+        for (const it of status.items) cells[it.requirement.id] = { state: it.state, dueAt: it.dueAt };
         return { key, person: a.user, club: { id: a.club.id, name: a.club.name, slug: a.club.slug }, role: a.role, seat: a.position?.name ?? null, startedAt: a.startedAt, cells, paused: status.overdue } satisfies ComplianceRow;
       }),
     );
     rows.push(...chunk);
   }
   return rows.sort((a, b) => Number(b.paused) - Number(a.paused) || a.person.name.localeCompare(b.person.name) || a.club.name.localeCompare(b.club.name));
+}
+
+// ─── Why someone's permissions are paused ────────────────────────────────────
+
+export type PauseReason = {
+  id: string;
+  name: string;
+  /** What to do, worded like the task ("Pass: Club Officer Policy Test"). */
+  title: string;
+  href: string;
+  kind: "TEST" | "FORM" | "TRAINING" | "PROFILE";
+  dueAt: Date;
+  /** Handed in after the deadline and still waiting for a grader. */
+  gradingPending: boolean;
+};
+
+/**
+ * What's overdue for the actor in one club, through their highest role there
+ * (the role getClubAccess checks): why their permissions are paused. Empty
+ * when they aren't. Read-only.
+ */
+export async function pauseReasons(actor: Actor | null, clubId: string, now: Date = new Date()): Promise<PauseReason[]> {
+  assertSignedIn(actor);
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { status: true, approvedAt: true } });
+  if (club?.status !== "APPROVED") return [];
+  const roles = await db.roleAssignment.findMany({ where: { clubId, userId: actor.id, endedAt: null } });
+  const top = [...roles].sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role])[0];
+  if (!top || ROLE_RANK[top.role] < 1 || top.role === "ADVISOR") return [];
+  const status = await requirementStatus(actor.id, top.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: club.approvedAt, at: now });
+  const late = status.items.filter((i) => i.overdue);
+  if (!late.length) return [];
+  const testIds = late.map((i) => i.requirement.testId).filter((id): id is string => Boolean(id));
+  const forms = new Set(testIds.length ? (await db.test.findMany({ where: { id: { in: testIds }, isForm: true }, select: { id: true } })).map((t) => t.id) : []);
+  const detailsMissing = late.some((i) => i.requirement.kind === "PROFILE")
+    ? missingDetails(await db.personalDetails.findUnique({ where: { userId: actor.id } }), actor.kind).length > 0
+    : false;
+  return late.map((i) => {
+    const r = i.requirement;
+    const isForm = Boolean(r.testId && forms.has(r.testId));
+    return {
+      id: r.id,
+      name: r.name,
+      title: requirementTitle(r, isForm, detailsMissing),
+      href: requirementHref(r),
+      kind: r.kind === "TRAINING" ? "TRAINING" : r.kind === "PROFILE" ? "PROFILE" : isForm ? "FORM" : "TEST",
+      dueAt: i.dueAt,
+      gradingPending: i.gradingPending,
+    } satisfies PauseReason;
+  });
 }
 
 // ─── Dashboards ──────────────────────────────────────────────────────────────
@@ -498,12 +560,14 @@ export type RequirementOverviewRow = {
   /** Still owed (open required tasks). */
   open: number;
   overdue: number;
+  /** Handed in on time and waiting for grading (part of `open`, never overdue). */
+  waiting: number;
   /** The soonest deadline still ahead, among open tasks. */
   nextDue: Date | null;
 };
 
 /**
- * The admin dashboard's "What WSUSA requires": each active requirement's
+ * The admin dashboard's "WSUSA requirements": each active requirement's
  * progress this renewal period, counted from its required tasks (one per
  * person), and how many student leaders are paused right now.
  */
@@ -516,8 +580,9 @@ export async function requirementsOverview(actor: Actor | null, now: Date = new 
   const earliest = new Date(Math.min(...[...starts.values()].map((d) => d.getTime())));
   const tasks = await db.task.findMany({
     where: { sourceType: "requirement", OR: [{ status: "OPEN" }, { status: "DONE", completedAt: { gte: earliest } }] },
-    select: { sourceId: true, status: true, dueAt: true, completedAt: true, assigneeId: true },
+    select: { id: true, sourceType: true, sourceId: true, status: true, dueAt: true, completedAt: true, assigneeId: true },
   });
+  const waiting = await tasksAwaitingGrade(tasks, now);
   const byReq = new Map<string, typeof tasks>();
   for (const t of tasks) {
     const id = t.sourceId?.split(":")[0];
@@ -530,8 +595,8 @@ export async function requirementsOverview(actor: Actor | null, now: Date = new 
     const mine = byReq.get(r.id) ?? [];
     const start = starts.get(r.id)!;
     const open = mine.filter((t) => t.status === "OPEN");
-    const late = open.filter((t) => t.dueAt && t.dueAt < now);
-    const ahead = open.map((t) => t.dueAt).filter((d): d is Date => Boolean(d && d >= now));
+    const late = open.filter((t) => t.dueAt && t.dueAt < now && !waiting.has(t.id));
+    const ahead = open.filter((t) => !waiting.has(t.id)).map((t) => t.dueAt).filter((d): d is Date => Boolean(d && d >= now));
     rows.push({
       id: r.id,
       name: r.name,
@@ -540,6 +605,7 @@ export async function requirementsOverview(actor: Actor | null, now: Date = new 
       done: mine.filter((t) => t.status === "DONE" && t.completedAt && t.completedAt >= start).length,
       open: open.length,
       overdue: late.length,
+      waiting: open.filter((t) => waiting.has(t.id)).length,
       nextDue: ahead.length ? new Date(Math.min(...ahead.map((d) => d.getTime()))) : null,
     });
     if (r.appliesTo.some((role) => role !== "MEMBER")) for (const t of late) if (t.assigneeId) overdueLeaderTasks.push({ reqId: r.id, userId: t.assigneeId });
@@ -560,8 +626,9 @@ export type ClubLeaderCompliance = {
 };
 
 /**
- * The advisor dashboard's "Officer requirements": where the student leaders
+ * The advisor dashboard's "WSUSA requirements": where the student leaders
  * of each club stand, for clubs the actor advises (or any club, for admins).
+ * Someone waiting for a grade owes nothing right now, so they aren't "due".
  */
 export async function clubLeaderCompliance(actor: Actor | null, clubIds: string[], now: Date = new Date()): Promise<ClubLeaderCompliance[]> {
   assertSignedIn(actor);

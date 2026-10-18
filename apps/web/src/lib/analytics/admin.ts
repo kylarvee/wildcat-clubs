@@ -1,9 +1,11 @@
 import "server-only";
-import type { ClubRole, ClubStatus, ClubType } from "@prisma/client";
+import type { ClubStatus, ClubType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { ROLE_LABEL } from "@/lib/authz";
 import { clubActivityMany } from "@/lib/metrics";
+import { STANDING_LABEL } from "@/lib/labels/clubs";
+import { actionPhrase, BUSY_ACTIONS } from "@/lib/lake/actions";
 import { getTerms, currentOrLastTerm } from "@/lib/terms";
 import { fmtLongDate } from "@/lib/time";
 
@@ -25,9 +27,9 @@ const QUEUES: { key: string; sources: (string | null)[]; label: string; detail: 
   { key: "clubDocument", sources: ["clubDocument"], label: "Custom constitutions & bylaws", detail: "Uploaded documents to approve", href: "/admin/clubs?tab=documents" },
   // No admin list shows these; each task links to its club's Google account section.
   { key: "googleAccount", sources: ["googleAccount"], label: "Club Google accounts to verify", detail: "Confirm a club's own Workspace account before Google sync runs as it", href: "/tasks?kind=APPROVAL" },
-  { key: "funding", sources: ["funding"], label: "Funding requests", detail: "Requests waiting for a decision", href: "/admin/funding" },
+  { key: "funding", sources: ["funding"], label: "Funding requests", detail: "Requests in WSUSA review", href: "/admin/funding" },
   { key: "invoice", sources: ["invoice"], label: "Invoices to process", detail: "Approved funding to push through", href: "/admin/funding" },
-  { key: "reviews", sources: ["reviewBombing", "reviewFlag"], label: "Reviews to check", detail: "Possible review bombing and reported reviews", href: "/admin/reviews" },
+  { key: "reviews", sources: ["reviewBombing", "reviewFlag"], label: "Reviews to check", detail: "Possible review bombing and flagged reviews", href: "/admin/reviews" },
   // Count only: report details never leave the Reports tool.
   { key: "complaint", sources: ["complaint"], label: "New reports", detail: "Open them in Reports", href: "/admin/complaints" },
 ];
@@ -99,7 +101,7 @@ export async function atRiskClubs(now = new Date()): Promise<AtRiskClub[]> {
     const a = activity.get(c.id);
     if (!a) continue;
     if (!a.active) {
-      out.push({ ...c, kind: "inactive", tag: "Inactive", reasons: a.reasons, endsThisTerm: false });
+      out.push({ ...c, kind: "inactive", tag: STANDING_LABEL.inactive, reasons: a.reasons, endsThisTerm: false });
       continue;
     }
     if (a.inPilot) {
@@ -108,7 +110,7 @@ export async function atRiskClubs(now = new Date()): Promise<AtRiskClub[]> {
       if (a.registeredMembers < minMembers) reasons.push(`${a.registeredMembers === 0 ? "No registered members yet" : `Only ${plural(a.registeredMembers, "registered member")}`} (needs ${minMembers}).`);
       if (!reasons.length) continue;
       const endsThisTerm = Boolean(a.pilotEndsAt && termEnd && a.pilotEndsAt.getTime() <= termEnd.getTime() + 86_400_000);
-      out.push({ ...c, kind: "pilot", tag: a.pilotEndsAt ? `Pilot ends ${fmtLongDate(a.pilotEndsAt)}` : "In pilot", reasons, endsThisTerm });
+      out.push({ ...c, kind: "pilot", tag: a.pilotEndsAt ? `Pilot period ends ${fmtLongDate(a.pilotEndsAt)}` : STANDING_LABEL.pilot, reasons, endsThisTerm });
       continue;
     }
     const reasons: string[] = [];
@@ -125,69 +127,15 @@ export async function atRiskClubs(now = new Date()): Promise<AtRiskClub[]> {
 
 // ─── Recent activity ─────────────────────────────────────────────────────────
 
+/** `text` follows the actor's name ("filled the Treasurer seat", lib/lake/actions); the club, when there is one, is shown beside it. */
 export type FeedItem = { id: string; at: Date; actor: { name: string; avatarUrl: string | null; avatarColor: string } | null; text: string; club: { id: string; name: string; slug: string } | null };
-
-/** Busy actions that would drown out everything else on a platform-wide feed. */
-const QUIET = ["attendance.checkin", "calendar.subscribed", "calendar.unsubscribed", "task.completed", "task.reopened"];
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v.trim() : null;
-}
-
-/** "filled the Treasurer seat at", "added “Game Night” to the calendar of"… — the club name follows when there is one. */
-function phrase(action: string, data: unknown, hasClub: boolean): string {
-  const d = (data ?? {}) as Record<string, unknown>;
-  const at = hasClub ? " at" : "";
-  switch (action) {
-    case "club.approved":
-      return "approved";
-    case "club.retired":
-      return "retired";
-    case "club.reinstated":
-      return "reinstated";
-    case "club.submitted":
-      return "submitted to WSUSA";
-    case "constitution.adopted":
-      return `adopted a new constitution and bylaws${hasClub ? " for" : ""}`;
-    case "role.assigned": {
-      const seat = str(d.position) ?? (typeof d.role === "string" && d.role in ROLE_LABEL ? ROLE_LABEL[d.role as ClubRole] : null);
-      return seat ? `filled the ${seat} seat${at}` : `assigned a role${at}`;
-    }
-    case "role.ended": {
-      const role = typeof d.role === "string" && d.role in ROLE_LABEL ? ROLE_LABEL[d.role as ClubRole] : null;
-      return role ? `ended a ${role} term${at}` : `ended a role${at}`;
-    }
-    case "membership.joined":
-      return hasClub ? "joined" : "joined a club";
-    case "review.created":
-      return hasClub ? "reviewed" : "wrote a review";
-    case "event.created": {
-      const title = str(d.title);
-      return title ? `added “${title}” to the calendar${hasClub ? " of" : ""}` : `added an event${hasClub ? " for" : ""}`;
-    }
-    case "cohost.approved":
-      return hasClub ? "accepted a co-host invitation for" : "accepted a co-host invitation";
-    case "election.applied": {
-      const title = str(d.title);
-      return title ? `applied the “${title}” election result${at}` : `applied an election result${at}`;
-    }
-    case "policy.published": {
-      const title = str(d.title);
-      return title ? `published the policy “${title}”` : "published a policy";
-    }
-    default: {
-      const [noun, verb] = action.split(".");
-      return `${(verb ?? "updated").replace(/_/g, " ")} ${noun ?? ""}${at}`.trim();
-    }
-  }
-}
 
 /** The latest public platform activity (ActivityLog.isPublic), never anything about reports. */
 export async function recentPlatformActivity(take = 12): Promise<FeedItem[]> {
   const rows = await db.activityLog.findMany({
     where: {
       isPublic: true,
-      action: { notIn: QUIET },
+      action: { notIn: BUSY_ACTIONS },
       NOT: [{ entityType: "complaint" }, { action: { startsWith: "complaint." } }],
     },
     orderBy: [{ at: "desc" }, { id: "desc" }],
@@ -201,5 +149,5 @@ export async function recentPlatformActivity(take = 12): Promise<FeedItem[]> {
       club: { select: { id: true, name: true, slug: true } },
     },
   });
-  return rows.map((r) => ({ id: String(r.id), at: r.at, actor: r.actor, text: phrase(r.action, r.data, Boolean(r.club)), club: r.club }));
+  return rows.map((r) => ({ id: String(r.id), at: r.at, actor: r.actor, text: actionPhrase(r.action, r.data, ROLE_LABEL), club: r.club }));
 }

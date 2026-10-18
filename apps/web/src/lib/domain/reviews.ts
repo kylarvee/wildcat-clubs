@@ -133,11 +133,11 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
     select: { id: true, userId: true, clubId: true, hiddenAt: true, club: { select: { name: true, status: true } } },
   });
   if (!review || (review.club.status !== "APPROVED" && review.club.status !== "RETIRED")) throw notFound("Review");
-  if (review.userId === actor.id) throw invalid("You can't report your own review — edit or delete it instead.");
+  if (review.userId === actor.id) throw invalid("You can't flag your own review — edit or delete it instead.");
   if (review.hiddenAt) throw conflict("Admins have already hidden this review.");
 
   const already = await db.reviewFlag.findUnique({ where: { reviewId_userId: { reviewId, userId: actor.id } }, select: { id: true } });
-  if (already) throw conflict("You've already reported this review. Admins will take a look.");
+  if (already) throw conflict("You've already flagged this review. Admins will take a look.");
   await db.reviewFlag.create({ data: { reviewId, userId: actor.id, reason } });
   await logActivity({ actorId: actor.id, action: "review.flagged", entityType: "review", entityId: reviewId, clubId: review.clubId });
   // A reported review leaves search until admins keep it.
@@ -150,15 +150,15 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
       const href = `/admin/reviews?club=${review.clubId}&review=${reviewId}`;
       await createTask({
         kind: "APPROVAL",
-        title: `Review reported on ${review.club.name}`,
-        description: `${flags} people reported this review. Decide whether to keep or hide it.`,
+        title: `Review flagged on ${review.club.name}`,
+        description: `${flags} people flagged this review. Decide whether to keep or hide it.`,
         assignee: { type: "ADMINS" },
         clubId: review.clubId,
         href,
         source: { type: "reviewFlag", id: reviewId },
         createdById: actor.id,
       });
-      await notifyAdmins({ kind: "review.flagged", title: `A review on ${review.club.name} was reported`, body: `${flags} people reported it.`, href, exceptUserId: actor.id, email: false });
+      await notifyAdmins({ kind: "review.flagged", title: `A review on ${review.club.name} was flagged`, body: `${flags} people flagged it.`, href, exceptUserId: actor.id, email: false });
     }
   }
 }

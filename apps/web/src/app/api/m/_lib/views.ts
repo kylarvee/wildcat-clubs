@@ -15,6 +15,8 @@ import { richToText } from "@/lib/rich/sanitize";
 import { campusDate, DAY_MS, fmtDate, inCampusTime } from "@/lib/time";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/components/clubs/labels";
 import { dueInfo } from "@/components/tasks/items";
+import { tasksAwaitingGrade } from "@/lib/authz/requirements";
+import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
 import {
   currentSeats,
   feedToMEvent,
@@ -80,9 +82,11 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
       where: { assigneeType: "USER", assigneeId: actor.id, status: "OPEN", required: true },
       orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
       take: 10,
-      select: { id: true, title: true, dueAt: true, href: true },
+      select: { id: true, title: true, dueAt: true, href: true, status: true, sourceType: true, sourceId: true, assigneeId: true },
     }),
   ]);
+  // A test handed in on time and waiting for a grader isn't overdue.
+  const waiting = await tasksAwaitingGrade(required, now);
 
   // "My clubs": active member, pending request, or a current role — in approved clubs.
   const ids = [...states].filter(([, s]) => s.member || s.pending || s.leader).map(([id]) => id);
@@ -111,6 +115,7 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
       .slice(0, UPCOMING_LIMIT),
     announcements: announcements.map(toMAnnouncement),
     required: required.map((t) => {
+      if (waiting.has(t.id)) return { id: t.id, title: t.title, dueLabel: AWAITING_GRADE_LABEL, overdue: false, path: t.href ?? "/tasks" };
       const due = dueInfo(t.dueAt, now);
       return { id: t.id, title: t.title, dueLabel: due?.label ?? null, overdue: Boolean(due?.overdue), path: t.href ?? "/tasks" };
     }),

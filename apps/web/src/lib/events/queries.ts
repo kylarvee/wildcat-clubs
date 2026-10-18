@@ -3,14 +3,13 @@ import type { Term } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getTerms } from "@/lib/terms";
 import { fileUrl } from "@/lib/domain/files";
-import { richToText } from "@/lib/rich/sanitize";
 import { googleCalendarReady } from "@/lib/integrations/google-calendar";
 import { costLineLocks } from "@/lib/domain/events";
 import { splitEventLinks } from "@/lib/events/links";
 import { describeRecurrence } from "@/lib/events/summary";
 import type { TermJson } from "@/lib/events/types";
 import type { EditorEvent } from "@/components/events/EventEditor";
-import type { IdeaRow, IncomingCohost, OutgoingCohost } from "@/components/events/BuilderPanels";
+import type { IncomingCohost, OutgoingCohost } from "@/components/events/BuilderPanels";
 
 /**
  * Read models for the Events Builder pages (club and admin). Pages check
@@ -30,12 +29,7 @@ const nextMeeting = (now: Date) =>
 
 export async function loadBuilderData(clubId: string | null) {
   const now = new Date();
-  const [ideaRows, incomingRows, outgoingRows, buildings, terms, google] = await Promise.all([
-    db.event.findMany({
-      where: { clubId, status: "DRAFT" },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, title: true, descriptionHtml: true, createdAt: true, createdBy: { select: { name: true } } },
-    }),
+  const [incomingRows, outgoingRows, buildings, terms, google] = await Promise.all([
     clubId
       ? db.eventCohost.findMany({
           where: { clubId, status: { in: ["PENDING", "APPROVED"] }, event: { status: "SCHEDULED" } },
@@ -62,7 +56,7 @@ export async function loadBuilderData(clubId: string | null) {
       : Promise.resolve([]),
     clubId
       ? db.event.findMany({
-          where: { clubId, status: { not: "DRAFT" }, cohosts: { some: {} } },
+          where: { clubId, cohosts: { some: {} } },
           orderBy: { startsAt: "desc" },
           take: 40,
           select: { id: true, title: true, cohostAllClubs: true, occurrences: nextMeeting(now), cohosts: { select: { id: true, status: true, club: { select: { name: true } } }, orderBy: { createdAt: "asc" } } },
@@ -72,8 +66,6 @@ export async function loadBuilderData(clubId: string | null) {
     getTerms(),
     googleCalendarReady(clubId),
   ]);
-
-  const ideas: IdeaRow[] = ideaRows.map((e) => ({ id: e.id, title: e.title, notes: richToText(e.descriptionHtml, 600), createdByName: e.createdBy.name, createdAt: e.createdAt.toISOString() }));
 
   const incoming: IncomingCohost[] = incomingRows
     // Accepted co-hostings only matter while there's something coming up.
@@ -104,7 +96,7 @@ export async function loadBuilderData(clubId: string | null) {
     cohosts: e.cohosts.map((c) => ({ id: c.id, clubName: c.club.name, status: c.status })),
   }));
 
-  return { ideas, incoming, outgoing, buildings, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null };
+  return { incoming, outgoing, buildings, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null };
 }
 
 /** Everything the full editor needs. Returns null when the event isn't this host's. */
@@ -143,7 +135,6 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       descriptionHtml: body,
       links,
       visibility: event.visibility,
-      allowSelfCheckIn: event.allowSelfCheckIn,
       setupMinutes: event.setupMinutes,
       cleanupMinutes: event.cleanupMinutes,
       startsAt: event.startsAt?.toISOString() ?? null,

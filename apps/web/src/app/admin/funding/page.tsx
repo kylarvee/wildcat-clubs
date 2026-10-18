@@ -20,7 +20,7 @@ import { FundingFilters } from "@/components/budget/admin/FundingFilters";
 export const metadata: Metadata = { title: "Funding" };
 
 const QUEUES: { key: AdminQueue; label: string; hint: string }[] = [
-  { key: "submitted", label: "Waiting for a decision", hint: "Oldest first." },
+  { key: "submitted", label: "In WSUSA review", hint: "Oldest first." },
   { key: "approved", label: "Approved · invoice open", hint: "Approved requests until their invoice is created and processed, oldest decision first." },
   { key: "all", label: "All requests", hint: "Everything clubs have submitted, newest first. Drafts stay private to the club." },
 ];
@@ -70,7 +70,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
-          label="Waiting for a decision"
+          label="In WSUSA review"
           value={overview.waiting.count}
           hint={overview.waiting.count ? `${fmtMoney(overview.waiting.cents)} requested${oldestDays ? ` · oldest ${plural(oldestDays, "day")}` : ""}` : "Nothing waiting"}
         />
@@ -120,7 +120,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
         ) : filtered ? (
           <EmptyState icon={<SearchX />} title="No requests match these filters" description="Try another funding source or club, or clear the filters." />
         ) : queue === "submitted" ? (
-          <EmptyState icon={<Inbox />} title="No requests waiting" description="When a club submits a funding request it shows up here, oldest first, and in your task inbox." />
+          <EmptyState icon={<Inbox />} title="No requests waiting" description="When a club submits a funding request it shows up here, oldest first, and in your Tasks." />
         ) : queue === "approved" ? (
           <EmptyState icon={<FileCheck2 />} title="Every approval is invoiced and processed" description="Approved requests show up here until their invoice is created and marked processed." />
         ) : (

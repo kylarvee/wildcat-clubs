@@ -7,6 +7,8 @@
  * two different groups.
  */
 
+import { CLUB_TYPE_LABEL } from "@/lib/labels/clubs";
+
 export type NetworkWindow = "term" | "year" | "12m" | "all";
 export type NetworkGroup = "club" | "college" | "department" | "major";
 
@@ -97,7 +99,7 @@ export type NetworkPayload = {
   generatedAt: string; // ISO
 };
 
-const TYPE_LABEL: Record<string, string> = { SPONSORED: "Sponsored", AFFILIATE: "Affiliate", REGISTERED: "Registered", COLLEGE_AMBASSADORS: "College Ambassadors" };
+const TYPE_LABEL: Record<string, string> = CLUB_TYPE_LABEL;
 const SCOPE_GROUP_LABEL: Record<NetworkClub["scope"], string> = {
   COLLEGE: "No college listed",
   UNIVERSITY: "University-wide clubs",

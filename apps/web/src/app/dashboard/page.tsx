@@ -3,6 +3,7 @@ import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { can, isAdmin } from "@/lib/authz";
+import { shouldPromptForApp } from "@/lib/clubs/queries";
 import { liveOccurrencesForUser } from "@/lib/domain/attendance";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtGraduated, shortName } from "@/lib/profiles/format";
@@ -43,14 +44,13 @@ function greeting(now: Date) {
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("/dashboard");
   const sp = await searchParams;
-  const [d, live] = await Promise.all([loadDashboard(user), user.status === "ACTIVE" ? liveOccurrencesForUser(user) : Promise.resolve([])]);
+  const [d, live, showApp] = await Promise.all([loadDashboard(user), user.status === "ACTIVE" ? liveOccurrencesForUser(user) : Promise.resolve([]), shouldPromptForApp(user.id)]);
   const first = shortName(user.name);
   const alumni = user.status === "ALUMNI";
   const faculty = user.kind === "FACULTY_STAFF";
   const admin = isAdmin(user);
   // Students with no clubs get the welcome steps; faculty find their clubs through advising.
   const newHere = !alumni && !faculty && d.clubs.length === 0;
-  const showApp = Boolean(!alumni && d.me && !d.me.hasMobileApp && !d.me.appPromptDismissedAt);
 
   return (
     <Container size="xl">
@@ -59,7 +59,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         description={[fmtDate(d.now, "EEEE, MMMM d"), d.term?.name, admin ? `${INSTITUTION.studentGovernment} administrator` : null].filter(Boolean).join(" · ")}
       />
 
-      {live.length ? <LiveCheckinPrompt occurrences={live} className="mb-6" /> : null}
+      {/* Always mounted: after a one-tap check-in the occurrence leaves `live`, and the prompt keeps its "You're checked in" card. */}
+      <LiveCheckinPrompt occurrences={live} className="mb-6" />
 
       {alumni ? (
         <Callout tone="brand" icon={<GraduationCap />} title={`Congratulations, graduate${d.me?.graduatedAt ? ` — ${fmtGraduated(d.me.graduatedAt)}` : ""}!`} className="mb-6">

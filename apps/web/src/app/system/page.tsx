@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Info } from "lucide-react";
+import { Info, TriangleAlert } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { CONFIG_DEFAULTS, getConfig, type ConfigKey } from "@/lib/config";
@@ -12,7 +12,7 @@ import { CONFIG_COPY } from "@/components/system/config-copy";
 import { RulesSection, type RuleField, type RuleSummary } from "@/components/system/RulesSection";
 import { WsusaContactsForm } from "@/components/system/WsusaContactsForm";
 
-export const metadata: Metadata = { title: "Platform rules" };
+export const metadata: Metadata = { title: "System settings" };
 
 type IntKey = { [K in ConfigKey]: (typeof CONFIG_DEFAULTS)[K] extends number ? K : never }[ConfigKey];
 type StringKey = { [K in ConfigKey]: (typeof CONFIG_DEFAULTS)[K] extends string ? K : never }[ConfigKey];
@@ -35,7 +35,7 @@ const SECTIONS: { id: string; title: string; description: string; summary: RuleS
   {
     id: "checkin",
     title: "Check-in",
-    description: "When the attendance QR code and self check-in work for an event.",
+    description: "When check-in opens and closes for an event, and how often its QR code changes.",
     summary: "checkin",
     keys: ["checkin.opensMinutesBefore", "checkin.closesMinutesAfter", "checkin.qrRotateSeconds"],
   },
@@ -44,11 +44,11 @@ const SECTIONS: { id: string; title: string; description: string; summary: RuleS
 const APP_KEYS: StringKey[] = ["app.iosUrl", "app.androidUrl"];
 
 /**
- * Platform rules (system.config): every system setting except the AI and
+ * System settings (system.config): every system setting except the AI and
  * integration switches, which live on their own page. Defaults come from
  * lib/config; saving goes through lib/domain/system.setConfigs.
  */
-export default async function PlatformRulesPage() {
+export default async function SystemSettingsPage() {
   const user = await requireUser("/system");
   if (!can(user, "system.config")) notFound();
 
@@ -76,15 +76,30 @@ export default async function PlatformRulesPage() {
     const c = CONFIG_COPY[key];
     return { kind: "url", key, label: c.label, help: c.help, placeholder, value: cfg[key], defaultValue: CONFIG_DEFAULTS[key] };
   };
+  const emailField = (key: StringKey, placeholder: string): RuleField => {
+    const c = CONFIG_COPY[key];
+    return { kind: "email", key, label: c.label, help: c.help, placeholder, value: cfg[key], defaultValue: CONFIG_DEFAULTS[key] };
+  };
 
-  const jump = [...SECTIONS.map((s) => ({ id: s.id, label: s.title })), { id: "wsusa", label: "WSUSA contacts" }, { id: "app", label: "Mobile app links" }];
+  const jump = [...SECTIONS.map((s) => ({ id: s.id, label: s.title })), { id: "wsusa", label: "WSUSA contacts" }, { id: "help", label: "Help email" }, { id: "app", label: "Mobile app links" }];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Platform rules"
+        title="System settings"
         description="The rules every club, page and report on Wildcat Clubs follows. Changes apply right away — numbers like activity and review eligibility are recomputed from attendance, so nothing needs re-running."
       />
+
+      {/* Until a sysadmin saves or confirms them once, the WSUSA contacts are only what weber.edu publishes. */}
+      {!stored.has("wsusa.office") ? (
+        <Callout tone="warning" icon={<TriangleAlert />} title="Confirm WSUSA's contact details">
+          Founders see the review office and reviewers after they submit a club, and the assistant quotes them. They came from Student Involvement &amp; Leadership&apos;s pages on weber.edu. Check them with WSUSA, then save or confirm them in{" "}
+          <a href="#wsusa" className="font-medium underline underline-offset-2">
+            WSUSA contacts
+          </a>
+          .
+        </Callout>
+      ) : null}
 
       <nav aria-label="Sections on this page" className="flex gap-1.5 overflow-x-auto pb-1">
         {jump.map((j) => (
@@ -118,9 +133,17 @@ export default async function PlatformRulesPage() {
       />
 
       <RulesSection
+        id="help"
+        title="Help email"
+        description="Where people write when they need someone at WSUSA to step in."
+        fields={[emailField("platform.supportEmail", "wsusa@weber.edu")]}
+        lastChanged={lastChanged(["platform.supportEmail"])}
+      />
+
+      <RulesSection
         id="app"
         title="Mobile app links"
-        description="Store links for the “Get the app” prompt students see after registering for a club and on the Get the app page."
+        description="Store links for the Get the app page. Until one is set, nobody sees a “Get the app” prompt, and the page says the app is on its way."
         fields={[urlField("app.iosUrl", "https://apps.apple.com/…"), urlField("app.androidUrl", "https://play.google.com/store/apps/…")]}
         lastChanged={lastChanged(APP_KEYS)}
       />

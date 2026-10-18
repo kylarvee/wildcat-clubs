@@ -49,7 +49,7 @@ export async function assertClubCap(actor: Actor | null, clubId: string, cap: Ca
   const access = await getClubAccess(actor, clubId);
   if (!access) throw notFound("Club");
   if (!access.capabilities.has(cap)) {
-    if (access.suspended) throw forbidden("Your leadership permissions are paused until you finish your required training or test.");
+    if (access.suspended) throw forbidden("Your leadership permissions are paused until you finish your overdue WSUSA requirement.");
     throw forbidden();
   }
   return access;

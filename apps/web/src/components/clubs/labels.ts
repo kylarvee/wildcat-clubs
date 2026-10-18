@@ -1,46 +1,31 @@
-import type { ClubCategory, ClubScope, ClubType, EventKind, JoinPolicy } from "@prisma/client";
-import type { Tone } from "@/components/ui/badge";
+import type { EventKind } from "@prisma/client";
 
 /**
  * Plain-language labels for club fields. Shared by server pages and client
- * filters, so this module must stay free of server-only imports.
+ * filters, so this module must stay free of server-only imports. The club
+ * field labels live in lib/labels/clubs and are re-exported here for the code
+ * that has always imported them from this file.
  */
 
-export const CLUB_TYPES: ClubType[] = ["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"];
-export const CLUB_SCOPES: ClubScope[] = ["COLLEGE", "UNIVERSITY", "INDEPENDENT", "SPORTS"];
-
-export const CLUB_TYPE_LABEL: Record<ClubType, string> = {
-  SPONSORED: "Sponsored",
-  AFFILIATE: "Affiliate",
-  REGISTERED: "Registered",
-  COLLEGE_AMBASSADORS: "College Ambassadors",
-};
-
-export const CLUB_TYPE_HINT: Record<ClubType, string> = {
-  SPONSORED: "Backed by an academic department",
-  AFFILIATE: "Tied to a university office or program",
-  REGISTERED: "Student-run and registered with WSUSA",
-  COLLEGE_AMBASSADORS: "A college's student ambassador team",
-};
-
-export const CLUB_TYPE_TONE: Record<ClubType, Tone> = {
-  SPONSORED: "brand",
-  AFFILIATE: "info",
-  REGISTERED: "neutral",
-  COLLEGE_AMBASSADORS: "success",
-};
-
-export const CLUB_SCOPE_LABEL: Record<ClubScope, string> = {
-  COLLEGE: "College",
-  UNIVERSITY: "University-wide",
-  INDEPENDENT: "Independent",
-  SPORTS: "Sports",
-};
-
-export const JOIN_POLICY_LABEL: Record<JoinPolicy, string> = {
-  OPEN: "Open — anyone can register",
-  APPROVAL: "Leaders approve new members",
-};
+export {
+  CLUB_CATEGORIES,
+  CLUB_CATEGORY_LABEL,
+  CLUB_SCOPE_LABEL,
+  CLUB_SCOPES,
+  CLUB_STATUS_LABEL,
+  CLUB_STATUS_TONE,
+  CLUB_TYPE_HINT,
+  CLUB_TYPE_LABEL,
+  CLUB_TYPE_TONE,
+  CLUB_TYPES,
+  JOIN_POLICY_LABEL,
+  JOIN_POLICY_SHORT,
+  STANDING_HINT,
+  STANDING_LABEL,
+  STANDING_TONE,
+  standingOf,
+  type ClubStanding,
+} from "@/lib/labels/clubs";
 
 export const EVENT_KIND_LABEL: Record<EventKind, string> = {
   MEETING: "Meeting",
@@ -67,18 +52,6 @@ export function plural(n: number, one: string, many = `${one}s`) {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
 
-/** WSUSA's club sub-categories (the type — Sponsored / Registered / Affiliated — is separate). */
-export const CLUB_CATEGORY_LABEL: Record<ClubCategory, string> = {
-  ACADEMIC: "Academic",
-  CULTURAL: "Cultural",
-  FSL: "Fraternity & Sorority Life",
-  HONOR_SOCIETY: "Honor society",
-  SERVICE_ADVOCACY: "Service & advocacy",
-  STUDENT_LIFE: "Student life & special interest",
-  RELIGIOUS: "Religious",
-};
-
-export const CLUB_CATEGORIES = Object.keys(CLUB_CATEGORY_LABEL) as ClubCategory[];
 
 export const SOCIAL_PLATFORMS = ["instagram", "facebook", "x", "tiktok", "discord", "linkedin", "youtube", "other"] as const;
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];

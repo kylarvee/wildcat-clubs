@@ -173,7 +173,22 @@ function ClubAttendanceCard({ entry, selected, onPress }: { entry: MClubAttendan
   const c = useColors();
   const s = entry.summary;
   const member = entry.membershipStatus === 'ACTIVE';
-  const label = member ? (s.active ? 'Active' : 'Member') : entry.membershipStatus === 'PENDING' ? 'Requested' : entry.membershipStatus === 'ALUMNI' ? 'Alumni' : entry.membershipStatus === 'LEFT' ? 'Left' : 'Guest';
+  // Never a member there (a guest visit) is the only "Guest"; every membership status says what it is.
+  const label = member
+    ? s.active
+      ? 'Attending'
+      : 'Member'
+    : entry.membershipStatus === 'PENDING'
+      ? 'Request pending'
+      : entry.membershipStatus === 'DECLINED'
+        ? 'Request declined'
+        : entry.membershipStatus === 'REMOVED'
+          ? 'Removed'
+          : entry.membershipStatus === 'ALUMNI'
+            ? 'Alumni'
+            : entry.membershipStatus === 'LEFT'
+              ? 'Left'
+              : 'Guest';
   return (
     <Pressable
       onPress={onPress}
@@ -195,7 +210,7 @@ function ClubAttendanceCard({ entry, selected, onPress }: { entry: MClubAttendan
           {member && s.rate != null ? ` · ${pct(s.rate)}` : ''}
         </Text>
       </View>
-      <Badge label={label} tone={member && s.active ? 'success' : label === 'Requested' ? 'warning' : 'neutral'} />
+      <Badge label={label} tone={member && s.active ? 'success' : label === 'Request pending' ? 'warning' : 'neutral'} />
     </Pressable>
   );
 }
@@ -244,7 +259,7 @@ function NotificationsSetting() {
                 ? 'Notifications are blocked for Wildcat Clubs in your phone’s settings.'
                 : unavailable
                   ? push.reason
-                  : 'Off. Your inbox in the app still updates.'}
+                  : 'Off. Your notifications in the app still update.'}
           </Text>
         </View>
         <Toggle value={on} onValueChange={(v) => void toggle(v)} disabled={busy || unavailable || (push.kind === 'denied' && !push.canAskAgain)} accessibilityLabel="Push notifications on this phone" />

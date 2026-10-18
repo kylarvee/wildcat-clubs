@@ -201,30 +201,6 @@ export const EVENT_IDEAS: Record<Topic, EventIdea[]> = {
   ],
 };
 
-export const DRAFT_IDEAS: Record<Topic, string[]> = {
-  tech: ["Alumni panel in the spring?", "Joint hackathon with Utah State", "Open house for the makerspace", "Workshop: intro to Raspberry Pi"],
-  business: ["Trip to the Salt Lake CFA Society lunch", "Mock interview night with Goddard career services", "Panel on starting a business in Ogden"],
-  health: ["Shadowing info night", "Partner with Nursing on a health fair", "MCAT practice exam day"],
-  science: ["Field trip to the Hansen Planetarium", "Demo show for elementary schools", "Lab tour at a local biotech company"],
-  socsci: ["Town hall with local legislators", "Documentary night", "Grad school application workshop"],
-  education: ["Classroom supply drive", "Panel with first-year teachers"],
-  arts: ["Collaborative show with the dance program", "Student showcase night", "Field trip to the Utah Shakespeare Festival"],
-  culture: ["Cultural food fair", "Speaker series with alumni", "Joint social with another cultural club"],
-  service: ["Habitat for Humanity build day", "Winter coat drive", "Valentine's cards for the veterans home"],
-  sports: ["Spring trip to Moab", "Learn-to-play clinic", "Alumni game"],
-  games: ["Charity tournament", "Convention carpool", "Collaborative mural"],
-  ambassadors: ["Club leaders breakfast", "College-wide service day"],
-  faith: ["Retreat in the spring", "Interfaith dinner", "Service trip"],
-  advocacy: ["Candidate forum", "Speaker series", "Teach-in on campus"],
-  greek: ["Philanthropy week", "Alumni brunch", "Joint mixer with another chapter"],
-  honor: ["Induction ceremony venue", "Tutoring partnership with the Learning Center", "Conference trip"],
-  media: ["Live broadcast of a home game", "Workshop with a local newsroom", "Podcast series"],
-  music: ["Spring concert", "Instrument drive for local schools", "Recording session"],
-  dance: ["Spring showcase", "Partner with another dance club", "Beginner series"],
-  spirit: ["Road trip to an away game", "Homecoming float", "New student orientation booth"],
-  film: ["Halloween marathon", "Campus short film contest", "Screening with a local filmmaker"],
-  general: ["Spring social", "Joint event with another club", "Fundraiser idea"],
-};
 
 export const REVIEWS = {
   5: [

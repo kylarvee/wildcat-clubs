@@ -98,7 +98,7 @@ export default async function ClubAttendancePage({ params, searchParams }: { par
       <Section title="This term at a glance" description={`${term.label} so far. Rates count members only; guests are people from outside the club.`}>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Stat label="Avg. attendance" value={pct(avgTermRate)} hint={termRates.length ? `across ${termRates.length} event${termRates.length === 1 ? "" : "s"}` : "No check-ins yet this term"} />
-          <Stat label="Active members" value={activeIds.length} hint={`of ${registered} registered`} />
+          <Stat label="Attending members" value={activeIds.length} hint={`of ${registered} registered`} />
           <Stat label="Retention · month" value={pct(retMonth.at(-1)?.rate)} hint={retentionHint(retMonth)} />
           <Stat label="Retention · quarter" value={pct(retQuarter.at(-1)?.rate)} hint={retentionHint(retQuarter)} />
           <Stat label="Guests" value={guestsThisTerm} hint="non-members who checked in" className="col-span-2 sm:col-span-1" />
@@ -160,7 +160,7 @@ function CheckinPanel({ list, base, slug, now }: { list: ClubCheckinList; base: 
     <Card>
       <CardHeader
         title="Check-in"
-        description="Put the QR screen on a projector or hold up your phone at the door. Members can also check themselves in from the app while the event is on."
+        description="Put the QR screen on a projector or hold up your phone at the door. Members can also type the code it shows, and at online events they check in with one tap."
       />
       {list.current.length === 0 ? (
         <div className="flex flex-wrap items-center gap-3 px-5 py-5 text-sm text-ink-2">

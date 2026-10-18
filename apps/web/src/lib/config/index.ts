@@ -44,22 +44,43 @@ export const CONFIG_DEFAULTS = {
   "integrations.push": false,
 
   /**
-   * Shown to founders after they submit a club for review.
-   * PLACEHOLDER contact details — a sysadmin must confirm them with WSUSA before launch.
+   * Shown to founders after they submit a club for review, and quoted by the
+   * assistant. Student Involvement & Leadership (SIL) runs Clubs & Organizations
+   * (https://www.weber.edu/studentinvolvement/). Room, hours, phone and email are
+   * its Ogden office's, from https://www.weber.edu/studentinvolvement/contact.html
+   * (checked October 2026). Leave a field blank when weber.edu doesn't publish it.
+   * reviewDays isn't published there: it's the platform's own estimate.
+   * System settings asks a sysadmin to confirm these with WSUSA.
    */
   "wsusa.office": {
-    name: "WSUSA Clubs & Organizations",
-    location: "Shepherd Union Building, Student Involvement & Leadership offices",
-    hours: "Monday–Friday, 8 a.m.–5 p.m.",
-    email: "wsusa-clubs@weber.edu",
-    phone: "",
+    name: "Student Involvement & Leadership",
+    location: "Shepherd Union, Room 326",
+    hours: "Monday–Friday, 8 a.m.–6 p.m.; Wednesday, 7 a.m.–7 p.m. (extended hours by appointment)",
+    email: "wsusa@weber.edu",
+    phone: "801-626-6349",
     reviewDays: 10,
   },
+  /**
+   * Roles, never named people. Clubs & Organizations staff work in SIL
+   * (https://www.weber.edu/co/forms.html); the email is SIL's public one, from
+   * https://www.weber.edu/studentinvolvement/contact.html. The C&O pages
+   * (https://www.weber.edu/co/) publish no general clubs address.
+   */
   "wsusa.reviewers": [
-    { name: "Clubs & Orgs Coordinator", title: "WSUSA Clubs & Organizations", email: "wsusa-clubs@weber.edu" },
+    { name: "Clubs & Organizations staff", title: "Student Involvement & Leadership", email: "wsusa@weber.edu" },
   ] as { name: string; title: string; email: string }[],
 
-  /** Mobile app store links shown in the "get the app" prompt. */
+  /**
+   * Where Settings tells people to write when they need someone to step in (a
+   * graduation marked by mistake, a retired profile). SIL's public email, from
+   * https://www.weber.edu/studentinvolvement/contact.html.
+   */
+  "platform.supportEmail": "wsusa@weber.edu",
+
+  /**
+   * Mobile app store links. While both are blank, no "Get the app" prompt shows
+   * (lib/clubs/queries shouldPromptForApp) and /get-the-app says the app is on its way.
+   */
   "app.iosUrl": "",
   "app.androidUrl": "",
 } as const;

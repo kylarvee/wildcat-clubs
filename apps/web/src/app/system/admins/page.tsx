@@ -11,10 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { AdminRowActions, GrantAdminForm } from "@/components/system/AdminActions";
+import type { ActionName } from "@/lib/lake/actions";
 
 export const metadata: Metadata = { title: "Administrators" };
 
-const ROLE_ACTIONS = ["system.admin_granted", "system.admin_revoked", "system.sysadmin_granted", "system.sysadmin_revoked"];
+/** Platform role changes (lib/lake/actions), told about the person whose role changed. */
+const ROLE_ACTIONS: ActionName[] = ["system.admin_granted", "system.admin_revoked", "system.sysadmin_granted", "system.sysadmin_revoked"];
 const CHANGE_LABEL: Record<string, string> = {
   "system.admin_granted": "made an administrator",
   "system.admin_revoked": "removed as an administrator",
@@ -84,7 +86,7 @@ export default async function AdminsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Administrators"
-        description="Administrators are WSUSA staff: they can do everything in every club and use the admin tools, but can't change platform rules or add administrators. System administrators can do everything, including this page."
+        description="Administrators are WSUSA staff: they can do everything in every club and use the admin tools, but can't change system settings or add administrators. System administrators can do everything, including this page."
       />
 
       <Card>

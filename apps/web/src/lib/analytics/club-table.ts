@@ -1,4 +1,5 @@
 import type { ClubScope, ClubStatus, ClubType } from "@prisma/client";
+import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, CLUB_TYPES, STANDING_HINT, STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
 
 /**
  * The admin club-analytics table: one row per club, with filters, sorting and
@@ -24,7 +25,7 @@ export type ClubAnalyticsRow = {
   collegeShort: string | null;
   /** Registered (ACTIVE) members. */
   registered: number;
-  /** Members active by attendance (lib/metrics). */
+  /** Attending members: active by attendance (lib/metrics). */
   active: number;
   /** Month retention: last complete month vs. the one before (lib/metrics clubListMetrics). */
   retention: number | null;
@@ -39,36 +40,29 @@ export type ClubAnalyticsRow = {
   crossCheckins: number;
 };
 
-export const CLUB_TYPE_NAMES: Record<ClubType, string> = {
-  SPONSORED: "Sponsored",
-  AFFILIATE: "Affiliate",
-  REGISTERED: "Registered",
-  COLLEGE_AMBASSADORS: "College Ambassadors",
-};
+/** Type names (lib/labels/clubs), under the name analytics code imports. */
+export const CLUB_TYPE_NAMES: Record<ClubType, string> = CLUB_TYPE_LABEL;
 
+/** Approved clubs by standing, then the other recognition stages. Labels come from lib/labels/clubs. */
 export const STAGES: { key: ClubStage; label: string; hint: string }[] = [
-  { key: "active", label: "Active", hint: "Approved and meeting the activity bar on its own record" },
-  { key: "pilot", label: "In pilot", hint: "New club, counted as active until its pilot period ends" },
-  { key: "inactive", label: "Inactive", hint: "Approved but below the activity bar" },
-  { key: "founding", label: "In founding", hint: "Draft, waiting on WSUSA, or sent back for changes" },
-  { key: "retired", label: "Retired", hint: "Wound down; history kept" },
-  { key: "rejected", label: "Not approved", hint: "WSUSA decided not to approve it" },
+  { key: "active", label: STANDING_LABEL.active, hint: STANDING_HINT.active },
+  { key: "pilot", label: STANDING_LABEL.pilot, hint: STANDING_HINT.pilot },
+  { key: "inactive", label: STANDING_LABEL.inactive, hint: STANDING_HINT.inactive },
+  { key: "founding", label: "In founding", hint: "Draft, in WSUSA review, or sent back for changes" },
+  { key: "retired", label: CLUB_STATUS_LABEL.RETIRED, hint: "Wound down; history kept" },
+  { key: "rejected", label: CLUB_STATUS_LABEL.REJECTED, hint: "WSUSA decided not to approve it" },
 ];
 
 export const STAGE_TONE: Record<ClubStage, "success" | "info" | "warning" | "neutral" | "brand" | "danger"> = {
-  active: "success",
-  pilot: "info",
-  inactive: "warning",
+  ...STANDING_TONE,
   founding: "brand",
   retired: "neutral",
   rejected: "neutral",
 };
 
-const FOUNDING_LABEL: Partial<Record<ClubStatus, string>> = { DRAFT: "Draft", SUBMITTED: "Waiting on WSUSA", CHANGES_REQUESTED: "Changes requested" };
-
-/** The badge text for a row: "Active", "In pilot", "Draft", "Waiting on WSUSA"… */
+/** The badge text for a row: "Active", "Pilot period", "Draft", "In WSUSA review"… */
 export function stageLabel(row: Pick<ClubAnalyticsRow, "stage" | "status">): string {
-  if (row.stage === "founding") return FOUNDING_LABEL[row.status] ?? "In founding";
+  if (row.stage === "founding") return CLUB_STATUS_LABEL[row.status];
   return STAGES.find((s) => s.key === row.stage)!.label;
 }
 
@@ -98,7 +92,7 @@ export type TableFilters = {
 
 export const SORT_KEYS: SortKey[] = ["name", "stage", "registered", "active", "retention", "attendance", "events", "rating", "connections"];
 const WORD_SORTS: SortKey[] = ["name", "stage"];
-const TYPES: ClubType[] = ["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"];
+const TYPES: ClubType[] = CLUB_TYPES;
 const STAGE_FILTERS: StageFilter[] = ["approved", "active", "pilot", "inactive", "founding", "retired", "rejected"];
 
 /** Words sort A–Z first, numbers high-to-low first (the clubs list does the same). */
@@ -212,7 +206,7 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       "College",
       "Status",
       "Registered members",
-      "Active members",
+      "Attending members",
       "Retention, last month (%)",
       `Average attendance rate${term} (%)`,
       `Events held${term}`,

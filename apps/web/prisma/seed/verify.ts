@@ -4,6 +4,7 @@
  */
 import { PrismaClient, type ClubRole } from "@prisma/client";
 import { PERSONAS } from "@/lib/auth/personas";
+import { awaitingGrade, requirementState as ruleState } from "@/lib/authz/requirement-rules";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
 import { unanimousChoice } from "@/lib/roles/pipeline";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
@@ -27,26 +28,60 @@ async function club(key: string) {
   return db.club.findUniqueOrThrow({ where: { slug: clubByKey(key).slug } });
 }
 
-/** Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat. */
+/** Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat, as of `at`. */
 let cached: { periodStart: Date; reqs: Awaited<ReturnType<typeof db.roleRequirement.findMany>> } | null = null;
-async function requirementState(userId: string, assignmentStartedAt: Date, clubApprovedAt: Date | null) {
+async function requirementState(userId: string, assignmentStartedAt: Date, clubApprovedAt: Date | null, at: Date = NOW) {
   if (!cached) {
     const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
     const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
     cached = { periodStart: terms.find((x) => x.academicYear === t.academicYear)!.startsOn, reqs: await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" } } }) };
   }
   const { periodStart, reqs } = cached;
-  const out: { name: string; met: boolean; dueAt: Date; overdue: boolean }[] = [];
+  const out: { name: string; met: boolean; waiting: boolean; dueAt: Date; overdue: boolean }[] = [];
   for (const r of reqs) {
-    const met =
-      r.kind === "TEST"
-        ? (await db.testAttempt.count({ where: { testId: r.testId!, userId, passed: true, submittedAt: { gte: periodStart } } })) > 0
-        : (await db.attendance.count({ where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId! } } })) > 0;
     const clock = Math.max(assignmentStartedAt.getTime(), clubApprovedAt?.getTime() ?? 0, periodStart.getTime(), r.createdAt.getTime());
     const dueAt = new Date(clock + r.graceDays * DAY);
-    out.push({ name: r.name, met, dueAt, overdue: !met && NOW > dueAt });
+    let met: boolean;
+    let waiting = false;
+    if (r.kind === "TEST") {
+      const attempts = await db.testAttempt.findMany({
+        where: { testId: r.testId!, userId, submittedAt: { gte: periodStart }, OR: [{ passed: true }, { status: "NEEDS_REVIEW" }] },
+        select: { status: true, passed: true, submittedAt: true },
+      });
+      met = attempts.some((a) => a.passed);
+      waiting = !met && awaitingGrade(attempts, dueAt);
+    } else {
+      met = (await db.attendance.count({ where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId! } } })) > 0;
+    }
+    out.push({ name: r.name, met, waiting, dueAt, overdue: ruleState({ met, awaitingGrade: waiting, dueAt, at }) === "overdue" });
   }
   return out;
+}
+
+/**
+ * Task kinds and the grading rule: REQUIREMENT is only what WSUSA requires
+ * (always required); a club's quiz is a TEST task; and an officer test handed
+ * in on time that waits for grading never pauses anyone, even past its deadline.
+ */
+async function taskChecks() {
+  check((await db.task.count({ where: { kind: "REQUIREMENT", required: false } })) === 0, "Every REQUIREMENT task is required (tests that aren't WSUSA requirements are TEST tasks)");
+  const quiz = await db.task.groupBy({ by: ["kind"], where: { title: "Take: Event Safety Quiz" }, _count: { _all: true } });
+  const quizTests = quiz.find((g) => g.kind === "TEST")?._count._all ?? 0;
+  check(quizTests >= 30 && quiz.every((g) => g.kind === "TEST"), "The Event Safety Quiz tasks are TEST tasks (a club test, not a requirement)", quiz.map((g) => `${g.kind} ${g._count._all}`).join(", "));
+
+  const officerTest = await db.test.findFirst({ where: { title: "Club Officer Policy Test" }, select: { id: true } });
+  const waiting = officerTest ? await db.testAttempt.findMany({ where: { testId: officerTest.id, status: "NEEDS_REVIEW" }, select: { userId: true, submittedAt: true, user: { select: { name: true } } } }) : [];
+  const safe: string[] = [];
+  for (const w of waiting) {
+    const task = await db.task.findFirst({ where: { assigneeId: w.userId, sourceType: "requirement", status: "OPEN", kind: "REQUIREMENT", required: true, href: `/tests/${officerTest!.id}` }, select: { dueAt: true } });
+    const seat = await db.roleAssignment.findFirst({ where: { userId: w.userId, endedAt: null, role: { in: ["OFFICER", "VP", "PRESIDENT"] }, club: { status: "APPROVED" } }, include: { club: true } });
+    if (!task?.dueAt || !seat || !w.submittedAt || w.submittedAt > task.dueAt) continue;
+    // Now, and two days after the deadline: waiting for grading, not overdue.
+    const now = (await requirementState(w.userId, seat.startedAt, seat.club.approvedAt)).find((r) => r.name === "Club Officer Policy Test");
+    const later = (await requirementState(w.userId, seat.startedAt, seat.club.approvedAt, new Date(task.dueAt.getTime() + 2 * DAY))).find((r) => r.name === "Club Officer Policy Test");
+    if (now?.waiting && !now.overdue && later?.waiting && !later.overdue) safe.push(`${w.user.name} (due ${task.dueAt.toISOString().slice(5, 10)})`);
+  }
+  check(waiting.length >= 4 && safe.length === waiting.length, "Officer-test attempts waiting for grading were handed in on time: “Submitted — waiting for grading”, never overdue", safe.join(", "));
 }
 
 async function hostCheckins(userId: string, clubId: string) {
@@ -267,8 +302,17 @@ async function main() {
   check(recent > 0 || lastTwo > 0, `Maya is an active ${psych.name} member`);
   const service = await club("service");
   const live = await db.eventOccurrence.findFirst({ where: { startsAt: { lte: NOW }, endsAt: { gte: NOW }, event: { clubId: service.id } }, include: { event: true } });
-  check(Boolean(live) && live!.event.allowSelfCheckIn && live!.startsAt.getTime() >= NOW.getTime() - 25 * 60_000, `A ${service.name} event is live now with self check-in`, live ? `${live.event.title} (${live.checkinCode})` : "");
+  check(Boolean(live) && live!.startsAt.getTime() >= NOW.getTime() - 25 * 60_000, `A ${service.name} event is live now for check-in`, live ? `${live.event.title} (${live.checkinCode})` : "");
   check(live ? (await db.attendance.count({ where: { occurrenceId: live.id, userId: maya.id } })) === 0 : false, "Maya hasn't checked in to the live event");
+  // The one-tap prompt is only for online events (rules.allowsTapCheckIn), so one of Maya's clubs has one on now.
+  const premed = await club("premed");
+  const online = await db.eventOccurrence.findFirst({
+    where: { startsAt: { lte: NOW }, endsAt: { gte: NOW }, status: "SCHEDULED", event: { clubId: premed.id, locationType: "VIRTUAL", status: "SCHEDULED" } },
+    include: { event: true },
+  });
+  check(Boolean(online) && mayaClubs.some((m) => m.clubId === premed.id), `An online ${premed.name} event is live now, in one of Maya's clubs (her one-tap check-in prompt)`, online ? `${online.event.title} (${online.checkinCode})` : "");
+  check(online ? (await db.attendance.count({ where: { occurrenceId: online.id, userId: maya.id } })) === 0 : false, "…Maya hasn't checked in to it");
+  check(online ? (await db.attendance.count({ where: { occurrenceId: online.id, method: "TAP" } })) > 0 : false, "…and a few members already checked in with one tap (TAP)");
   const endOfDay = new Date(NOW.getTime() + 8 * 3_600_000);
   check((await db.eventOccurrence.count({ where: { startsAt: { gt: NOW, lte: endOfDay }, event: { clubId: { in: mayaClubs.map((m) => m.clubId) } } } })) > 0, "Another of Maya's clubs has an event later today");
 
@@ -418,6 +462,21 @@ async function main() {
   );
   check(Number(unsub[0].n) === 0, "Every active member of an approved club is subscribed to its calendar");
   check((await db.attendance.count({ where: { checkedInAt: { gt: NOW } } })) === 0, "No check-ins in the future");
+  // How people check in (lib/attendance/rules decideMethod): one tap only online, codes and taps only for the hosts' members.
+  const methods = await db.attendance.groupBy({ by: ["method"], _count: { _all: true } });
+  const tapRows = methods.find((m) => m.method === "TAP")?._count._all ?? 0;
+  const tapInPerson = await db.attendance.count({ where: { method: "TAP", occurrence: { event: { locationType: { not: "VIRTUAL" } } } } });
+  check(tapRows > 0 && tapInPerson === 0, "One-tap check-ins (TAP) exist, and only at online events", methods.map((m) => `${m.method} ${m._count._all}`).join(", "));
+  const universityCodes = await db.attendance.count({ where: { method: { in: ["SELF", "TAP"] }, occurrence: { event: { clubId: null } } } });
+  check(universityCodes === 0, "No typed-code or one-tap check-ins at university events (they have no host club)", `${universityCodes} found`);
+  const outsiders = await db.$queryRawUnsafe<{ n: bigint }[]>(
+    `select count(*) n from "Attendance" a join "EventOccurrence" o on o.id = a."occurrenceId" join "Event" e on e.id = o."eventId"
+      where a.method in ('SELF', 'TAP') and not exists (
+        select 1 from (select e."clubId" as id union select c."clubId" from "EventCohost" c where c."eventId" = e.id and c.status = 'APPROVED') x
+         where exists (select 1 from "Membership" m where m."userId" = a."userId" and m."clubId" = x.id and m."joinedAt" <= a."checkedInAt" and (m."endedAt" is null or m."endedAt" > a."checkedInAt") and m.status not in ('PENDING', 'DECLINED'))
+            or exists (select 1 from "RoleAssignment" r where r."userId" = a."userId" and r."clubId" = x.id and r."startedAt" <= a."checkedInAt" and (r."endedAt" is null or r."endedAt" > a."checkedInAt")))`,
+  );
+  check(Number(outsiders[0].n) === 0, "Typed-code and one-tap check-ins are all by members of the host or a co-host club", `${outsiders[0].n} exceptions`);
   const futureAtt = await db.attendance.count({ where: { occurrence: { startsAt: { gt: NOW } } } });
   check(futureAtt === 0, "No check-ins at occurrences that haven't started");
   const polisci = await club("discgolf");
@@ -451,6 +510,9 @@ async function main() {
   const slugs = ["review-integrity", "anonymous-reporting", "club-registration", "officer-eligibility-and-training", "event-safety", "funding-and-purchasing", "hazing-prohibition", "non-discrimination", "files-and-messaging-acceptable-use"];
   check((await db.policy.count({ where: { slug: { in: slugs } } })) === slugs.length, "All nine policy slugs exist");
   check((await db.policy.count({ where: { documentFileId: { not: null }, bodyHtml: null } })) === 1 && (await db.policy.count({ where: { status: "DRAFT" } })) === 1, "One PDF-only policy and one draft");
+
+  console.log("Tasks");
+  await taskChecks();
 
   await searchChecks();
   await ambassadorChecks();

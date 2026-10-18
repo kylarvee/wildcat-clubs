@@ -49,7 +49,7 @@ export default async function ClubRequestsPage({ params }: { params: Promise<{ s
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Stat label="Requested, all time" value={<TileMoney cents={totals.requested} />} hint={plural(requests.filter((r) => r.status !== "DRAFT" && r.status !== "WITHDRAWN").length, "request") + " sent"} />
             <Stat label="Approved, all time" value={<TileMoney cents={totals.approved} />} hint={totals.requested ? `${Math.round((totals.approved / totals.requested) * 100)}% of what was asked` : "Nothing decided yet"} />
-            <Stat label="In review now" value={<TileMoney cents={totals.pending} />} hint={`${requests.filter((r) => r.status === "SUBMITTED").length} waiting on WSUSA`} className="col-span-2 sm:col-span-1" />
+            <Stat label="In WSUSA review" value={<TileMoney cents={totals.pending} />} hint={`${requests.filter((r) => r.status === "SUBMITTED").length} waiting on WSUSA`} className="col-span-2 sm:col-span-1" />
           </div>
           {groups.map(([termId, g]) => (
             <section key={termId} className="space-y-2" aria-labelledby={`term-${termId}`}>

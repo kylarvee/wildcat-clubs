@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/layout";
 import { RequirementForm } from "../RequirementForm";
 import { requireRequirementAdmin } from "../guard";
 
-export const metadata: Metadata = { title: "New officer requirement" };
+export const metadata: Metadata = { title: "New WSUSA requirement" };
 
 export default async function NewRequirementPage() {
   await requireRequirementAdmin("/admin/requirements/new");

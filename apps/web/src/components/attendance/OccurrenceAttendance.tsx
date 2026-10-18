@@ -1,7 +1,9 @@
 import Link from "next/link";
+import type { CheckInMethod } from "@prisma/client";
 import { Users } from "lucide-react";
 import { loadOccurrenceAttendees, type OccurrenceSummary } from "@/lib/attendance/queries";
 import { pct } from "@/lib/attendance/matrix";
+import { CHECKIN_METHODS, METHOD_SHORT } from "@/lib/attendance/rules";
 import { fmtDate, fmtTime } from "@/lib/time";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -34,15 +36,19 @@ export async function OccurrenceAttendance({
   personHref?: string;
 }) {
   const { attendees, membersAtTime, memberAttendees, guests, rate } = await loadOccurrenceAttendees(occurrence.id, memberClubId, occurrence.startsAt);
-  const counts = { QR: 0, SELF: 0, MANUAL: 0 };
+  const counts = Object.fromEntries(CHECKIN_METHODS.map((m) => [m, 0])) as Record<CheckInMethod, number>;
   for (const a of attendees) counts[a.method]++;
+  // "9 QR · 2 Code · 1 Leader": only the ways people actually used.
+  const byMethod = CHECKIN_METHODS.filter((m) => counts[m] > 0)
+    .map((m) => `${counts[m]} ${METHOD_SHORT[m]}`)
+    .join(" · ");
   const canAdd = canManage && !occurrence.cancelled && occurrence.windowState !== "NOT_OPEN";
   const sameDay = (d: Date) => fmtDate(d, "yyyy-MM-dd") === fmtDate(occurrence.startsAt, "yyyy-MM-dd");
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Checked in" value={attendees.length} hint={attendees.length ? `${counts.QR} QR · ${counts.SELF} self · ${counts.MANUAL} added` : "Nobody yet"} />
+        <Stat label="Checked in" value={attendees.length} hint={attendees.length ? byMethod : "Nobody yet"} />
         {memberClubId ? (
           <>
             <Stat label="Members" value={memberAttendees} hint={`of ${membersAtTime} members at the time`} />
@@ -63,10 +69,10 @@ export async function OccurrenceAttendance({
               title="No check-ins yet"
               description={
                 occurrence.windowState === "NOT_OPEN"
-                  ? "Check-in hasn't opened. People who scan the QR code will show up here."
+                  ? "Check-in hasn't opened. People who check in will show up here."
                   : canAdd
-                    ? "If people were there but didn't scan, add them by name."
-                    : "People who scan the QR code show up here."
+                    ? "If people were there but didn't check in, add them by name."
+                    : "People who check in show up here."
               }
             />
           ) : (

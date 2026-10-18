@@ -1,5 +1,5 @@
 import "server-only";
-import type { EventStatus, Prisma, Visibility } from "@prisma/client";
+import type { Prisma, Visibility } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, isAdmin } from "@/lib/authz";
@@ -12,7 +12,7 @@ import { getClubAccess, isAdmin } from "@/lib/authz";
  *   UNIVERSITY  any signed-in Weber State account
  *   MEMBERS     members and leaders of the host club or an approved co-host club
  *               (a university event marked MEMBERS is treated as UNIVERSITY)
- *   Drafts (a club's idea list) show only to the host club's event planners.
+ *   Cancelled events stay visible (crossed out) under the same rule.
  *   Events of clubs that aren't approved (or retired) show only to that club's leaders.
  *   Admins see everything.
  */
@@ -21,7 +21,6 @@ export type EventGate = {
   id: string;
   clubId: string | null;
   visibility: Visibility;
-  status: EventStatus;
   club?: { status: string } | null;
   cohosts?: { clubId: string; status: string }[];
 };
@@ -41,17 +40,16 @@ export async function viewerEventClubIds(actor: Actor | null): Promise<string[]>
 }
 
 /**
- * Prisma filter for the non-draft events a viewer may see.
- * `membersOnly: false` leaves MEMBERS events out entirely (public listings).
+ * Prisma filter for the events a viewer may see.
+ * `includeMembersOnly: false` leaves MEMBERS events out entirely (public listings).
  */
 export function eventVisibilityWhere(
   viewer: { signedIn: boolean; admin: boolean; memberClubIds: string[] },
   opts: { includeMembersOnly?: boolean } = {},
 ): Prisma.EventWhereInput {
-  const notDraft: Prisma.EventWhereInput = { status: { not: "DRAFT" } };
-  if (viewer.admin) return notDraft;
+  if (viewer.admin) return {};
   const listedClub: Prisma.EventWhereInput = { OR: [{ clubId: null }, { club: { status: { in: [...LISTED_CLUB_STATUSES] } } }] };
-  if (!viewer.signedIn) return { AND: [notDraft, listedClub, { visibility: "PUBLIC" }] };
+  if (!viewer.signedIn) return { AND: [listedClub, { visibility: "PUBLIC" }] };
   const open: Prisma.EventWhereInput[] = [{ visibility: { in: ["PUBLIC", "UNIVERSITY"] } }, { visibility: "MEMBERS", clubId: null }];
   const members: Prisma.EventWhereInput[] =
     opts.includeMembersOnly === false
@@ -60,7 +58,7 @@ export function eventVisibilityWhere(
           { visibility: "MEMBERS", clubId: { in: viewer.memberClubIds } },
           { visibility: "MEMBERS", cohosts: { some: { status: "APPROVED", clubId: { in: viewer.memberClubIds } } } },
         ];
-  return { AND: [notDraft, listedClub, { OR: [...open, ...members] }] };
+  return { AND: [listedClub, { OR: [...open, ...members] }] };
 }
 
 /** The same filter, loading the viewer's clubs. */
@@ -72,7 +70,6 @@ export async function visibleEventsWhere(actor: Actor | null, opts: { includeMem
 export async function eventAccess(actor: Actor | null, event: EventGate): Promise<EventAccess> {
   if (isAdmin(actor)) return { ok: true };
   const host = actor && event.clubId ? await getClubAccess(actor, event.clubId) : null;
-  if (event.status === "DRAFT") return host?.capabilities.has("events") ? { ok: true } : { ok: false, reason: "hidden" };
   if (event.clubId) {
     const clubStatus = event.club?.status ?? (await db.club.findUnique({ where: { id: event.clubId }, select: { status: true } }))?.status;
     if (!clubStatus) return { ok: false, reason: "hidden" };

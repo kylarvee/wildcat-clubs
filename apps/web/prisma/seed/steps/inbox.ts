@@ -105,7 +105,7 @@ function approvalTasks(ctx: Ctx) {
         href: `/clubs/${partner.slug}/manage/events`, status: c.status === "PENDING" ? "OPEN" : "DONE", sourceType: "cohost", sourceId: c.id, createdById: c.requestedById,
         createdAt: c.createdAt, completedAt: c.decidedAt, completedById: c.decidedById,
       });
-      if (c.status !== "PENDING") ctx.activity({ at: c.decidedAt ?? c.createdAt, actorId: c.decidedById, action: c.status === "APPROVED" ? "cohost.approved" : "cohost.declined", entityType: "eventCohost", entityId: c.id, clubId: partner.id, data: { eventId: ev.id, hostClubId: host.id }, isPublic: c.status === "APPROVED" });
+      if (c.status !== "PENDING") ctx.activity({ at: c.decidedAt ?? c.createdAt, actorId: c.decidedById, action: c.status === "APPROVED" ? "event.cohost_approved" : "event.cohost_declined", entityType: "eventCohost", entityId: c.id, clubId: partner.id, data: { eventId: ev.id, title: ev.title, hostClubId: host.id }, isPublic: c.status === "APPROVED" });
     }
   }
   // An EAST club without a College Ambassador asked EAST Ambassadors for one (domain/ambassadors).
@@ -270,7 +270,7 @@ function outbox(ctx: Ctx) {
   mail(ctx.person(ctx.club("aviation").founderId).email, "Changes requested: Aviation Club", "WSUSA reviewed Aviation Club and asked for a couple of changes before approval. Open the club workspace to see the note.", `/clubs/${ctx.club("aviation").slug}/manage`, 24 * 6.3);
   for (const a of ctx.admins) mail(a.email, `Possible review bombing: ${nm("discgolf")}`, "3 reviews of 2★ or lower in the last 48 hours.", `/admin/reviews?club=${ctx.club("discgolf").id}`, 9);
   for (const a of ctx.admins) mail(a.email, `Funding request: ${nm("fic")} — Fall speaker series`, "A new funding request is waiting for review.", "/admin/funding", 24 * 5.2);
-  mail(e("oscar"), "Your new role has required training", "Finish Club Officer Policy Test, Club Officer Training to keep your leadership permissions active.", "/tasks", 24 * 20.3);
+  mail(e("oscar"), "Your new role has WSUSA requirements", "Finish Club Officer Policy Test, Club Officer Training to keep your permissions on.", "/tasks", 24 * 20.3);
   mail(e("maya"), `Voting is open: ${nm("psych")} President`, "Cast your secret ballot before voting closes.", `/clubs/${ctx.club("psych").slug}`, 50);
   mail(e("maya"), "Starting now: Care Kit Assembly for the Weber Cares Pantry", "Check in when you arrive.", `/events/${ctx.refs.liveEventId}`, 0.25, "PUSH");
   mail(e("vanessa"), `Co-host request from ${nm("cyber")}`, `${nm("cyber")} asked SWE to co-host “Women in Cybersecurity Panel”.`, `/clubs/${ctx.club("swe").slug}/manage/events`, 30);
@@ -304,11 +304,11 @@ function activity(ctx: Ctx) {
     }
   }
   for (const ev of allEvents(ctx)) {
-    if (ev.createdAt >= since60) ctx.activity({ at: ev.createdAt, actorId: ev.createdById, action: ev.status === "DRAFT" ? "event.drafted" : "event.created", entityType: "event", entityId: ev.id, clubId: ev.clubId, data: { title: ev.title }, isPublic: ev.status === "SCHEDULED" && ev.visibility === "PUBLIC" });
+    if (ev.createdAt >= since60) ctx.activity({ at: ev.createdAt, actorId: ev.createdById, action: "event.created", entityType: "event", entityId: ev.id, clubId: ev.clubId, data: { title: ev.title }, isPublic: ev.status === "SCHEDULED" && ev.visibility === "PUBLIC" });
     for (const o of ev.occurrences) {
       if (o.startsAt < since30) continue;
       for (const [userId, a] of o.attendees) {
-        ctx.activity({ at: a.at, actorId: a.method === "MANUAL" ? a.recordedById : userId, action: "attendance.checkin", entityType: "attendance", entityId: a.id, clubId: ev.clubId, data: { occurrenceId: o.id, method: a.method, userId } });
+        ctx.activity({ at: a.at, actorId: a.method === "MANUAL" ? a.recordedById : userId, action: a.method === "MANUAL" ? "attendance.manual_add" : "attendance.checkin", entityType: "attendance", entityId: a.id, clubId: ev.clubId, data: { occurrenceId: o.id, eventId: ev.id, title: ev.title, method: a.method, userId }, isPublic: a.method !== "MANUAL" });
       }
     }
   }

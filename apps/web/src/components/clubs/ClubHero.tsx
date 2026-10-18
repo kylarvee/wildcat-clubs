@@ -8,13 +8,13 @@ import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Stars } from "@/components/ui/misc";
-import { CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, safeHex } from "@/components/clubs/labels";
+import { CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, JOIN_POLICY_LABEL, safeHex } from "@/components/clubs/labels";
 import { ClubStatusBadge } from "@/components/clubs/ClubCard";
 import { MemberMenu, RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
 
 /**
  * The club page hero: who the club is, how to join, and its calendar.
- * Signed-out visitors register through log-in and come back with ?register=1.
+ * Signed-out visitors register through sign-in and come back with ?register=1.
  */
 export function ClubHero({
   club,
@@ -69,7 +69,7 @@ export function ClubHero({
                     {CLUB_TYPE_LABEL[club.type]}
                   </Badge>
                   <ClubStatusBadge club={{ status: club.status, metrics, hasMetrics: metrics.hasMetrics }} />
-                  {club.joinPolicy === "APPROVAL" && approved ? <Badge>Leaders approve new members</Badge> : null}
+                  {club.joinPolicy === "APPROVAL" && approved ? <Badge>{JOIN_POLICY_LABEL.APPROVAL}</Badge> : null}
                 </div>
               </div>
             </div>
@@ -144,7 +144,7 @@ export function ClubHero({
               <SubscribeToggle variant="switch" clubId={club.id} clubName={club.name} slug={club.slug} subscribed={subscribed} signedIn={signedIn} className="mt-4 max-w-md" />
             ) : null}
             {approved && !signedIn ? (
-              <p className="mt-3 text-sm text-ink-3">Registering asks you to log in with your Weber State account first — then you&rsquo;re straight back here.</p>
+              <p className="mt-3 text-sm text-ink-3">Registering asks you to sign in with your Weber State account first — then you&rsquo;re straight back here.</p>
             ) : null}
           </div>
 

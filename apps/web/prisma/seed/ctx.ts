@@ -80,7 +80,7 @@ export type Occ = {
   roomOverride: string | null;
   checkinCode: string;
   checkinSecret: string;
-  attendees: Map<string, { id: string; at: Date; method: "QR" | "SELF" | "MANUAL"; recordedById: string | null }>;
+  attendees: Map<string, { id: string; at: Date; method: "QR" | "SELF" | "TAP" | "MANUAL"; recordedById: string | null }>;
 };
 
 export type Ev = {
@@ -89,7 +89,7 @@ export type Ev = {
   title: string;
   descriptionHtml: string | null;
   kind: EventKind;
-  status: "DRAFT" | "SCHEDULED" | "CANCELLED";
+  status: "SCHEDULED" | "CANCELLED";
   visibility: Visibility;
   startsAt: Date | null;
   durationMinutes: number;
@@ -105,7 +105,6 @@ export type Ev = {
   lat: number | null;
   lng: number | null;
   virtualUrl: string | null;
-  allowSelfCheckIn: boolean;
   createdById: string;
   createdAt: Date;
   termId: string | null;

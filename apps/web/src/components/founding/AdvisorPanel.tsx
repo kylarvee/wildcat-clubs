@@ -96,7 +96,7 @@ export function AdvisorPanel({
                     {i.email} · sent {i.sentLabel}
                   </span>
                 </span>
-                <Badge tone={i.hasAccount ? "info" : "neutral"}>{i.hasAccount ? "In their inbox" : "Email only"}</Badge>
+                <Badge tone={i.hasAccount ? "info" : "neutral"}>{i.hasAccount ? "In their Tasks" : "Email only"}</Badge>
                 {canInvite ? (
                   <span className="flex gap-1">
                     <Button
@@ -144,7 +144,7 @@ export function AdvisorPanel({
               {(id) => <Input id={id} name="email" type="email" inputMode="email" autoComplete="off" placeholder={`jordanlee@${staffDomain}`} required />}
             </Field>
           </div>
-          <p className="text-xs text-ink-3">They get an email explaining what advising means, plus a request in their Wildcat Clubs inbox if they already have an account.</p>
+          <p className="text-xs text-ink-3">They get an email explaining what advising means, plus a request in their Wildcat Clubs Tasks if they already have an account.</p>
           {error ? <Callout tone="danger">{error}</Callout> : null}
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={inviteForm.pending}>

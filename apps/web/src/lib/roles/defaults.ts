@@ -26,7 +26,7 @@ export const CLUB_SEATS: SeatTemplate[] = [
       "Leads the club and chairs its meetings",
       "Primary contact for the advisor and WSUSA",
       "Keeps the club in line with university policy, trainings and funding rules",
-      "Sets the org structure and names their successor per the bylaws",
+      "Sets the org structure and fills open seats with the advisor, following the club's bylaws",
       "Approves major plans, budgets and co-hosted events",
     ],
   },

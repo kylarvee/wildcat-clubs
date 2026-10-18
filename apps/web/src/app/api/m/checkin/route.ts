@@ -7,8 +7,8 @@ import type { MCheckinResult } from "../_types";
 
 /**
  * POST /api/m/checkin { url | code, token?, via } → MCheckinResult.
- * Scan-to-check-in ("mobile-scan") and the in-app "check in?" pop-up
- * ("mobile-popup"). Calls attendance.checkIn — the one write path for
+ * Scan or typed code ("mobile-scan") and the in-app "check in?" pop-up
+ * ("mobile-popup", one tap at an online event → TAP). Calls attendance.checkIn — the one write path for
  * attendance — so auto-enrolment, join gates, training requirements and the
  * activity log behave exactly as on the web. Repeating it is harmless
  * (status "ALREADY").

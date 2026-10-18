@@ -101,7 +101,6 @@ const DetailsShape = {
   descriptionHtml: z.string().max(200_000).nullish(),
   links: z.array(z.object({ label: z.string().trim().max(120).default(""), url: httpUrl })).max(20).default([]),
   visibility: VISIBILITY.default("PUBLIC"),
-  allowSelfCheckIn: z.boolean().default(true),
   /** Room time before and after (for reservations); not part of the listed time. */
   setupMinutes: z.coerce.number().int().min(0, "Setup can't be negative.").max(480, "Setup can be up to 8 hours.").default(0),
   cleanupMinutes: z.coerce.number().int().min(0, "Cleanup can't be negative.").max(480, "Cleanup can be up to 8 hours.").default(0),
@@ -115,11 +114,6 @@ const DetailsShape = {
 const EventSchema = z.object({ ...DetailsShape, ...ScheduleShape, ...LocationShape });
 const CreateSchema = EventSchema.extend({ clubId: z.string().nullable() });
 const ScheduleSchema = z.object(ScheduleShape);
-const IdeaSchema = z.object({
-  clubId: z.string().nullable(),
-  title: z.string().overwrite(oneLine).trim().min(1, "Give the idea a title.").max(140),
-  notes: z.string().max(5000).nullish(),
-});
 const MoveSchema = z.object({
   startsAt: z.coerce.date(),
   durationMinutes: z.coerce.number().int().min(5).max(14 * 24 * 60).optional(),
@@ -128,8 +122,6 @@ const MoveSchema = z.object({
 
 export type EventInput = z.input<typeof EventSchema>;
 export type CreateEventInput = z.input<typeof CreateSchema>;
-export type ScheduleInput = z.input<typeof ScheduleSchema>;
-export type IdeaInput = z.input<typeof IdeaSchema>;
 
 export type EventWriteResult = { id: string; google: Pick<GoogleSyncResult, "status" | "message"> };
 
@@ -169,13 +161,11 @@ export async function canManageEvent(actor: Actor | null, event: { clubId: strin
 
 /**
  * Visibility: PUBLIC anyone · UNIVERSITY signed-in accounts · MEMBERS members and
- * leaders of the host and approved co-host clubs. Ideas (drafts) only for managers.
- * Admins see everything. Pass `cohosts` as { clubId, status } rows (or leave it
+ * leaders of the host and approved co-host clubs. Admins see everything. The rule
+ * lives in lib/authz/events. Pass `cohosts` as { clubId, status } rows (or leave it
  * out to have them loaded); the EventGate type rejects other shapes.
  */
 export async function canViewEvent(actor: Actor | null, event: EventGate): Promise<boolean> {
-  // Drafts: university drafts belong to admins (trainings), club drafts to the club's planners.
-  if (event.status === "DRAFT" && !event.clubId) return canManageEvent(actor, event);
   return canViewEventRule(actor, event);
 }
 
@@ -278,17 +268,6 @@ function buildDescription(html: string | null | undefined, links: { label: strin
   return joined.trim() ? joined : null;
 }
 
-function notesToHtml(notes: string | null | undefined): string | null {
-  const text = (notes ?? "").trim();
-  if (!text) return null;
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return sanitizeRichHtml(
-    text
-      .split(/\n{2,}/)
-      .map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`)
-      .join(""),
-  );
-}
 
 /** Files must exist and be visible to the person attaching them. */
 async function assertAttachable(actor: Actor, fileIds: string[], already: string[]) {
@@ -587,7 +566,7 @@ export async function eventCostSummaries(eventIds: string[]): Promise<Map<string
   if (ids.length === 0) return out;
   const [items, occurrences, terms] = await Promise.all([
     db.budgetItem.findMany({ where: { eventId: { in: ids } }, select: { eventId: true, quantity: true, unitCostCents: true, perOccurrence: true, termId: true } }),
-    db.eventOccurrence.findMany({ where: { eventId: { in: ids }, status: "SCHEDULED", event: { status: { not: "DRAFT" } } }, select: { eventId: true, startsAt: true } }),
+    db.eventOccurrence.findMany({ where: { eventId: { in: ids }, status: "SCHEDULED" }, select: { eventId: true, startsAt: true } }),
     getTerms(),
   ]);
   const termName = new Map(terms.map((t) => [t.id, t.name]));
@@ -632,7 +611,6 @@ type EventFields = {
   title: string;
   kind: Event["kind"];
   visibility: Event["visibility"];
-  allowSelfCheckIn: boolean;
   setupMinutes: number;
   cleanupMinutes: number;
   descriptionHtml: string | null;
@@ -645,9 +623,9 @@ type EventFields = {
   costs?: CostRow[];
 };
 
-/** The meetings an event's saved rule produces (null for an idea, which has none). */
+/** The meetings an event's saved rule produces (null when it has no start yet). */
 function savedTimes(e: Event, terms: Term[]): OccurrenceTimes[] | null {
-  if (e.status === "DRAFT" || !e.startsAt) return null;
+  if (!e.startsAt) return null;
   return expandOccurrences(
     { startsAt: e.startsAt, durationMinutes: e.durationMinutes, allDay: e.allDay, recurrence: e.recurrence, interval: e.recurrenceInterval, weekdays: e.recurrenceWeekdays, until: e.recurrenceUntil, count: e.recurrenceCount },
     terms,
@@ -657,7 +635,7 @@ function savedTimes(e: Event, terms: Term[]): OccurrenceTimes[] | null {
 const sameTimes = (a: OccurrenceTimes[], b: OccurrenceTimes[]) =>
   a.length === b.length && a.every((o, i) => o.startsAt.getTime() === b[i].startsAt.getTime() && o.endsAt.getTime() === b[i].endsAt.getTime());
 
-/** The one place events are written. Create (existing = null), update, schedule an idea, or move. */
+/** The one place events are written. Create (existing = null), update, or move. */
 async function writeEvent(actor: Actor, club: HostClub | null, existing: Event | null, f: EventFields, action: string): Promise<EventWriteResult> {
   const terms = await getTerms();
   const desired = expandSchedule(f.schedule, terms);
@@ -685,7 +663,6 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
           title: f.title,
           kind: f.kind,
           visibility,
-          allowSelfCheckIn: f.allowSelfCheckIn,
           setupMinutes: f.setupMinutes,
           cleanupMinutes: f.cleanupMinutes,
           descriptionHtml: f.descriptionHtml,
@@ -726,7 +703,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
             clubId: club?.id ?? null,
             data: { title: event.title, recurrence: event.recurrence, startsAt: event.startsAt?.toISOString() ?? null },
             // A public event appearing on the calendar is safe to show on the club's feed.
-            isPublic: (!existing || existing.status === "DRAFT") && visibility === "PUBLIC",
+            isPublic: !existing && visibility === "PUBLIC",
           },
           tx,
         );
@@ -738,7 +715,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
 
   reindexEventClubsSoon(event.id, cohostsBefore);
   if (club && cohostChanges.length) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
-  if (club && existing && existing.status !== "DRAFT" && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
+  if (club && existing && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
   const google = await mirror(event.id, actor, f.createMeetLink);
   return { id: event.id, google: { status: google.status, message: google.message } };
 }
@@ -772,7 +749,6 @@ function fieldsFromInput(d: z.output<typeof EventSchema>, schedule: NormalizedSc
     title: d.title,
     kind: d.kind,
     visibility: d.visibility,
-    allowSelfCheckIn: d.allowSelfCheckIn,
     setupMinutes: d.setupMinutes,
     cleanupMinutes: d.cleanupMinutes,
     descriptionHtml: buildDescription(d.descriptionHtml, d.links),
@@ -790,7 +766,6 @@ function fieldsFromEvent(e: Event, schedule: NormalizedSchedule): EventFields {
     title: e.title,
     kind: e.kind,
     visibility: e.visibility,
-    allowSelfCheckIn: e.allowSelfCheckIn,
     setupMinutes: e.setupMinutes,
     cleanupMinutes: e.cleanupMinutes,
     descriptionHtml: e.descriptionHtml,
@@ -809,20 +784,19 @@ export async function createEvent(actor: Actor | null, input: unknown): Promise<
   return writeEvent(a, club, null, fieldsFromInput(d, schedule, location), club ? "event.created" : "event.university_created");
 }
 
-/** Save the full editor. Saving an idea (draft) with a time puts it on the calendar. */
+/** Save the full editor. */
 export async function updateEvent(actor: Actor | null, eventId: string, input: unknown): Promise<EventWriteResult> {
   const d = parse(EventSchema, input);
   const { actor: a, club, event } = await loadManaged(actor, eventId);
   const schedule = normalizeSchedule(d);
   const location = await normalizeLocation(d);
-  return writeEvent(a, club, event, fieldsFromInput(d, schedule, location), event.status === "DRAFT" ? "event.scheduled" : "event.updated");
+  return writeEvent(a, club, event, fieldsFromInput(d, schedule, location), "event.updated");
 }
 
 /** Drag-and-drop / resize on the Events Builder calendar (one-time events only). */
 export async function moveEvent(actor: Actor | null, eventId: string, input: unknown): Promise<EventWriteResult> {
   const d = parse(MoveSchema, input);
   const { actor: a, club, event } = await loadManaged(actor, eventId);
-  if (event.status === "DRAFT") throw invalid("Put the idea on the calendar first.");
   if (event.recurrence !== "NONE") throw invalid("Repeating events can't be dragged. Open the event to change its schedule.");
   const allDay = d.allDay ?? event.allDay;
   const schedule = normalizeSchedule({
@@ -838,42 +812,6 @@ export async function moveEvent(actor: Actor | null, eventId: string, input: unk
   return writeEvent(a, club, event, fieldsFromEvent(event, schedule), "event.moved");
 }
 
-/** Jot down an idea (a draft with no date) on the club's — or the university's — idea list. */
-export async function addIdea(actor: Actor | null, input: unknown) {
-  const d = parse(IdeaSchema, input);
-  const { actor: a, club } = await assertHost(actor, d.clubId);
-  const event = await db.event.create({
-    data: {
-      clubId: club?.id ?? null,
-      title: d.title,
-      descriptionHtml: notesToHtml(d.notes),
-      status: "DRAFT",
-      kind: club ? "MEETING" : "TRAINING",
-      visibility: club ? "PUBLIC" : "UNIVERSITY",
-      createdById: a.id,
-    },
-  });
-  await logActivity({ actorId: a.id, action: "event.idea_added", entityType: "event", entityId: event.id, clubId: club?.id ?? null, data: { title: event.title } });
-  return { id: event.id };
-}
-
-export async function updateIdea(actor: Actor | null, eventId: string, input: unknown) {
-  const d = parse(IdeaSchema.omit({ clubId: true }), input);
-  const { actor: a, event } = await loadManaged(actor, eventId);
-  if (event.status !== "DRAFT") throw conflict("This idea is already on the calendar. Edit the event instead.");
-  await db.event.update({ where: { id: event.id }, data: { title: d.title, descriptionHtml: notesToHtml(d.notes) } });
-  await logActivity({ actorId: a.id, action: "event.idea_updated", entityType: "event", entityId: event.id, clubId: event.clubId });
-  return { id: event.id };
-}
-
-/** Put an idea on the calendar: DRAFT → SCHEDULED with a time and repeat rule. */
-export async function scheduleIdea(actor: Actor | null, eventId: string, input: unknown): Promise<EventWriteResult> {
-  const d = parse(ScheduleSchema, input);
-  const { actor: a, club, event } = await loadManaged(actor, eventId);
-  if (event.status !== "DRAFT") throw conflict("This idea is already on the calendar.");
-  return writeEvent(a, club, event, fieldsFromEvent(event, normalizeSchedule(d)), "event.scheduled");
-}
-
 /**
  * Cancel the whole event: every upcoming meeting is marked cancelled (history
  * stays, and so does a meeting people already checked in to). Meetings that were
@@ -881,7 +819,6 @@ export async function scheduleIdea(actor: Actor | null, eventId: string, input: 
  */
 export async function cancelEvent(actor: Actor | null, eventId: string, reason?: string | null) {
   const { actor: a, club, event } = await loadManaged(actor, eventId);
-  if (event.status === "DRAFT") throw invalid("Ideas aren't on the calendar. Delete the idea instead.");
   if (event.status === "CANCELLED") return { id: event.id };
   const note = reason?.trim().slice(0, 300) || null;
   const now = new Date();
@@ -976,7 +913,7 @@ export async function setOccurrenceRoom(actor: Actor | null, occurrenceId: strin
 }
 
 /**
- * Delete an event or idea. Events with check-ins can only be cancelled, so attendance
+ * Delete an event. Events with check-ins can only be cancelled, so attendance
  * history stays; so can events whose cost lines a funding request locked (deleting
  * the event would delete those lines).
  */
@@ -989,16 +926,16 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
     db.budgetItem.findMany({ where: { eventId }, select: { id: true } }),
   ]);
   if (attended > 0) throw conflict("People already checked in to this event, so it can't be deleted. Cancel it instead — its history stays.");
-  if (requirement) throw conflict(`This training is the officer requirement “${requirement.name}”. Change that requirement first, or cancel the event instead.`);
+  if (requirement) throw conflict(`This training is the WSUSA requirement “${requirement.name}”. Change that requirement first, or cancel the event instead.`);
   const [lock] = (await costLineLocks(costLines.map((b) => b.id))).values();
   if (lock) throw conflict(`This event's costs are part of the funding request “${lock.title}”, so it can't be deleted. Cancel it instead — its costs stay.`);
   const cohosts = await db.eventCohost.findMany({ where: { eventId }, select: { id: true, clubId: true, status: true } });
   await db.$transaction(async (tx) => {
     for (const c of cohosts) await resolveTasks("cohost", c.id, a.id, tx, "CANCELLED");
     await tx.event.delete({ where: { id: eventId } });
-    await logActivity({ actorId: a.id, action: event.status === "DRAFT" ? "event.idea_deleted" : "event.deleted", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title } }, tx);
+    await logActivity({ actorId: a.id, action: "event.deleted", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title } }, tx);
   });
-  if (event.status !== "DRAFT") reindexClubSoon(event.clubId, ...cohosts.filter((c) => c.status === "APPROVED").map((c) => c.clubId));
+  reindexClubSoon(event.clubId, ...cohosts.filter((c) => c.status === "APPROVED").map((c) => c.clubId));
   await removeEventFromGoogle({ googleEventId: event.googleEventId, clubId: event.clubId });
   return { id: eventId };
 }

@@ -654,7 +654,6 @@ model RoleRequirement {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum EventStatus {
-  DRAFT // on the club's idea list, not on any calendar
   SCHEDULED
   CANCELLED
 }
@@ -703,7 +702,7 @@ model Event {
   title              String
   descriptionHtml    String?
   kind               EventKind    @default(MEETING)
-  status             EventStatus  @default(DRAFT)
+  status             EventStatus  @default(SCHEDULED)
   visibility         Visibility   @default(PUBLIC)
   startsAt           DateTime? // first occurrence (null while a draft)
   durationMinutes    Int          @default(60)
@@ -724,7 +723,7 @@ model Event {
   lat                Float?
   lng                Float?
   virtualUrl         String? // Google Meet or other link
-  allowSelfCheckIn   Boolean      @default(true)
+
   cohostAllClubs     Boolean      @default(false)
   googleEventId      String?
   createdById        String
@@ -807,9 +806,10 @@ model CalendarSubscription {
 }
 
 enum CheckInMethod {
-  QR
-  SELF
-  MANUAL
+  QR // scanned the rotating code ("QR scan")
+  SELF // typed the event's code ("Typed code")
+  TAP // one tap at an online event ("One-tap (online)")
+  MANUAL // added by a leader ("Added by a leader")
 }
 
 /// The only attendance input. Written by the Attendance Tool (QR scan, in-app
@@ -1413,7 +1413,8 @@ enum TaskKind {
   PERSONAL // a to-do you wrote yourself
   CLUB // assigned by club leaders
   APPROVAL // something waits on your decision
-  REQUIREMENT // a test or training you owe
+  REQUIREMENT // something WSUSA requires of you (test, form, training, details)
+  TEST // a test assigned outside the requirements engine: club quizzes, WSUSA tests sent to chosen people (those are `required`)
   INVOICE // make sure funding goes through in the university's system
 }
 

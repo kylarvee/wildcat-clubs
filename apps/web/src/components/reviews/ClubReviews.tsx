@@ -65,7 +65,7 @@ export async function ClubReviews({ clubId, clubSlug }: { clubId: string; clubSl
             <Callout tone="brand" icon={<MessageSquareText />} title="Been to a few meetings?">
               Students who&rsquo;ve checked in at {required} or more {club.name} events can leave a review.{" "}
               <Link href={`/login?next=${encodeURIComponent(`/clubs/${club.slug}#reviews`)}`} className="font-medium underline underline-offset-2">
-                Log in
+                Sign in
               </Link>{" "}
               to see if you can.
             </Callout>
@@ -106,8 +106,8 @@ export async function ClubReviews({ clubId, clubSlug }: { clubId: string; clubSl
         {admin ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-line-2 px-3 py-2 text-sm text-ink-2">
             <ShieldCheck className="h-4 w-4 text-brand" aria-hidden="true" />
-            You see hidden reviews and report counts because you&rsquo;re an admin.
-            {flaggedCount ? <Badge tone="warning">{flaggedCount} reported</Badge> : null}
+            You see hidden reviews and flag counts because you&rsquo;re an admin.
+            {flaggedCount ? <Badge tone="warning">{flaggedCount} flagged</Badge> : null}
             <Link href={`/admin/reviews?club=${club.id}`} className="ml-auto font-medium text-brand-600 hover:underline">
               Moderate reviews
             </Link>
@@ -234,7 +234,7 @@ function ReviewItem({ review, signedIn, admin }: { review: ReviewView; signedIn:
           ) : null}
           {review.flagCount > 0 ? (
             <Badge tone="warning">
-              <Flag className="h-3 w-3" aria-hidden="true" /> {review.flagCount} {review.flagCount === 1 ? "report" : "reports"}
+              <Flag className="h-3 w-3" aria-hidden="true" /> {review.flagCount} {review.flagCount === 1 ? "flag" : "flags"}
             </Badge>
           ) : null}
         </div>

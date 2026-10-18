@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, Download, GraduationCap, Plus, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, Download, GraduationCap, Hourglass, Plus, ShieldCheck } from "lucide-react";
 import { listRequirementsForAdmin, openRequirementCounts, requirementCompliance, type ComplianceCell, type ComplianceRow } from "@/lib/domain/requirements";
+import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
 import { ROLE_LABEL } from "@/lib/authz";
 import { RENEWAL_LABEL } from "@/lib/tests/types";
 import { fmtDate } from "@/lib/time";
@@ -45,7 +46,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
   const allMet = new Set(rows.filter((r) => Object.values(r.cells).every((c) => c.state === "met")).map((r) => r.person.id)).size;
   const clubs = [...new Map(rows.map((r) => [r.club.id, r.club])).values()].sort((a, b) => a.name.localeCompare(b.name));
   const counts = (reqId: string) => {
-    const c = { met: 0, due: 0, overdue: 0 };
+    const c = { met: 0, review: 0, due: 0, overdue: 0 };
     for (const r of rows) {
       const cell = r.cells[reqId];
       if (cell) c[cell.state]++;
@@ -78,7 +79,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
             {reqs.map((r) => {
               const c = counts(r.id);
               const members = r.appliesTo.includes("MEMBER");
-              const o = open.get(r.id) ?? { open: 0, overdue: 0 };
+              const o = open.get(r.id) ?? { open: 0, overdue: 0, waiting: 0 };
               return (
                 <li key={r.id}>
                   <Card className="h-full p-4">
@@ -119,11 +120,13 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
                     {r.active && members ? (
                       <p className="mt-3 text-sm text-ink-2">
                         {o.open ? `${o.open} ${o.open === 1 ? "person still owes" : "people still owe"} it` : "Everyone it applies to is done"} ·{" "}
+                        {o.waiting ? <span className="text-info">{o.waiting} waiting for grading · </span> : null}
                         <span className={o.overdue ? "font-medium text-danger" : ""}>{o.overdue} overdue</span>
                       </p>
                     ) : r.active ? (
                       <p className="mt-3 text-sm text-ink-2">
-                        <span className="text-success">{c.met} met</span> · {c.due} due · <span className={c.overdue ? "font-medium text-danger" : ""}>{c.overdue} overdue</span>
+                        <span className="text-success">{c.met} met</span> · {c.due} due · {c.review ? <span className="text-info">{c.review} waiting for grading · </span> : null}
+                        <span className={c.overdue ? "font-medium text-danger" : ""}>{c.overdue} overdue</span>
                       </p>
                     ) : (
                       <p className="mt-3 text-sm text-ink-3">Off — nobody is asked to complete it.</p>
@@ -198,6 +201,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
               <option value="">Any status</option>
               <option value="overdue">Overdue</option>
               <option value="due">Due</option>
+              <option value="review">Waiting for grading</option>
               <option value="met">All met</option>
               <option value="paused">Permissions paused</option>
             </Select>
@@ -285,7 +289,7 @@ function ComplianceTable({ rows, columns, now }: { rows: ComplianceRow[]; column
                   <AlertTriangle className="h-3 w-3" aria-hidden /> Paused
                 </Badge>
               ) : (
-                <Badge tone="success">Active</Badge>
+                <Badge tone="success">On</Badge>
               )}
             </TD>
           </TR>
@@ -307,6 +311,13 @@ function Cell({ cell, now }: { cell: ComplianceCell | undefined; now: Date }) {
     return (
       <span className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-medium text-danger">
         <AlertTriangle className="h-4 w-4" aria-hidden /> Overdue since {fmtDate(cell.dueAt, "MMM d")}
+      </span>
+    );
+  // Handed in by the deadline: nothing is late while a grader reviews it.
+  if (cell.state === "review")
+    return (
+      <span className="inline-flex min-w-[11rem] max-w-[12rem] items-start gap-1 text-sm text-info">
+        <Hourglass className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {AWAITING_GRADE_LABEL}
       </span>
     );
   const days = Math.ceil((cell.dueAt.getTime() - now.getTime()) / 86_400_000);

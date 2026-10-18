@@ -73,7 +73,7 @@ export function ClubAnalyticsTable({
     { key: "name", label: "Club" },
     { key: "stage", label: "Status" },
     { key: "registered", label: "Members", sub: "registered", numeric: true },
-    { key: "active", label: "Active", sub: "lately", numeric: true },
+    { key: "active", label: "Attending", sub: "members lately", numeric: true },
     { key: "retention", label: "Retention", sub: "last month", numeric: true },
     { key: "attendance", label: "Attendance", sub: "avg. this term", numeric: true },
     { key: "events", label: "Events", sub: "this term", numeric: true },
@@ -248,7 +248,7 @@ export function ClubAnalyticsTable({
         </div>
       )}
       <p className="text-xs leading-relaxed text-ink-3">
-        This term is {term}. Active members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention compares the last full month with the one before.
+        This term is {term}. Attending members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention compares the last full month with the one before.
         Attendance is the average share of members at each event with check-ins. Connections count members of one club checking in at another&rsquo;s events.
       </p>
     </div>

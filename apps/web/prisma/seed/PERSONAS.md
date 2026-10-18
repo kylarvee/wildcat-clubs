@@ -50,20 +50,25 @@ clubs, check-ins, tasks or notifications.
 1. Sign in — the dashboard should feel empty and point Sam to the clubs list.
 2. Open **Clubs**: all 290 approved clubs on the real list (plus the two
    college ambassador orgs). Switch grid/list, filter by category, sort by
-   rating, activity, active members, retention, college or type. Most clubs
-   read as inactive, as they do in reality: dormant clubs with nobody on the
+   rating, activity, attending members, retention, college or type. Most clubs
+   read as Inactive, as they do in reality: dormant clubs with nobody on the
    roster, clubs under 8 members, and four that stopped meeting (Society of
    Physics Students, Actuary Club, Model United Nations Organization, Art
-   Guild). Pilot clubs (Data Analytics Club, First Generation Club at WSU,
-   Swing Dance/ Social Dance Club) read differently again.
-3. Register for **Chess Club** (open): Sam becomes a member at once, the club
-   calendar is subscribed, and the "get the app" prompt appears.
+   Guild). Clubs in their pilot period (Data Analytics Club, First Generation
+   Club at WSU, Swing Dance/ Social Dance Club) read "Pilot period".
+3. Register for **Chess Club** (open): Sam becomes a member at once, follows
+   the club's calendar, and a "You're in!" toast confirms it. (The "get the
+   app" prompt shows instead once a sysadmin adds a store link in System
+   settings → Mobile app links.)
 4. Register for **RC Wrecker Bots Club** (approval gate): the request is
    pending. Sign in as Priya or Dr. Alvarez to see it in Tasks.
-5. Subscribe to **Incredibly Strange Movie Night (ISMN)**'s calendar without
+5. Follow **Incredibly Strange Movie Night (ISMN)**'s calendar without
    registering.
-6. Check in at the live service event with code **HERE26**: Wildcat Service
-   Club is open, so the check-in also makes Sam a member.
+6. Check in at the live service event: Sam isn't a member of Wildcat Service
+   Club, so typing **HERE26** is refused (typed codes are only for the host and
+   co-host clubs' members). Scan its QR code instead, shown on another device
+   from the club's Attendance screen (signed in as Alex, say). The club is
+   open, so the check-in also makes Sam a member.
 7. Try to review a club — it stays locked until Sam has attended three events.
 8. **Report a concern** anonymously and keep the case code.
 
@@ -77,11 +82,17 @@ so she can review them; she already gave the Hiking and Outdoors Club 5★. She
 follows ISMN's calendar without joining. Her member details are complete and
 confirmed for this year.
 
-1. **Check in, live now.** Wildcat Service Club's *Care Kit Assembly for the
-   Weber Cares Pantry* started 15 minutes before the seed ran and ends 105
-   minutes after it (self check-in allowed). Open the club page for the
-   check-in pop-up — and its "not now" option — or use **HERE26**. About nine
-   people are already checked in.
+1. **Check in, live now.**
+   - In person: Wildcat Service Club's *Care Kit Assembly for the Weber Cares
+     Pantry* started 15 minutes before the seed ran and ends 105 minutes after
+     it. In-person events have no pop-up: scan the QR code, or, as a member,
+     type **HERE26** (it shows as "Typed code"). About nine people are already
+     checked in.
+   - Online: Pre-Med Club's *Online MCAT Study Hall* (Google Meet) started 10
+     minutes before the seed ran and runs two hours. Online events are the
+     only ones with the check-in pop-up: open Pre-Med Club's page (web or
+     app), the dashboard or the app's Home, then **Check in** — or **Not now**.
+     One tap shows as "One-tap (online)"; about six members already checked in.
 2. **Later today:** Psi Chi's *Grad School Q&A with Psychology Faculty*
    starts about three hours after the seed ran (code **LATER7**; check-in opens
    30 minutes before).
@@ -92,7 +103,7 @@ confirmed for this year.
 4. **Review** Pre-Med Club or Psi Chi. Her Hiking and Outdoors Club review can
    be edited or deleted.
 5. **Attendance tracker** (`/me/attendance`) and her record on each club page.
-6. **United calendar:** four clubs, ISMN (subscribed only) and university
+6. **United calendar:** four clubs, ISMN (followed only) and university
    events.
 7. **Messages:** an unread DM from Priya; three unread messages in the
    Psi Chi chat.
@@ -119,7 +130,10 @@ about 10 days after seeding (30-day grace) and **Club Officer Training** about
    and a club task from his president, *Reconcile September spending*.
 4. **Take the officer test:** info page with an embedded video, "are you sure?"
    confirmation with the 30-minute limit, eight choice questions and two open
-   answers. Submitting sends it to review (open answers need a person).
+   answers. Submitting sends it to review (open answers need a person). His
+   task then reads *Submitted — waiting for grading*: handed in on time, it
+   never pauses him while it waits, even past the deadline. If it's graded
+   as not passed, the usual deadline applies again.
 5. **Officer Training makeup session** is on the calendar (a Wednesday about a
    week out, 5:30 PM, Shepherd Union 404A). Checking in completes the training
    requirement.
@@ -147,8 +161,8 @@ hasn't signed the *Club Member Agreements* form.
 2. **Org chart:** she can assign officers but **not** President or VP, and
    can't retire the club. SWE has no College Ambassador, and only EAST
    Ambassadors can place one: the card under the chart has **Request a college
-   ambassador** (with an optional note). The request lands in the program's
-   inbox.
+   ambassador** (with an optional note). The request lands in the program
+   leaders' Tasks.
 3. **Elections:** *President — Spring 2027* (self-select) is **CLOSED**: everyone
    below the President started as a candidate, all but two withdrew (Vanessa
    among them), and every other leader chose the same one — unanimous. It's
@@ -160,7 +174,7 @@ hasn't signed the *Club Member Agreements* form.
 ## Priya Patel — president
 
 **Where Priya stands:** President of the RC Wrecker Bots Club since May 2026
-(VP 2025–26, Events Coordinator 2024–25). About 90 active members, an
+(VP 2025–26, Events Coordinator 2024–25). About 90 members, an
 **approval gate** with **five pending join requests**, Tuesday build nights,
 and regular co-hosted events with CSWS (The Computing Society at Weber State)
 and SWE. Both officer requirements met; the *Annual Club Re-registration* form
@@ -169,9 +183,12 @@ is still hers to fill out. The club runs its own *Event Safety Quiz*.
 1. **Members:** approve or decline the five requests — their tasks close for
    everyone with the roster capability.
 2. **Attendance:** *Open Build Night (extra session)* is live now (code
-   **BUILD8**, about 12 already checked in). Open the rotating QR screen, add
-   someone by hand, then look at the tracker (every meeting × every member)
-   and retention.
+   **BUILD8**, about 12 already checked in). Open the rotating QR screen: it
+   tells members of the RC Wrecker Bots Club they can type the code if they
+   have no camera (typed codes are only for the host and co-host clubs'
+   members). Add someone by hand, then look at the tracker (every meeting ×
+   every member, each mark showing QR scan, Typed code, One-tap (online) or
+   Added by a leader) and retention.
 3. **Org chart & history:** role history back to fall 2022 with hand-offs,
    December graduations, resignations and empty seats. She can name a
    successor or co-president and could retire the club.
@@ -291,10 +308,13 @@ The two are fictional **demo clubs** (approved, with members, events and
 check-ins) made to carry these incidents, so nothing negative is invented
 about a real club.
 - **Tests:** five officer-test attempts with open answers to grade (each also a
-  task in Tasks).
-- **Officer requirements:** one officer is past the grace period, so their
-  permissions are paused (the seed prints who).
-- **Ambassador programs** (Club reviews → Ambassador programs): only admins
+  task in Tasks). All five were handed in on time, so those officers' tasks
+  and their cells in Admin → Requirements read *Submitted — waiting for
+  grading*, and none of them is paused.
+- **WSUSA requirements:** one officer is past the grace period, so their
+  permissions are paused (the seed prints who). Their club workspace banner,
+  *Permissions paused*, names what's overdue and links to it.
+- **Ambassador programs** (Club approvals → Ambassador programs): only admins
   start a program and choose its advisor ("Change" appoints someone else and
   ends the previous advisor's role). In **EAST Ambassadors → Ambassador
   placements**, the RC Wrecker Bots Club is waiting on its request (badge
@@ -353,8 +373,8 @@ push), scheduled jobs, and granting admin.
 - **Events** from fall 2024 through fall 2026: weekly or biweekly meetings per
   semester (holidays and spring break cancelled), socials, workshops, service
   days and competitions, on campus, off campus and online; co-hosted events;
-  idea drafts; Club Officer Training and Funding Workshop every semester.
-- **About 59,000 check-ins** with semester-start spikes, pre-finals dips and
+  Club Officer Training and Funding Workshop every semester.
+- **About 63,000 check-ins** with semester-start spikes, pre-finals dips and
   members who drift away at different rates. Officers show up most. Members of
   several clubs in the same college give the network map its clusters.
 - **Files:** each approved club that meets has Meeting Minutes, Flyers & Photos,
@@ -372,7 +392,8 @@ push), scheduled jobs, and granting admin.
   two past leaders have a project tied to the seat they held, usually with a
   file (a club file they made that term, or a write-up in their own files).
 - **Event Safety Quiz:** RC Wrecker Bots Club members who haven't passed it
-  have a *Take: Event Safety Quiz* task.
+  have a *Take: Event Safety Quiz* task, marked *Club test* (a club's own
+  test, not a WSUSA requirement; /tasks has a Tests filter).
 
 All policy text is sample text and says so at the top. People, memberships,
 events and reviews are fictional even where the club is real; reports and

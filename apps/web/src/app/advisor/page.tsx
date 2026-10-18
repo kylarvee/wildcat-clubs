@@ -13,7 +13,7 @@ import { STATUS_LABEL, STATUS_TONE } from "@/components/founding/copy";
 
 export const metadata: Metadata = { title: "Advising" };
 
-/** Faculty/staff home for advising: invitations waiting on you and the clubs you advise. */
+/** Faculty & staff home for advising: invitations waiting on you and the clubs you advise. */
 export default async function AdvisingPage() {
   const user = await requireUser("/advisor");
   const [invites, roles] = await Promise.all([

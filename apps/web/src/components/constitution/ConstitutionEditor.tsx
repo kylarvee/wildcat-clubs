@@ -21,7 +21,8 @@ import {
 } from "@/lib/constitution/templates";
 import { EMPTY_FACTS, renderDoc } from "@/lib/constitution/render";
 import { adoptDraftAction, saveDraftAction } from "@/app/constitution/actions";
-import { JOIN_LABEL, STATUS_LABEL, SUCCESSION_LABEL } from "@/components/founding/copy";
+import { STATUS_LABEL, SUCCESSION_LABEL } from "@/components/founding/copy";
+import { JOIN_POLICY_SHORT } from "@/lib/labels/clubs";
 
 export type EditorClub = {
   id: string;
@@ -564,7 +565,7 @@ function AdoptDialog({
               <legend className="sr-only">Clubs</legend>
               {clubs.map((c) => {
                 const changes = [
-                  c.joinPolicy !== join ? `Joining: ${JOIN_LABEL[c.joinPolicy].split(" — ")[0]} → ${JOIN_LABEL[join].split(" — ")[0]}` : null,
+                  c.joinPolicy !== join ? `Joining: ${JOIN_POLICY_SHORT[c.joinPolicy]} → ${JOIN_POLICY_SHORT[join]}` : null,
                   c.successionMethod !== succession ? `Succession: ${SUCCESSION_LABEL[c.successionMethod].split(" — ")[0]} → ${SUCCESSION_LABEL[succession].split(" — ")[0]}` : null,
                 ].filter(Boolean);
                 return (
@@ -594,7 +595,7 @@ function AdoptDialog({
               <li>Replaces each club&apos;s current constitution and bylaws. Earlier versions stay in its history.</li>
               <li>Withdraws any custom document still waiting for WSUSA.</li>
               <li>
-                Sets joining to <span className="font-medium text-ink-2">{JOIN_LABEL[join].split(" — ")[0].toLowerCase()}</span> and the primary way leaders are chosen to{" "}
+                Sets joining to <span className="font-medium text-ink-2">{JOIN_POLICY_SHORT[join].toLowerCase()}</span> and the primary way leaders are chosen to{" "}
                 <span className="font-medium text-ink-2">{SUCCESSION_LABEL[succession].split(" — ")[0]}</span>.
               </li>
             </ul>

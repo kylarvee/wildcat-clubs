@@ -15,12 +15,14 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
   return (
     // `relative` keeps the visually-hidden labels inside the horizontal scroller on phones.
     <Table className="relative">
-      <caption className="sr-only">Clubs, one per row, with members, rating, retention and activity</caption>
+      <caption className="sr-only">Clubs, one per row, with attending members, rating, retention and activity</caption>
       <THead>
         <tr>
           <TH scope="col">Club</TH>
           <TH scope="col" className="hidden xl:table-cell">Type</TH>
-          <TH scope="col" className="text-right">Active</TH>
+          <TH scope="col" className="text-right" title="Attending members, of everyone registered">
+            Attending
+          </TH>
           <TH scope="col" className="hidden sm:table-cell">Rating</TH>
           <TH scope="col" className="hidden text-right lg:table-cell">Retention</TH>
           <TH scope="col" className="hidden text-right xl:table-cell" title="Events in the last 30 days and the next 30 days">Events</TH>
@@ -56,7 +58,7 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
               </TD>
               <TD className="text-right tabular-nums">
                 <span className="font-medium">{c.metrics.activeMembers.toLocaleString("en-US")}</span>
-                <span className="block text-xs text-ink-3">of {c.metrics.registeredMembers.toLocaleString("en-US")}</span>
+                <span className="block text-xs text-ink-3">of {c.metrics.registeredMembers.toLocaleString("en-US")} registered</span>
               </TD>
               <TD className="hidden whitespace-nowrap text-sm sm:table-cell">
                 <RatingInline avg={c.metrics.avgRating} count={c.metrics.reviewCount} size={13} />

@@ -29,8 +29,10 @@ export type ClubRole = "MEMBER" | "AMBASSADOR" | "OFFICER" | "VP" | "PRESIDENT" 
 export type MembershipStatus = "PENDING" | "ACTIVE" | "LEFT" | "ALUMNI" | "REMOVED" | "DECLINED";
 export type JoinPolicy = "OPEN" | "APPROVAL";
 export type Visibility = "PUBLIC" | "UNIVERSITY" | "MEMBERS";
-export type CheckInMethod = "QR" | "SELF" | "MANUAL";
+/** QR scan · SELF typed code · TAP one-tap at an online event · MANUAL added by a leader. Show `methodLabel` when a response has one. */
+export type CheckInMethod = "QR" | "SELF" | "TAP" | "MANUAL";
 export type WindowState = "NOT_OPEN" | "OPEN" | "CLOSED";
+/** "mobile-scan": a scan or a typed code. "mobile-popup": the one-tap "check in?" prompt (recorded as TAP at online events). */
 export type CheckInVia = "mobile-scan" | "mobile-popup";
 
 // ─── People and clubs ────────────────────────────────────────────────────────
@@ -120,7 +122,8 @@ export type MOccurrence = {
   place: string | null;
   visibility: Visibility;
   cancelled: boolean;
-  allowSelfCheckIn: boolean;
+  /** An online event: members can check in with one tap (in person needs the QR code or the typed code). */
+  allowTapCheckIn: boolean;
   opensAt: string;
   closesAt: string;
   windowState: WindowState;
@@ -369,7 +372,7 @@ export type MCheckinResult = {
   /** JOINED = now a member (open club); REQUESTED = a join request went to the leaders. */
   membership: "MEMBER" | "JOINED" | "REQUESTED" | "NONE";
   reviewProgress: { eligible: boolean; attended: number; required: number } | null;
-  /** Officer requirements this check-in fulfilled. */
+  /** WSUSA requirements this check-in fulfilled. */
   requirementsMet: string[];
 };
 

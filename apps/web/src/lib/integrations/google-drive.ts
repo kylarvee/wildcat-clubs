@@ -49,7 +49,7 @@ import type { Vis } from "@/lib/files/types";
  *      club account's Drive — including sharing them; it can't read anything
  *      else in those accounts.)
  *   3. Turn on Google Drive sync in System settings. Each club adds its Google
- *      account email in its Settings, and WSUSA verifies it (Admin → Club reviews).
+ *      account email in its Settings, and WSUSA verifies it (Admin → Club approvals).
  */
 
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];

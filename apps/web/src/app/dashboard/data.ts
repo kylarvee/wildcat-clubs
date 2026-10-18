@@ -30,13 +30,13 @@ export type DashClub = {
   pending: boolean;
   /** Ambassador and up, or advisor: may open the club workspace. */
   leads: boolean;
-  /** The club's next meeting (a MEETING-kind event) the viewer may see. */
+  /** The club's next meeting (the next date of any repeating event: meetings, practices…) the viewer may see. */
   nextMeeting: Date | null;
 };
 
 export type AdminQueueRow = { key: string; label: string; href: string; count: number; urgent: boolean };
 
-/** One line of "This week" / "Coming up": an event, or (admins) a requirement deadline. */
+/** One line of "Coming up": an event, or (admins) a requirement deadline. */
 export type AgendaItem = {
   key: string;
   kind: "event" | "deadline";
@@ -53,8 +53,8 @@ export type AgendaItem = {
 
 const clubSelect = { id: true, name: true, slug: true, logoUrl: true, logoColor: true, status: true } as const;
 const HIDDEN: ClubStatus[] = ["RETIRED", "REJECTED"];
-const WEEK_DAYS = 7;
-const ADMIN_DAYS = 14;
+/** "Coming up" on the dashboard (and the mobile Home) looks this far ahead. */
+const COMING_UP_DAYS = 14;
 
 /** Every club you're connected to right now: member, pending request or role (advisors included), leaders first. */
 async function myClubs(user: Actor, ctx: ViewerContext, now: Date): Promise<DashClub[]> {
@@ -85,13 +85,14 @@ async function myClubs(user: Actor, ctx: ViewerContext, now: Date): Promise<Dash
   }
   const clubs = [...map.values()].map((c) => ({ ...c, roles: c.roles.length ? c.roles : c.topRole === "MEMBER" ? ["Member"] : [] }));
 
-  // Next meeting per approved club, filtered by lib/authz/events like every calendar.
+  // Next meeting per approved club: the next date of any repeating event it hosts (a weekly
+  // meeting, a practice…), filtered by lib/authz/events like every calendar.
   const visible = eventVisibilityWhere({ signedIn: true, admin: ctx.admin, memberClubIds: ctx.memberClubIds });
   const approved = clubs.filter((c) => c.status === "APPROVED" && !c.pending);
   const next = await Promise.all(
     approved.map((c) =>
       db.eventOccurrence.findFirst({
-        where: { startsAt: { gt: now }, status: "SCHEDULED", event: { AND: [{ clubId: c.id, kind: "MEETING", status: "SCHEDULED" }, visible] } },
+        where: { startsAt: { gt: now }, status: "SCHEDULED", event: { AND: [{ clubId: c.id, recurrence: { not: "NONE" }, status: "SCHEDULED" }, visible] } },
         orderBy: { startsAt: "asc" },
         select: { startsAt: true },
       }),
@@ -152,9 +153,9 @@ function toAgendaItem(o: FeedOccurrence, ctx: ViewerContext): AgendaItem {
 
 const live = (o: FeedOccurrence) => o.status !== "CANCELLED" && o.event.status !== "CANCELLED";
 
-/** Your calendar for the next week (subscribed clubs and university events), like the calendar page. */
+/** "Coming up": your calendar for the next two weeks (followed clubs and university events), like the calendar page. */
 async function weekAgenda(ctx: ViewerContext, now: Date): Promise<AgendaItem[]> {
-  const rows = await feedOccurrences(ctx, { scope: "me" }, { start: now, end: new Date(now.getTime() + WEEK_DAYS * DAY_MS) }, { take: 60 });
+  const rows = await feedOccurrences(ctx, { scope: "me" }, { start: now, end: new Date(now.getTime() + COMING_UP_DAYS * DAY_MS) }, { take: 60 });
   return rows.filter(live).slice(0, 10).map((o) => toAgendaItem(o, ctx));
 }
 
@@ -193,7 +194,7 @@ export async function loadDashboard(user: Actor) {
 
 /** Admins: university events and requirement deadlines in the next two weeks. */
 async function adminAgenda(ctx: ViewerContext, now: Date, reqs: NonNullable<Awaited<ReturnType<typeof requirementsOverview>>>["rows"]): Promise<AgendaItem[]> {
-  const end = new Date(now.getTime() + ADMIN_DAYS * DAY_MS);
+  const end = new Date(now.getTime() + COMING_UP_DAYS * DAY_MS);
   const rows = await feedOccurrences(ctx, { scope: "trainings" }, { start: now, end }, { take: 30 });
   const deadlines: AgendaItem[] = reqs
     .filter((r) => r.nextDue && r.nextDue <= end)
@@ -204,7 +205,7 @@ async function adminAgenda(ctx: ViewerContext, now: Date, reqs: NonNullable<Awai
       title: `${r.name}: next deadline`,
       at: r.nextDue!,
       allDay: true,
-      detail: `Requirement deadline · ${r.open} still to do`,
+      detail: `Requirement deadline · ${r.open - r.waiting} still to do${r.waiting ? `, ${r.waiting} waiting for grading` : ""}`,
       color: "#b91c1c",
       leading: false,
     }));

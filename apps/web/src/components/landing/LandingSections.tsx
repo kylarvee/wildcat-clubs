@@ -77,14 +77,14 @@ export function LandingHero({ firstName, events, clubs }: { firstName: string | 
                   Browse clubs <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
                 <Link href="/login" className={buttonClasses("outline", "lg", "border-white/30 bg-white/5 text-white hover:bg-white/15")}>
-                  Log in
+                  Sign in
                 </Link>
               </>
             )}
           </div>
           {!signedIn ? (
             <p className="mt-4 text-sm text-brand-200">
-              Log in with your Weber State Google account — @{INSTITUTION.studentEmailDomain} for students, @{INSTITUTION.staffEmailDomain} for faculty and staff.
+              Sign in with your Weber State Google account — @{INSTITUTION.studentEmailDomain} for students, @{INSTITUTION.staffEmailDomain} for faculty and staff.
             </p>
           ) : null}
         </div>
@@ -254,7 +254,7 @@ export function Audiences({ reviewThreshold }: { reviewThreshold: number }) {
       title: "Find clubs that fit — and show up",
       points: [
         "Search by major, college or interest, and see how active each club really is.",
-        "Register in a click, or just subscribe to a club's calendar.",
+        "Register in a click, or just follow a club's calendar.",
         "Scan the QR code at meetings to check in, and keep your attendance on record.",
         `Leave a review after you've been to ${reviewThreshold} events.`,
       ],
@@ -276,7 +276,7 @@ export function Audiences({ reviewThreshold }: { reviewThreshold: number }) {
       who: "Faculty & staff advisors",
       title: "Advise without the email ping-pong",
       points: [
-        "Accept an advisor invite straight from your inbox.",
+        "Accept an advisor invite straight from your Tasks.",
         "See everything your club does, and step in when it matters.",
         "Approve requests from your task list, not a stack of forms.",
       ],

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { Clock, Maximize, Minimize, RefreshCw, UserPlus, Users, WifiOff, X } from "lucide-react";
-import type { WindowState } from "@/lib/attendance/rules";
+import { sameCampusDay, whenLabel, type WindowState } from "@/lib/attendance/rules";
 import { fmtRange, fmtTime } from "@/lib/time";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
 import { cn } from "@/components/ui/cn";
@@ -25,8 +25,14 @@ type Props = {
   initialToken: LiveToken;
   initialFeed: LiveFeed;
   initialSvg: string;
-  /** "clubs.weber.edu/checkin" — where people can type the code. */
+  /** "clubs.weber.edu/checkin" — where members can type the code. */
   typeAt: string;
+  /**
+   * Whose members may type the code ("Chess Club or SWE", rules.codeClubsPhrase).
+   * Null for university events: no host club, so only the QR code works and the
+   * screen doesn't show the code.
+   */
+  codeClubs: string | null;
   backHref: string;
 };
 
@@ -48,8 +54,9 @@ function qrSvg(url: string) {
 }
 
 /**
- * The leader's check-in screen: a giant rotating QR, the typed code, the
- * live head count and the latest arrivals. Built for a projector and for a
+ * The leader's check-in screen: a giant rotating QR, the code members of the
+ * host and co-host clubs can type, the live head count and the latest
+ * arrivals. Built for a projector and for a
  * phone held up at the door. Polls the token and feed APIs; the QR changes
  * every `rotateSeconds` so photos of it stop working.
  */
@@ -84,7 +91,7 @@ export function LiveCheckinScreen(props: Props) {
         setReceivedAt(Date.now());
         setProblem(null);
       } else if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 400) {
-        setFatal(res.status === 401 ? "You were signed out. Log in again to keep running check-in." : res.error);
+        setFatal(res.status === 401 ? "You were signed out. Sign in again to keep running check-in." : res.error);
       } else {
         setProblem("Connection lost — retrying. The last code keeps working for about a minute.");
       }
@@ -158,6 +165,10 @@ export function LiveCheckinScreen(props: Props) {
 
   const state = feed.windowState ?? token.windowState;
   const code = token.code;
+  // "at 5:00 PM" today, "Wed, Oct 28 at 5:00 PM" on another day, so a screen opened early doesn't read as today.
+  const now = new Date();
+  const opensAt = new Date(token.opensAt);
+  const closesAt = new Date(token.closesAt);
 
   return (
     <div ref={rootRef} className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-white text-ink">
@@ -211,11 +222,13 @@ export function LiveCheckinScreen(props: Props) {
         </Banner>
       ) : state === "NOT_OPEN" ? (
         <Banner tone="info" icon={<Clock />}>
-          Check-in opens at {fmtTime(token.opensAt)}. Until then, scans will say it hasn&apos;t opened yet.
+          Check-in opens {sameCampusDay(opensAt, now) ? "at " : ""}
+          {whenLabel(opensAt, now)}. Until then, scans will say it hasn&apos;t opened yet.
         </Banner>
       ) : state === "CLOSED" ? (
         <Banner tone="warning" icon={<Clock />}>
-          Check-in closed at {fmtTime(token.closesAt)}.{" "}
+          Check-in closed {sameCampusDay(closesAt, now) ? "at " : "on "}
+          {whenLabel(closesAt, now)}.{" "}
           <Link href={props.backHref} className="font-semibold underline underline-offset-2">
             Add late arrivals by hand
           </Link>
@@ -261,20 +274,25 @@ export function LiveCheckinScreen(props: Props) {
 
         <aside className="min-w-0 space-y-5 text-center lg:text-left">
           <div>
-            <p className="text-sm text-ink-3 sm:text-base">
-              No camera? Go to <span className="font-semibold text-ink-2">{props.typeAt}</span> and type
-            </p>
-            <p
-              className="mt-1 select-all whitespace-nowrap font-mono font-bold leading-none tracking-[0.14em] text-ink"
-              // Scales with the screen so it's huge on a projector and still fits a phone.
-              style={{ fontSize: "clamp(2.75rem, 5.2vw, 4.75rem)" }}
-              aria-label={`Code ${code.split("").join(" ")}`}
-            >
-              {code.slice(0, 3)}
-              <span className="text-ink-3">·</span>
-              {code.slice(3)}
-            </p>
-            <p className="mt-2 text-sm text-ink-3">
+            {/* Typed codes only work for members of the host and co-host clubs, so only they are told to type it. */}
+            {props.codeClubs ? (
+              <>
+                <p className="text-sm text-ink-3 sm:text-base">
+                  Members of <span className="font-semibold text-ink-2">{props.codeClubs}</span>: no camera? Go to <span className="font-semibold text-ink-2">{props.typeAt}</span> and type
+                </p>
+                <p
+                  className="mt-1 select-all whitespace-nowrap font-mono font-bold leading-none tracking-[0.14em] text-ink"
+                  // Scales with the screen so it's huge on a projector and still fits a phone.
+                  style={{ fontSize: "clamp(2.75rem, 5.2vw, 4.75rem)" }}
+                  aria-label={`Code ${code.split("").join(" ")}`}
+                >
+                  {code.slice(0, 3)}
+                  <span className="text-ink-3">·</span>
+                  {code.slice(3)}
+                </p>
+              </>
+            ) : null}
+            <p className={cn("text-sm text-ink-3", props.codeClubs && "mt-2")}>
               {fmtRange(props.startsAt, props.endsAt, props.allDay)}
               {props.place ? ` · ${props.place}` : ""}
             </p>
@@ -304,7 +322,7 @@ export function LiveCheckinScreen(props: Props) {
                 ))}
               </ul>
             ) : (
-              <p className="rounded-xl border border-dashed border-line-2 px-4 py-6 text-center text-sm text-ink-3">The first person to scan shows up here.</p>
+              <p className="rounded-xl border border-dashed border-line-2 px-4 py-6 text-center text-sm text-ink-3">The first person to check in shows up here.</p>
             )}
           </div>
         </aside>

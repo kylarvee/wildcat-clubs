@@ -98,7 +98,7 @@ describe("totals", () => {
 
   it("checks partial approval amounts", () => {
     expect(partialAmountProblem(10000, 6000)).toBeNull();
-    expect(partialAmountProblem(10000, 0)).toMatch(/Deny/);
+    expect(partialAmountProblem(10000, 0)).toMatch(/Don't approve/);
     expect(partialAmountProblem(10000, 10000)).toMatch(/Approve/);
     expect(partialAmountProblem(10000, 12000)).toMatch(/less than/);
     expect(partialAmountProblem(10000, Number.NaN)).not.toBeNull();

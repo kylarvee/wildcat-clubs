@@ -608,6 +608,17 @@ function placements(ctx: Ctx) {
       for (const t of open.slice(0, rng.int(1, 2))) place(t, r.userId, start, endAt && t.retiredAt && t.retiredAt < endAt ? t.retiredAt : endAt, endAt ? r.endReason : null);
     }
   }
+  // PERSONAS: RC Wrecker Bots and SWE have no College Ambassador right now. A placement there, if
+  // the draw made one, ended this term, so Priya can ask for a new one (steps/inbox) and Vanessa can
+  // ask too. This runs after the draw and uses no randomness, so nothing else shifts.
+  const termEnd = addDays(NOW, -20);
+  for (const key of ["robotics", "swe"]) {
+    for (const a of ctx.club(key).assignments) {
+      if (a.role !== "AMBASSADOR" || !a.viaClubId || a.endedAt) continue;
+      a.endedAt = a.startedAt < termEnd ? termEnd : new Date(Math.min(NOW.getTime() - 60_000, a.startedAt.getTime() + 60_000));
+      a.endReason = "TERM_ENDED";
+    }
+  }
 }
 
 // ─── Mid-term officer changes (people still inside their requirement grace period) ──

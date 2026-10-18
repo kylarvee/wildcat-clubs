@@ -3,8 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, Award, GraduationCap, History, Lock, Users } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
+import { getConfigValue } from "@/lib/config";
 import { db } from "@/lib/db";
-import { INSTITUTION, PLATFORM } from "@/lib/institution";
+import { INSTITUTION } from "@/lib/institution";
 import { fmtGraduated, toDateInput } from "@/lib/profiles/format";
 import { myRoleOptions } from "@/lib/profiles/queries";
 import { ClubLogo } from "@/components/ui/avatar";
@@ -21,12 +22,13 @@ export const metadata: Metadata = { title: "Settings · Graduation" };
  */
 export default async function GraduationSettingsPage() {
   const actor = await requireUser("/settings/graduation");
+  const supportEmail = await getConfigValue("platform.supportEmail");
   if (actor.kind !== "STUDENT") {
     return (
       <Callout tone="info" icon={<GraduationCap />} title="Graduation is for student accounts">
         Faculty and staff accounts stay as they are. If you&apos;re leaving {INSTITUTION.shortName}, ask the clubs you advise to invite a new advisor, or email {INSTITUTION.studentGovernment} at{" "}
-        <a href={`mailto:${PLATFORM.supportEmail}`} className="font-medium underline underline-offset-2">
-          {PLATFORM.supportEmail}
+        <a href={`mailto:${supportEmail}`} className="font-medium underline underline-offset-2">
+          {supportEmail}
         </a>
         .
       </Callout>
@@ -81,13 +83,13 @@ export default async function GraduationSettingsPage() {
           <li className="flex gap-3">
             <Users className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
             <span className="text-ink-2">
-              <span className="font-medium text-ink">Your memberships become alumni memberships.</span> Pending join requests are withdrawn, and officer tests, trainings and club tasks you owe are closed.
+              <span className="font-medium text-ink">Your memberships become alumni memberships.</span> Pending join requests are withdrawn, and the WSUSA requirements, tests and club tasks you owe are closed.
             </span>
           </li>
           <li className="flex gap-3">
             <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
             <span className="text-ink-2">
-              <span className="font-medium text-ink">Your profile is retired.</span> It shows an Alumni badge and your graduation date, and can&apos;t be edited after today.
+              <span className="font-medium text-ink">Your profile is retired.</span> It shows an Alumni badge and your graduation date, and it can&apos;t be edited from the moment you confirm.
             </span>
           </li>
           <li className="flex gap-3">
@@ -102,7 +104,7 @@ export default async function GraduationSettingsPage() {
           <Link href="/settings" className="font-medium text-brand-600 hover:underline">
             Update it now
           </Link>{" "}
-          — your About, experience and projects are frozen once you graduate.
+          — your About, experience and projects are frozen as soon as you confirm.
         </p>
       </Card>
 
@@ -155,7 +157,7 @@ export default async function GraduationSettingsPage() {
         <h2 className="text-base font-semibold text-ink">Ready?</h2>
         <p className="mt-1 text-sm text-ink-3">Only mark this once you&apos;ve actually graduated.</p>
         <div className="mt-4">
-          <GraduationForm handle={me.handle} today={toDateInput(new Date())} roleCount={current.length} clubCount={memberships.length} />
+          <GraduationForm handle={me.handle} today={toDateInput(new Date())} roleCount={current.length} clubCount={memberships.length} supportEmail={supportEmail} />
         </div>
       </Card>
     </div>

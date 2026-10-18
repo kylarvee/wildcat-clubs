@@ -93,15 +93,10 @@ export function EventCostCard({
           <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-ink-3" aria-hidden />
           <div className="min-w-0">
             <h3 className="flex flex-wrap items-center gap-2 font-semibold text-ink">
-              {/* Ideas have no public event page yet. */}
-              {e.status === "DRAFT" ? (
-                e.title
-              ) : (
-                <Link href={`/events/${e.id}`} className="hover:text-brand-600 hover:underline">
-                  {e.title}
-                </Link>
-              )}
-              {e.status === "DRAFT" ? <Badge>Idea</Badge> : e.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
+              <Link href={`/events/${e.id}`} className="hover:text-brand-600 hover:underline">
+                {e.title}
+              </Link>
+              {e.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
             </h3>
             <p className="text-sm text-ink-3">
               {schedule}

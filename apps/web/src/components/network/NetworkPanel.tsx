@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight, RefreshCw, X } from "lucide-react";
 import type { NetworkLinkDetails, NetworkNodeDetails } from "@/lib/analytics/network";
 import type { NetworkPayload, NetworkViewNode } from "@/lib/analytics/network-model";
+import { STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/layout";
@@ -153,11 +154,6 @@ function StatBox({ label, value, hint }: { label: string; value: React.ReactNode
   );
 }
 
-const STANDING = {
-  active: { label: "Active", tone: "success" },
-  pilot: { label: "In pilot period", tone: "info" },
-  inactive: { label: "Inactive", tone: "warning" },
-} as const;
 
 function NodeBody({
   node,
@@ -185,11 +181,11 @@ function NodeBody({
   return (
     <div className="space-y-5">
       {club ? (
-        <Badge tone={STANDING[club.standing].tone}>{STANDING[club.standing].label}</Badge>
+        <Badge tone={STANDING_TONE[club.standing]}>{STANDING_LABEL[club.standing]}</Badge>
       ) : null}
       <dl className="grid grid-cols-2 gap-2">
         <StatBox label={isClub ? "Members" : "Memberships"} value={fmt(details ? details.members : node.members)} hint={isClub ? "registered" : `across ${node.clubIds.length} ${node.clubIds.length === 1 ? "club" : "clubs"}`} />
-        <StatBox label="Active" value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : details ? fmt(details.activeMembers) : "—"} hint="attended lately" />
+        <StatBox label="Attending members" value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : details ? fmt(details.activeMembers) : "—"} hint="came to an event lately" />
         <StatBox label="Check-ins" value={fmt(node.size)} hint={data.windowPhrase} />
         {isClub ? (
           <StatBox label="Retention" value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : pct(club?.retentionRate ?? null)} hint="came back last month" />

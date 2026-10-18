@@ -147,7 +147,7 @@ function SignedInHome({ userId }: { userId: string }) {
           ))}
         </Card>
       ) : (
-        <EmptyView icon="calendar" title="Nothing in the next two weeks" body="Subscribe to a club's calendar and its events show up here." />
+        <EmptyView icon="calendar" title="Nothing in the next two weeks" body="Follow a club and its events show up here." />
       )}
 
       <SectionHeader title="Announcements" />

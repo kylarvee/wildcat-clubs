@@ -23,7 +23,7 @@ import { CloseCheckButton, HideReviewButton, KeepReviewButton, RestoreReviewButt
 export const metadata: Metadata = { title: "Review moderation" };
 
 const TABS = [
-  { key: "reported", label: "Reported" },
+  { key: "reported", label: "Flagged" },
   { key: "bombing", label: "Possible review bombing" },
   { key: "hidden", label: "Hidden" },
 ] as const;
@@ -41,7 +41,7 @@ type ReviewRow = Prisma.ReviewGetPayload<{ include: typeof reviewInclude }>;
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
 /**
- * Review moderation (admin.reviews): reported reviews, possible review
+ * Review moderation (admin.reviews): flagged reviews, possible review
  * bombing, and hidden reviews. Every change goes through lib/domain/reviews,
  * which also closes the matching admin tasks.
  */
@@ -84,7 +84,7 @@ export default async function AdminReviewsPage({ searchParams }: { searchParams:
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Review moderation" description="Reviews students reported, possible review bombing, and reviews you've hidden. Hidden reviews stop counting toward a club's rating." />
+      <PageHeader title="Review moderation" description="Reviews students flagged, possible review bombing, and reviews you've hidden. Hidden reviews stop counting toward a club's rating." />
       <PolicyNotices placement="REVIEWS" title="Review policy" />
 
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -120,9 +120,9 @@ export default async function AdminReviewsPage({ searchParams }: { searchParams:
 
 async function Reported({ clubFilter, focusId }: { clubFilter: Prisma.ReviewWhereInput; focusId: string | null }) {
   const rows = await db.review.findMany({ where: { hiddenAt: null, flags: { some: {} }, ...clubFilter }, include: reviewInclude, take: 200 });
-  // Most-reported first; the review a task pointed at goes to the very top.
+  // Most-flagged first; the review a task pointed at goes to the very top.
   rows.sort((a, b) => Number(b.id === focusId) - Number(a.id === focusId) || b.flags.length - a.flags.length || b.flags[0].createdAt.getTime() - a.flags[0].createdAt.getTime());
-  if (!rows.length) return <EmptyState icon={<ShieldCheck />} title="No reported reviews" description="When students report a review, it shows up here so you can keep it or hide it." />;
+  if (!rows.length) return <EmptyState icon={<ShieldCheck />} title="No flagged reviews" description="When students flag a review, it shows up here so you can keep it or hide it." />;
   return (
     <ul className="space-y-3">
       {rows.map((r) => (
@@ -327,7 +327,7 @@ function ReviewCard({ review, focused, children }: { review: ReviewRow; focused:
         <details className="mt-3 rounded-lg border border-amber-200 bg-warning-50/60 px-3 py-2 text-sm" open={!review.hiddenAt}>
           <summary className="cursor-pointer font-medium text-amber-900">
             <Flag className="mr-1 inline h-3.5 w-3.5" aria-hidden />
-            Reported by {review.flags.length} {review.flags.length === 1 ? "person" : "people"}
+            Flagged by {review.flags.length} {review.flags.length === 1 ? "person" : "people"}
           </summary>
           <ul className="mt-2 space-y-1.5">
             {review.flags.map((f) => (

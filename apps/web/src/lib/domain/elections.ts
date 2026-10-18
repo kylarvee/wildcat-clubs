@@ -722,7 +722,7 @@ async function assertCanSeat(actor: Actor, e: SyncedElection): Promise<ClubAcces
   const access = await getClubAccess(actor, e.clubId);
   if (!access) throw notFound("Club");
   if (!access.assignableRoles.includes(e.position.role)) {
-    throw forbidden(access.suspended ? "Your leadership permissions are paused until you finish your required training or test." : `Only someone who can assign the ${ROLE_LABEL[e.position.role]} role can fill this seat.`);
+    throw forbidden(access.suspended ? "Your leadership permissions are paused until you finish your overdue WSUSA requirement." : `Only someone who can assign the ${ROLE_LABEL[e.position.role]} role can fill this seat.`);
   }
   return access;
 }

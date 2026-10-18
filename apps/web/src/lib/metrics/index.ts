@@ -75,9 +75,8 @@ import type {
  * Details settled while building (see pure.ts for each rule):
  * - Event times are occurrence start times, so a leader's late manual add
  *   counts on the day of the event.
- * - Occurrences of draft events never count; past occurrences of an event
- *   that was later cancelled still count when people checked in. Activity
- *   score counts only live (SCHEDULED) events.
+ * - Past occurrences of an event that was later cancelled still count when
+ *   people checked in. Activity score counts only live (SCHEDULED) events.
  * - "Members at the time" = joined at or before the start, not ended by then,
  *   any status except a pending or declined request.
  * - "Current term" is the term containing now, or the latest one between
@@ -121,22 +120,22 @@ function inClubs(col: Prisma.Sql, scope?: ClubScope) {
 
 /**
  * Rows (occurrence_id, starts_at, club_id): one per club taking part in a
- * scheduled occurrence — the host and every approved co-host. Draft events
- * never count; `liveOnly` also drops cancelled events (for calendar counts).
+ * scheduled occurrence — the host and every approved co-host. `liveOnly`
+ * drops cancelled events (for calendar counts).
  */
 function clubOccurrences(o: { clubs?: ClubScope; from?: Date; to?: Date; liveOnly?: boolean }): Prisma.Sql {
-  const ev = o.liveOnly ? Prisma.sql`e.status = 'SCHEDULED'` : Prisma.sql`e.status <> 'DRAFT'`;
+  const ev = o.liveOnly ? Prisma.sql`AND e.status = 'SCHEDULED'` : Prisma.empty;
   const from = o.from ? Prisma.sql`AND o."startsAt" >= ${ts(o.from)}` : Prisma.empty;
   const to = o.to ? Prisma.sql`AND o."startsAt" <= ${ts(o.to)}` : Prisma.empty;
   return Prisma.sql`
     SELECT o.id AS occurrence_id, o."startsAt" AS starts_at, e."clubId" AS club_id
       FROM "EventOccurrence" o JOIN "Event" e ON e.id = o."eventId"
-     WHERE o.status = 'SCHEDULED' AND ${ev} AND e."clubId" IS NOT NULL ${inClubs(Prisma.sql`e."clubId"`, o.clubs)} ${from} ${to}
+     WHERE o.status = 'SCHEDULED' ${ev} AND e."clubId" IS NOT NULL ${inClubs(Prisma.sql`e."clubId"`, o.clubs)} ${from} ${to}
     UNION
     SELECT o.id, o."startsAt", c."clubId"
       FROM "EventOccurrence" o JOIN "Event" e ON e.id = o."eventId"
       JOIN "EventCohost" c ON c."eventId" = e.id AND c.status = 'APPROVED'
-     WHERE o.status = 'SCHEDULED' AND ${ev} ${inClubs(Prisma.sql`c."clubId"`, o.clubs)} ${from} ${to}`;
+     WHERE o.status = 'SCHEDULED' ${ev} ${inClubs(Prisma.sql`c."clubId"`, o.clubs)} ${from} ${to}`;
 }
 
 /** Same rule as P.wasMemberAt, for a Membership alias at a timestamp expression. */
@@ -755,7 +754,7 @@ function checkinsWithClubs(from: Date, to: Date, extra: { select: Prisma.Sql; jo
         SELECT array_agg(c."clubId") AS ids FROM "EventCohost" c
          WHERE c."eventId" = e.id AND c.status = 'APPROVED' AND c."clubId" IS DISTINCT FROM e."clubId"
       ) co ON TRUE
-     WHERE o.status = 'SCHEDULED' AND e.status <> 'DRAFT' AND o."startsAt" >= ${ts(from)} AND o."startsAt" <= ${ts(to)}`;
+     WHERE o.status = 'SCHEDULED' AND o."startsAt" >= ${ts(from)} AND o."startsAt" <= ${ts(to)}`;
 }
 
 /**
@@ -902,7 +901,7 @@ const platformCached = cache(async (atMs: number): Promise<PlatformSummary> => {
             FROM "EventOccurrence" o
             JOIN "Event" e ON e.id = o."eventId"
             JOIN "Attendance" a ON a."occurrenceId" = o.id
-           WHERE o.status = 'SCHEDULED' AND e.status <> 'DRAFT'
+           WHERE o.status = 'SCHEDULED'
              AND o."startsAt" >= ${ts(termStart)} AND o."startsAt" <= ${ts(termStop)}`
       : Promise.resolve([{ checkins: 0, events: 0 }]),
     termStart && termStop ? networkCounts(termStart, termStop, true) : Promise.resolve(null),
@@ -914,7 +913,7 @@ const platformCached = cache(async (atMs: number): Promise<PlatformSummary> => {
             FROM "Attendance" a
             JOIN "EventOccurrence" o ON o.id = a."occurrenceId"
             JOIN "Event" e ON e.id = o."eventId"
-           WHERE o.status = 'SCHEDULED' AND e.status <> 'DRAFT'
+           WHERE o.status = 'SCHEDULED'
              AND o."startsAt" >= ${ts(months[0].start)} AND o."startsAt" <= ${ts(at)}
            GROUP BY 1, 2
         ) t

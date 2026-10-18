@@ -13,7 +13,8 @@ import { splitEventLinks, linkLabel } from "@/lib/events/links";
 import { KIND_LABEL, locationText, roomLabel, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { describeRecurrence } from "@/lib/events/summary";
 import { appUrl, campusMapQuery, googleCalendarTemplateUrl } from "@/lib/events/share";
-import { INSTITUTION } from "@/lib/institution";
+import { codeClubsPhrase } from "@/lib/attendance/rules";
+import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { fmtDate, fmtMoney, fmtRange, fmtTime } from "@/lib/time";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -69,6 +70,16 @@ export default async function EventPage({ params, searchParams }: Props) {
   const occ = requested ?? upcoming.find((x) => x.status === "SCHEDULED") ?? upcoming[0] ?? lastPast;
   const cost = seeCosts ? await eventCostSummary(id) : null;
   const canCheckIn = event.clubId ? Boolean(hostAccess?.capabilities.has("attendance")) : can(viewer, "admin.trainings");
+  // Who may check in without the QR code (rules.decideMethod): the host's and co-hosts' members.
+  const codeClubs = codeClubsPhrase(event.club?.name ?? null, event.cohosts.map((c) => c.club.name));
+  const howToCheckIn =
+    event.locationType === "VIRTUAL"
+      ? codeClubs
+        ? `While it's on, members of ${codeClubs} can check in with one tap on ${PLATFORM.name}. Guests scan the QR code the hosts share on screen.`
+        : "Check in by scanning the QR code the hosts share on screen."
+      : codeClubs
+        ? `Check in at the event by scanning the QR code on the screen. Members of ${codeClubs} can also type the code shown there.`
+        : "Check in at the event by scanning the QR code on the screen.";
 
   const files = [];
   for (const a of event.attachments) if (await canViewFile(viewer, a.file)) files.push(a.file);
@@ -102,7 +113,6 @@ export default async function EventPage({ params, searchParams }: Props) {
             <Badge>{KIND_LABEL[event.kind]}</Badge>
             {event.visibility !== "PUBLIC" ? <Badge tone="brand">{VISIBILITY_LABEL[event.visibility]}</Badge> : null}
             {event.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
-            {event.status === "DRAFT" ? <Badge tone="warning">Idea — only leaders can see this</Badge> : null}
             <span className="text-sm text-ink-3">
               Hosted by{" "}
               {event.club ? (
@@ -131,12 +141,6 @@ export default async function EventPage({ params, searchParams }: Props) {
           </>
         }
       />
-
-      {event.status === "DRAFT" ? (
-        <Callout tone="brand" className="mb-6" title="This is still an idea">
-          It isn&apos;t on any calendar yet. <Link href={manageHref} className="font-medium underline">Pick a time</Link> to schedule it.
-        </Callout>
-      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-6">
@@ -168,7 +172,7 @@ export default async function EventPage({ params, searchParams }: Props) {
                   {occ?.note ?? "Check back for the next one."}
                 </Callout>
               ) : null}
-              {occ && !occCancelled && event.status !== "DRAFT" ? (
+              {occ && !occCancelled ? (
                 <div className="flex flex-wrap gap-2">
                   {gcal ? (
                     <a href={gcal} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-2 bg-surface px-3 text-sm font-medium text-ink hover:bg-muted">
@@ -358,17 +362,15 @@ export default async function EventPage({ params, searchParams }: Props) {
             </Card>
           ) : null}
 
-          {event.status !== "DRAFT" ? (
-            <Card>
-              <CardBody className="flex gap-2 text-sm text-ink-2">
-                <Users className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
-                <p>
-                  {event.locationType === "VIRTUAL" ? "Members check in by tapping “Check in” on Wildcat Clubs while it's happening." : "Check in at the event: scan the QR code, or type the code shown on the screen."}
-                  {!viewer ? " You'll be asked to sign in with your Weber State account." : ""}
-                </p>
-              </CardBody>
-            </Card>
-          ) : null}
+          <Card>
+            <CardBody className="flex gap-2 text-sm text-ink-2">
+              <Users className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
+              <p>
+                {howToCheckIn}
+                {!viewer ? " You'll be asked to sign in with your Weber State account." : ""}
+              </p>
+            </CardBody>
+          </Card>
         </aside>
       </div>
     </Container>

@@ -43,9 +43,9 @@ describe("stages", () => {
     expect(stageOf("REJECTED", undefined)).toBe("rejected");
   });
   it("names founding clubs by where they are in review", () => {
-    expect(stageLabel({ stage: "founding", status: "SUBMITTED" })).toBe("Waiting on WSUSA");
+    expect(stageLabel({ stage: "founding", status: "SUBMITTED" })).toBe("In WSUSA review");
     expect(stageLabel({ stage: "founding", status: "CHANGES_REQUESTED" })).toBe("Changes requested");
-    expect(stageLabel({ stage: "pilot", status: "APPROVED" })).toBe("In pilot");
+    expect(stageLabel({ stage: "pilot", status: "APPROVED" })).toBe("Pilot period");
   });
 });
 

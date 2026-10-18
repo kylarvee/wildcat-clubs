@@ -15,7 +15,7 @@ import { cn } from "@/components/ui/cn";
 import { RichTextEditor } from "@/components/rich/RichTextEditor";
 import { SearchSelect, type SearchOption } from "@/components/founding/SearchSelect";
 import { LogoField } from "@/components/founding/LogoField";
-import { CLUB_TYPES, SCOPES, TYPE_LABEL, type FoundingType } from "@/components/founding/copy";
+import { FOUNDING_TYPES, SCOPES, TYPE_LABEL, type FoundingType } from "@/components/founding/copy";
 import { saveProfileAction } from "@/app/clubs/[slug]/manage/profile/actions";
 import { CLUB_CATEGORIES, CLUB_CATEGORY_LABEL, SOCIAL_LABEL, SOCIAL_PLATFORMS, type SocialLink } from "@/components/clubs/labels";
 
@@ -142,7 +142,7 @@ export function ProfileForm({
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium text-ink">Club type</legend>
                 <div className="grid gap-2 sm:grid-cols-3">
-                  {CLUB_TYPES.map((t) => (
+                  {FOUNDING_TYPES.map((t) => (
                     <label key={t.value} className={cn("flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-brand", type === t.value ? "border-brand bg-brand-50/60" : "border-line-2 hover:bg-muted/50")}>
                       <input type="radio" name="type" value={t.value} checked={type === t.value} onChange={() => setType(t.value)} className="mt-0.5 accent-[var(--color-brand)]" />
                       <span>

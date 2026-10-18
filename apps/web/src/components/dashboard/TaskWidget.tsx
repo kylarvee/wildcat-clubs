@@ -16,7 +16,8 @@ const SHOW = 6;
 export function TaskWidget({ tasks, viewerId, now, title = "Tasks", note }: { tasks: TaskRow[]; viewerId: string; now: Date; title?: string; note?: string }) {
   const items = groupJoinRequests(tasks, viewerId, now);
   const shown = items.slice(0, SHOW);
-  const overdue = tasks.filter((t) => t.dueAt && t.dueAt < now).length;
+  // A test handed in on time and waiting for a grader isn't overdue.
+  const overdue = tasks.filter((t) => t.dueAt && t.dueAt < now && !t.awaitingGrade).length;
   return (
     <Panel
       id="dash-tasks"

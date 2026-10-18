@@ -82,6 +82,7 @@ export const CONFIG_SCHEMAS: { [K in ConfigKey]: z.ZodType<Config[K]> } = {
       }),
     )
     .max(12, "List up to 12 reviewers.") as unknown as z.ZodType<Config["wsusa.reviewers"]>,
+  "platform.supportEmail": email,
   "app.iosUrl": optionalHttps("App Store link"),
   "app.androidUrl": optionalHttps("Google Play link"),
 };
@@ -255,7 +256,7 @@ export async function grantAdmin(actor: Actor | null, input: unknown) {
     userIds: [user.id],
     kind: "system.admin_granted",
     title: "You're now a WSUSA administrator on Wildcat Clubs",
-    body: "Admin tools are in your account menu: club reviews, funding, policies, reports and more.",
+    body: "Admin tools are in your account menu: club approvals, funding, policies, reports and more.",
     href: "/admin",
   });
   return { name: user.name };

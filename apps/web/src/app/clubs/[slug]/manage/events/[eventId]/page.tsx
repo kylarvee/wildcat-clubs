@@ -26,17 +26,15 @@ export default async function EditClubEventPage({ params }: { params: Promise<{ 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={e.status === "DRAFT" ? "Schedule an idea" : "Edit event"}
+        title="Edit event"
         description={e.title}
         breadcrumbs={[{ href: base, label: "Events" }, { label: e.title }]}
         actions={
           <>
             {e.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
-            {e.status !== "DRAFT" ? (
-              <ButtonLink variant="outline" href={`/events/${e.id}`}>
-                <ExternalLink className="h-4 w-4" /> Event page
-              </ButtonLink>
-            ) : null}
+            <ButtonLink variant="outline" href={`/events/${e.id}`}>
+              <ExternalLink className="h-4 w-4" /> Event page
+            </ButtonLink>
           </>
         }
       />

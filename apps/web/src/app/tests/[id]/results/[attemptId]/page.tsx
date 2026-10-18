@@ -46,7 +46,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   if (test.isForm) {
     return (
       <Container size="md">
-        <PageHeader breadcrumbs={[{ href: "/tests", label: "Your tests" }, { href: `/tests/${id}`, label: test.title }, { label: "Your answers" }]} title={test.title} description={`From ${owner}`} />
+        <PageHeader breadcrumbs={[{ href: "/tests", label: "Tests & forms" }, { href: `/tests/${id}`, label: test.title }, { label: "Your answers" }]} title={test.title} description={`From ${owner}`} />
         <Card className="mb-6">
           <CardBody className="flex flex-wrap items-start gap-3">
             <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-success" aria-hidden />
@@ -63,7 +63,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
         <FormAnswers items={items.map((it) => ({ questionId: it.questionId, type: it.type, promptHtml: it.promptHtml, options: it.options, text: it.text }))} />
         <p className="mt-8 text-sm text-ink-3">
           <Link href="/tests" className="font-medium text-brand-600 hover:underline">
-            Back to your tests
+            Back to tests & forms
           </Link>
         </p>
       </Container>
@@ -73,7 +73,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   return (
     <Container size="md">
       <PageHeader
-        breadcrumbs={[{ href: "/tests", label: "Your tests" }, { href: `/tests/${id}`, label: test.title }, { label: "Results" }]}
+        breadcrumbs={[{ href: "/tests", label: "Tests & forms" }, { href: `/tests/${id}`, label: test.title }, { label: "Results" }]}
         title={`Results: ${test.title}`}
         description={
           attempt.submittedAt
@@ -143,7 +143,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
       <p className="mt-8 text-sm text-ink-3">
         <Link href="/tests" className="font-medium text-brand-600 hover:underline">
-          Back to your tests
+          Back to tests & forms
         </Link>
       </p>
     </Container>

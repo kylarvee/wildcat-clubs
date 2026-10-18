@@ -73,7 +73,7 @@ export function toMOccurrence(o: OccurrenceSummary): MOccurrence {
     place: o.place,
     visibility: o.visibility,
     cancelled: o.cancelled,
-    allowSelfCheckIn: o.allowSelfCheckIn,
+    allowTapCheckIn: o.allowTapCheckIn,
     opensAt: iso(o.opensAt),
     closesAt: iso(o.closesAt),
     windowState: o.windowState,

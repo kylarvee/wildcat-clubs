@@ -13,7 +13,7 @@ const officers = (n: number) => `${n} officer${n === 1 ? "" : "s"}`;
  */
 export function OfficerRequirements({ clubs }: { clubs: ClubLeaderCompliance[] }) {
   return (
-    <Panel id="dash-officers" title="Officer requirements" icon={<ShieldCheck />}>
+    <Panel id="dash-officers" title="WSUSA requirements" icon={<ShieldCheck />}>
       <ul className="space-y-3">
         {clubs.map((c) => (
           <li key={c.club.id}>
@@ -24,7 +24,7 @@ export function OfficerRequirements({ clubs }: { clubs: ClubLeaderCompliance[] }
               <p className="mt-0.5 text-[13px] text-ink-3">No student leaders yet.</p>
             ) : c.paused ? (
               <p className="mt-0.5 text-[13px] font-medium text-danger">
-                {officers(c.paused)} {c.paused === 1 ? "has" : "have"} paused permissions until a requirement is done.
+                {officers(c.paused)} {c.paused === 1 ? "has" : "have"} permissions paused until an overdue requirement is done.
               </p>
             ) : c.due ? (
               <p className="mt-0.5 text-[13px] font-medium text-warning">

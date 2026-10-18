@@ -90,7 +90,7 @@ export function AdminRowActions({ person }: { person: { id: string; name: string
           </Button>
         }
         title={`Make ${person.name} a regular administrator?`}
-        description={`${person.name} keeps every admin tool but can no longer change platform rules, switch integrations or manage administrators.`}
+        description={`${person.name} keeps every admin tool but can no longer change system settings, switch integrations or manage administrators.`}
         confirmLabel="Remove system admin role"
         onConfirm={() => go("down", () => revokeSysadminAction(person.id), `${person.name} is now an administrator`)}
       />

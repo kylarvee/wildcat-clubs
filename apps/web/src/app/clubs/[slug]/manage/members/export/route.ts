@@ -8,7 +8,7 @@ import { memberContacts } from "@/lib/domain/details";
 import { YEAR_LABEL } from "@/lib/details/rules";
 import { fmtDate, fmtLongDate } from "@/lib/time";
 
-const STATUS_LABEL: Record<string, string> = { ACTIVE: "Member", PENDING: "Requested to join", ALUMNI: "Alumni", LEFT: "Left", REMOVED: "Removed", DECLINED: "Declined" };
+const STATUS_LABEL: Record<string, string> = { ACTIVE: "Member", PENDING: "Request pending", ALUMNI: "Alumni", LEFT: "Left", REMOVED: "Removed", DECLINED: "Request declined" };
 
 /** GET: the club roster as CSV, for people holding the `roster` capability. */
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -23,7 +23,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
   const [roster, attendance] = await Promise.all([rosterData(club.id), clubMemberAttendanceCounts(club.id)]);
   // Contact basics from member details, under the same rule as the roster page (lib/authz/details).
   const contacts = await memberContacts(user, club.id, roster.map((r) => r.person.id));
-  const header = ["Name", "Email", "Personal email", "Phone", "Year in school", "Status", "Roles", "Internal title", "Joined", "Events attended", "Last attended", "Active"];
+  const header = ["Name", "Email", "Personal email", "Phone", "Year in school", "Status", "Roles", "Internal title", "Joined", "Events attended", "Last attended", "Attending"];
   const lines = roster
     .filter((r) => r.status !== "DECLINED")
     .map((r) => {

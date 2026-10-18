@@ -141,7 +141,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     recurrenceWeekdays: e.recurrenceWeekdays, recurrenceUntil: e.recurrenceUntil, locationType: e.locationType, buildingId: e.buildingId,
     room: e.room, address: e.address, lat: e.locationType === "CAMPUS" || e.locationType === "ADDRESS" ? e.lat : null,
     lng: e.locationType === "CAMPUS" || e.locationType === "ADDRESS" ? e.lng : null, virtualUrl: e.virtualUrl,
-    allowSelfCheckIn: e.allowSelfCheckIn, createdById: e.createdById, createdAt: e.createdAt, updatedAt: e.createdAt,
+    createdById: e.createdById, createdAt: e.createdAt, updatedAt: e.createdAt,
   }));
   await insertMany("Event", events, (d) => db.event.createMany({ data: d }), log);
   const occs: Prisma.EventOccurrenceCreateManyInput[] = evs.flatMap((e) =>

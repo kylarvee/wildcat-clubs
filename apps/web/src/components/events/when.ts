@@ -4,8 +4,8 @@ import { addDaysToDateInput, campusParts, fromInputs, toDateInput, toTimeInput }
 import type { TermJson } from "@/lib/events/types";
 
 /**
- * The "When" form model shared by quick-create, the idea scheduler and the full
- * editor: campus date/time inputs plus a repeat rule, converted to the domain's
+ * The "When" form model shared by quick-create and the full editor: campus
+ * date/time inputs plus a repeat rule, converted to the domain's
  * schedule input (real instants + duration).
  */
 

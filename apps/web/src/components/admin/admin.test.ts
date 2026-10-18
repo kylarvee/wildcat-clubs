@@ -25,9 +25,11 @@ describe("report wording", () => {
 });
 
 describe("activity labels", () => {
-  it("uses plain words for common actions and a readable fallback for the rest", () => {
+  it("names every action from the catalog, with a readable fallback for old rows", () => {
     expect(activityLabel("attendance.checkin")).toBe("Checked in to an event");
-    expect(activityLabel("constitution.draft_saved")).toBe("Constitution: draft saved");
+    expect(activityLabel("constitution.draft_saved")).toBe("Saved a constitution draft");
+    expect(activityLabel("funding.denied")).toBe("Didn't approve a funding request");
+    expect(activityLabel("legacy.thing_done")).toBe("Legacy: thing done");
     expect(activityLabel("solo")).toBe("Solo");
   });
 });

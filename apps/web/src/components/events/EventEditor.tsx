@@ -1,15 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
-import type { CohostStatus, EventKind, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
+import type { CohostStatus, EventKind, EventStatus, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
 import { AlertTriangle, Ban, CalendarCheck, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Checkbox, Input, Label, Select, Textarea } from "@/components/ui/form";
+import { Input, Label, Select, Textarea } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { toast } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
@@ -28,14 +27,13 @@ import { cancelEventAction, createEventAction, deleteEventAction, restoreEventAc
 
 export type EditorEvent = {
   id: string;
-  status: "DRAFT" | "SCHEDULED" | "CANCELLED";
+  status: EventStatus;
   title: string;
   kind: EventKind;
   /** Description without the links block (see lib/events/links). */
   descriptionHtml: string;
   links: EventLink[];
   visibility: Visibility;
-  allowSelfCheckIn: boolean;
   setupMinutes: number;
   cleanupMinutes: number;
   startsAt: string | null;
@@ -57,7 +55,7 @@ export type EditorEvent = {
   /** `lockedBy`: the submitted or approved funding request that covers the line (it can't change). */
   costs: { id: string; description: string; category: string; quantity: number; unitCostCents: number; perOccurrence: boolean; fundingSource: FundingSource; lockedBy: string | null }[];
   attendanceCount: number;
-  /** Set when an officer requirement points at this training. */
+  /** Set when a WSUSA requirement points at this training. */
   requirementName: string | null;
 };
 
@@ -84,7 +82,7 @@ const SECTIONS = [
   { id: "attachments", label: "Attachments" },
   { id: "costs", label: "Costs", club: true },
   { id: "cohosts", label: "Co-hosts", club: true },
-  { id: "visibility", label: "Visibility & check-in" },
+  { id: "visibility", label: "Visibility & room time" },
   { id: "danger", label: "Cancel or delete", existing: true },
 ];
 
@@ -113,7 +111,6 @@ export function EventEditor(props: EventEditorProps) {
   const router = useRouter();
   const id = useId();
   const isClub = mode === "club" && club !== null;
-  const isIdea = event?.status === "DRAFT";
 
   const [title, setTitle] = useState(event?.title ?? props.initial?.title ?? "");
   const [kind, setKind] = useState<EventKind>(event?.kind ?? (isClub ? "MEETING" : "TRAINING"));
@@ -218,7 +215,7 @@ export function EventEditor(props: EventEditorProps) {
       const res = event ? await updateEventAction(event.id, payload) : await createEventAction({ ...payload, clubId: club?.id ?? null });
       if (!res.ok) return fail(res.error);
       setDirty(false);
-      toast.success(isIdea ? "Added to the calendar" : event ? "Event saved" : "Event created");
+      toast.success(event ? "Event saved" : "Event created");
       if (res.data.google.status === "failed" && res.data.google.message) toast.warning(res.data.google.message);
       router.push(`${basePath}?date=${when.date}`);
       router.refresh();
@@ -239,7 +236,7 @@ export function EventEditor(props: EventEditorProps) {
   }
 
   const sections = SECTIONS.filter((s) => (!s.club || isClub) && (!s.existing || event));
-  const blockedDelete = event ? (event.attendanceCount > 0 ? "People already checked in, so it can only be cancelled — its attendance history stays." : event.requirementName ? `This training is the officer requirement “${event.requirementName}”. Change the requirement first.` : null) : null;
+  const blockedDelete = event ? (event.attendanceCount > 0 ? "People already checked in, so it can only be cancelled — its attendance history stays." : event.requirementName ? `This training is the WSUSA requirement “${event.requirementName}”. Change the requirement first.` : null) : null;
 
   return (
     <div className="grid gap-6 xl:grid-cols-[180px_1fr]">
@@ -267,11 +264,6 @@ export function EventEditor(props: EventEditorProps) {
         {error ? (
           <Callout tone="danger" title="Couldn't save yet" icon={<AlertTriangle />}>
             {error}
-          </Callout>
-        ) : null}
-        {isIdea ? (
-          <Callout tone="brand" title="This is an idea">
-            Pick a time below and save to put it on the calendar.
           </Callout>
         ) : null}
         {event?.status === "CANCELLED" ? (
@@ -359,7 +351,7 @@ export function EventEditor(props: EventEditorProps) {
         ) : null}
 
         <Card id="visibility" className="scroll-mt-20">
-          <CardHeader title="Visibility & check-in" />
+          <CardHeader title="Visibility & room time" />
           <CardBody className="space-y-5">
             <fieldset>
               <legend className="mb-2 text-sm font-medium text-ink">Who can see it</legend>
@@ -434,16 +426,16 @@ export function EventEditor(props: EventEditorProps) {
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <p className="max-w-lg text-sm text-ink-2">{blockedDelete ?? (isIdea ? "Remove this idea from the list." : "Delete the event and all of its meetings for good.")}</p>
+                <p className="max-w-lg text-sm text-ink-2">{blockedDelete ?? "Delete the event and all of its meetings for good."}</p>
                 <ConfirmDialog
-                  title={isIdea ? "Delete this idea?" : "Delete this event for good?"}
-                  description={isIdea ? undefined : "It disappears from every calendar and feed. This can't be undone."}
+                  title="Delete this event for good?"
+                  description="It disappears from every calendar and feed. This can't be undone."
                   confirmLabel="Delete"
                   danger
-                  onConfirm={() => runDanger(() => deleteEventAction(event.id), isIdea ? "Idea deleted" : "Event deleted", true)}
+                  onConfirm={() => runDanger(() => deleteEventAction(event.id), "Event deleted", true)}
                   trigger={
                     <Button variant="danger" disabled={busy || Boolean(blockedDelete)}>
-                      <Trash2 className="h-4 w-4" /> {isIdea ? "Delete idea" : "Delete event"}
+                      <Trash2 className="h-4 w-4" /> Delete event
                     </Button>
                   }
                 />
@@ -459,18 +451,9 @@ export function EventEditor(props: EventEditorProps) {
           </ButtonLink>
           <Button type="submit" disabled={saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />}
-            {saving ? "Saving…" : isIdea ? "Add to calendar" : event ? "Save changes" : "Create event"}
+            {saving ? "Saving…" : event ? "Save changes" : "Create event"}
           </Button>
         </div>
-        {!event ? (
-          <p className="text-center text-xs text-ink-3">
-            Just an idea for now?{" "}
-            <Link href={`${basePath}?tab=ideas`} className="font-medium text-brand-600 hover:underline">
-              Add it to the idea list
-            </Link>{" "}
-            instead.
-          </p>
-        ) : null}
       </form>
     </div>
   );

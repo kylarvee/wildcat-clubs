@@ -6,10 +6,10 @@ import { agendaDayLabel, dayKey } from "@/components/dashboard/format";
 import type { AgendaItem } from "@/app/dashboard/data";
 
 /**
- * "This week": the next few days of your calendar, grouped by day, with the
+ * "Coming up": the next two weeks of your calendar, grouped by day, with the
  * clubs you lead marked. The full calendar has its own page, so this stays
- * a short list. Admins get "Coming up": university events and requirement
- * deadlines for the next two weeks.
+ * a short list. Admins see university events and requirement deadlines for
+ * the same two weeks.
  */
 export function WeekAgenda({ items, now, admin = false }: { items: AgendaItem[]; now: Date; admin?: boolean }) {
   const days: { key: string; label: string; items: AgendaItem[] }[] = [];
@@ -20,7 +20,7 @@ export function WeekAgenda({ items, now, admin = false }: { items: AgendaItem[];
     else days.push({ key, label: agendaDayLabel(it.at, now), items: [it] });
   }
   return (
-    <Panel id="dash-week" title={admin ? "Coming up" : "This week"} icon={<CalendarDays />} link={{ href: "/calendar", label: "Calendar" }}>
+    <Panel id="dash-week" title="Coming up" icon={<CalendarDays />} link={{ href: "/calendar", label: "Calendar" }}>
       {days.length ? (
         <div className="space-y-4">
           {days.map((d) => (
@@ -51,7 +51,7 @@ export function WeekAgenda({ items, now, admin = false }: { items: AgendaItem[];
           ))}
         </div>
       ) : (
-        <p className="text-sm text-ink-3">{admin ? "No university events or requirement deadlines in the next two weeks." : "Nothing on your calendar this week. Follow a club and its events show up here."}</p>
+        <p className="text-sm text-ink-3">{admin ? "No university events or requirement deadlines in the next two weeks." : "Nothing on your calendar in the next two weeks. Follow a club and its events show up here."}</p>
       )}
     </Panel>
   );

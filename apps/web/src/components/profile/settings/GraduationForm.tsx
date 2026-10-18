@@ -10,14 +10,27 @@ import { Callout } from "@/components/ui/layout";
 import { toast } from "@/components/ui/misc";
 import { useRunAction } from "@/components/roles/useRunAction";
 import { markGraduatedAction } from "@/app/settings/actions";
-import { INSTITUTION, PLATFORM } from "@/lib/institution";
+import { INSTITUTION } from "@/lib/institution";
 
 /**
  * "I've graduated": pick the date, confirm what happens, done. Roles end as
  * Graduated in every club's history, memberships become alumni and the
  * profile is retired (read-only) — the history stays.
  */
-export function GraduationForm({ handle, today, roleCount, clubCount }: { handle: string; today: string; roleCount: number; clubCount: number }) {
+export function GraduationForm({
+  handle,
+  today,
+  roleCount,
+  clubCount,
+  supportEmail,
+}: {
+  handle: string;
+  today: string;
+  roleCount: number;
+  clubCount: number;
+  /** System config `platform.supportEmail`: who undoes a graduation marked by mistake. */
+  supportEmail: string;
+}) {
   const [date, setDate] = useState(today);
   const [confirming, setConfirming] = useState(false);
   const { pending, error, setError, run } = useRunAction();
@@ -61,7 +74,7 @@ export function GraduationForm({ handle, today, roleCount, clubCount }: { handle
         open={confirming}
         onOpenChange={setConfirming}
         title="Mark yourself as graduated?"
-        description={`You can't undo this yourself. If you mark it by mistake, email ${INSTITUTION.studentGovernment} at ${PLATFORM.supportEmail}.`}
+        description={`You can't undo this yourself. If you mark it by mistake, email ${INSTITUTION.studentGovernment} at ${supportEmail}.`}
         confirmLabel="Yes, I've graduated"
         onConfirm={() => void graduate()}
       >

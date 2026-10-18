@@ -23,10 +23,13 @@ function readDismissed(): string[] {
 }
 
 /**
- * "Check-in is open — are you here?" for members during their club's event
- * (the web twin of the mobile app's pop-up). One tap checks in (self
- * check-in); "Not now" hides it for this browser session so people can just
- * use the page. Feed it liveOccurrencesForUser(actor).
+ * "Check-in is open — are you here?" for members during their club's online
+ * event (the web twin of the mobile app's pop-up). One tap checks in (method
+ * TAP, "One-tap (online)"); "Not now" hides it for this browser session so
+ * people can just use the page. Feed it liveOccurrencesForUser(actor), and
+ * render it even when that list is empty (it shows nothing then): after a
+ * check-in the page refreshes with nothing live, and staying mounted keeps
+ * the "You're checked in!" card on screen.
  */
 export function LiveCheckinPrompt({ occurrences, className }: { occurrences: OccurrenceSummary[]; className?: string }) {
   const router = useRouter();
@@ -50,7 +53,7 @@ export function LiveCheckinPrompt({ occurrences, className }: { occurrences: Occ
     setBusyId(o.id);
     setErrors((e) => ({ ...e, [o.id]: "" }));
     startTransition(async () => {
-      const res = await checkInAction({ code: o.code, via: "web" });
+      const res = await checkInAction({ code: o.code, via: "web-popup" });
       setBusyId(null);
       if (res.ok) {
         setDone((d) => [...d.filter((r) => r.occurrence.id !== o.id), res.data]);

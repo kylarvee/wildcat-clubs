@@ -13,7 +13,8 @@ import { getConfig } from "@/lib/config";
 import { occurrenceById, toOccurrenceSummary } from "@/lib/attendance/queries";
 import { canManageOccurrence } from "@/lib/domain/attendance";
 import { OccurrenceAttendance } from "@/components/attendance/OccurrenceAttendance";
-import { loadAttendees, METHOD_LABEL } from "./attendees";
+import { MethodBadge } from "@/components/attendance/MethodMark";
+import { loadAttendees } from "./attendees";
 
 export const metadata: Metadata = { title: "Attendees" };
 
@@ -87,7 +88,7 @@ export default async function TrainingAttendeesPage({ params }: { params: Promis
                 </TD>
                 <TD className="text-sm text-ink-2">{rolesByUser.get(a.userId)?.join(" · ") ?? <span className="text-ink-3">—</span>}</TD>
                 <TD>
-                  <Badge>{METHOD_LABEL[a.method]}</Badge>
+                  <MethodBadge method={a.method} />
                   {a.method === "MANUAL" && a.recordedBy ? <span className="block text-xs text-ink-3">by {a.recordedBy.name}</span> : null}
                 </TD>
                 <TD className="whitespace-nowrap text-sm">{fmtTime(a.checkedInAt)}</TD>

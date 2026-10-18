@@ -28,7 +28,7 @@ export function DecisionCallout({ request: r, audience, reviewDays }: { request:
   switch (r.status) {
     case "SUBMITTED":
       return (
-        <Callout tone="info" icon={<Clock />} title={audience === "club" ? "Waiting on WSUSA" : "Waiting for your decision"}>
+        <Callout tone="info" icon={<Clock />} title="In WSUSA review">
           {audience === "club"
             ? `WSUSA staff are reviewing it${reviewDays ? ` and usually respond within about ${reviewDays} business days` : ""}. You'll get a notification when they decide.`
             : `Submitted ${r.submittedAt ? fmtLongDate(r.submittedAt) : ""}${r.submittedBy ? ` by ${r.submittedBy.name}` : ""}.`}

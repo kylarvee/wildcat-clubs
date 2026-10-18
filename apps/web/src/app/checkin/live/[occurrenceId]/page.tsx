@@ -6,6 +6,7 @@ import { Ban, Lock } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { DomainError } from "@/lib/domain/kit";
 import { appUrl, checkinScreen } from "@/lib/domain/attendance";
+import { codeClubsPhrase } from "@/lib/attendance/rules";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/layout";
 import { LiveCheckinScreen, type LiveFeed, type LiveToken } from "@/components/attendance/LiveCheckinScreen";
@@ -63,6 +64,7 @@ export default async function LiveCheckinPage({ params }: { params: Promise<{ oc
       initialFeed={asJson<LiveFeed>(feed)}
       initialSvg={svg}
       typeAt={`${host}/checkin`}
+      codeClubs={codeClubsPhrase(occurrence.club?.name ?? null, occurrence.cohosts.map((c) => c.name))}
       backHref={backHref}
     />
   );

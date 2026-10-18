@@ -21,18 +21,16 @@ export default async function EditTrainingPage({ params }: { params: Promise<{ e
   return (
     <div className="space-y-6">
       <PageHeader
-        title={e.status === "DRAFT" ? "Schedule an idea" : "Edit university event"}
+        title="Edit university event"
         description={e.title}
         breadcrumbs={[{ href: "/admin/trainings", label: "Trainings & events" }, { label: e.title }]}
         actions={
           <>
             {e.requirementName ? <Badge tone="warning">Required: {e.requirementName}</Badge> : null}
             {e.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
-            {e.status !== "DRAFT" ? (
-              <ButtonLink variant="outline" href={`/events/${e.id}`}>
-                <ExternalLink className="h-4 w-4" /> Event page
-              </ButtonLink>
-            ) : null}
+            <ButtonLink variant="outline" href={`/events/${e.id}`}>
+              <ExternalLink className="h-4 w-4" /> Event page
+            </ButtonLink>
           </>
         }
       />

@@ -10,7 +10,7 @@ export type SeatCardHolder = {
   person: { name: string; handle: string; avatarUrl: string | null; avatarColor: string };
   internalTitle?: string | null;
   viaClub?: { name: string; slug: string } | null;
-  /** Officer requirements — only pass for leader viewers. */
+  /** Where they stand on WSUSA requirements — only pass for leader viewers. */
   training?: "pending" | "overdue" | null;
   /** Extra line under the name (e.g. "Since Sep 2025"). */
   meta?: ReactNode;
@@ -102,7 +102,7 @@ export function SeatCard({
                 {h.training ? (
                   <p className={cn("mt-0.5 flex items-center gap-1 text-xs font-medium", h.training === "overdue" ? "text-danger" : "text-warning")}>
                     <GraduationCap className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    {h.training === "overdue" ? "Training overdue — permissions paused" : "Training pending"}
+                    {h.training === "overdue" ? "Requirement overdue — permissions paused" : "WSUSA requirements pending"}
                   </p>
                 ) : null}
               </div>
