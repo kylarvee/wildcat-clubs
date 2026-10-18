@@ -7,6 +7,8 @@ import { Stars } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
 import { CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, pct, safeHex } from "@/components/clubs/labels";
 import { RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
+import { FoundIn } from "@/components/search/FoundIn";
+import { Reasons } from "@/components/search/Reasons";
 
 /** Pilot / inactive / retired badge. Shows nothing until the metrics layer has numbers for the club. */
 export function ClubStatusBadge({ club }: { club: Pick<ClubListItem, "status" | "metrics" | "hasMetrics"> }) {
@@ -43,7 +45,11 @@ export function RatingInline({ avg, count, size = 14 }: { avg: number | null; co
   );
 }
 
-/** A club in the grid: identity, what it's about, and its numbers. Signed-in viewers get Register / Subscribe. */
+/**
+ * A club in the grid: identity, what it's about, and its numbers. With a
+ * search, where the words were found when the card doesn't show them; and up
+ * to two reasons it's suggested. Signed-in viewers get Register / Subscribe.
+ */
 export function ClubCard({ club, state, signedIn, showActions = true }: { club: ClubListItem; state?: ViewerClubState; signedIn: boolean; showActions?: boolean }) {
   const color = safeHex(club.logoColor);
   const actionable = showActions && signedIn && club.status === "APPROVED";
@@ -81,6 +87,9 @@ export function ClubCard({ club, state, signedIn, showActions = true }: { club: 
         ) : null}
       </div>
       <p className="line-clamp-3 flex-1 px-4 pt-2.5 text-sm leading-relaxed text-ink-2">{club.shortDescription || <span className="text-ink-3">This club hasn&rsquo;t added a description yet.</span>}</p>
+      {/* Above the card's stretched link, so the "Found in" link opens the event or section itself. */}
+      {club.match ? <FoundIn match={club.match} className="relative z-10 mx-4 mt-3" /> : null}
+      {club.reasons.length ? <Reasons reasons={club.reasons} className="px-4 pt-3" /> : null}
       <p className="px-4 pt-3 text-sm">
         <RatingInline avg={m.avgRating} count={m.reviewCount} size={14} />
       </p>

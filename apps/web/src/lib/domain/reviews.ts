@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyAdmins } from "@/lib/domain/notify";
+import { reindexClubSoon } from "@/lib/search/fresh";
 
 /**
  * Reviews — the one input tool is the review form on the club page.
@@ -68,6 +69,8 @@ export async function writeReview(actor: Actor | null, clubId: string, input: un
     data: { rating: data.rating },
     isPublic: true,
   });
+  // Review text is searchable (lib/search) unless it's hidden or reported.
+  reindexClubSoon(clubId);
 
   const cfg = await getConfig();
   if (data.rating <= cfg["reviews.bombingMaxRating"]) await checkReviewBombing(club, actor.id);
@@ -114,6 +117,7 @@ export async function deleteReview(actor: Actor | null, reviewId: string) {
   // Nothing left to moderate.
   await resolveTasks("reviewFlag", review.id, actor.id, db, "CANCELLED");
   await logActivity({ actorId: actor.id, action: "review.deleted", entityType: "review", entityId: review.id, clubId: review.clubId });
+  reindexClubSoon(review.clubId);
 }
 
 const FlagInput = z.object({
@@ -136,6 +140,8 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
   if (already) throw conflict("You've already reported this review. Admins will take a look.");
   await db.reviewFlag.create({ data: { reviewId, userId: actor.id, reason } });
   await logActivity({ actorId: actor.id, action: "review.flagged", entityType: "review", entityId: reviewId, clubId: review.clubId });
+  // A reported review leaves search until admins keep it.
+  reindexClubSoon(review.clubId);
 
   const flags = await db.reviewFlag.count({ where: { reviewId } });
   if (flags >= (await getConfig())["reviews.flagThreshold"]) {
@@ -173,6 +179,7 @@ export async function hideReview(actor: Actor | null, reviewId: string, input: u
   await db.review.update({ where: { id: reviewId }, data: { hiddenAt: new Date(), hiddenReason: reason } });
   await resolveTasks("reviewFlag", reviewId, actor.id);
   await logActivity({ actorId: actor.id, action: "review.hidden", entityType: "review", entityId: reviewId, clubId: review.clubId, data: { reason } });
+  reindexClubSoon(review.clubId);
   await notify({
     userIds: [review.userId],
     kind: "review.hidden",
@@ -191,6 +198,7 @@ export async function restoreReview(actor: Actor | null, reviewId: string) {
   if (!review.hiddenAt) throw conflict("This review isn't hidden.");
   await db.review.update({ where: { id: reviewId }, data: { hiddenAt: null, hiddenReason: null } });
   await logActivity({ actorId: actor.id, action: "review.restored", entityType: "review", entityId: reviewId, clubId: review.clubId });
+  reindexClubSoon(review.clubId);
 }
 
 /** Admins looked at a reported review and it stays up: clears its reports and closes the task. */
@@ -201,6 +209,7 @@ export async function keepReportedReview(actor: Actor | null, reviewId: string) 
   await db.reviewFlag.deleteMany({ where: { reviewId } });
   await resolveTasks("reviewFlag", reviewId, actor.id);
   await logActivity({ actorId: actor.id, action: "review.reports_cleared", entityType: "review", entityId: reviewId, clubId: review.clubId });
+  reindexClubSoon(review.clubId);
 }
 
 /** Admins finished checking a club for review bombing (whether or not they hid anything). */

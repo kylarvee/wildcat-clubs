@@ -39,6 +39,7 @@ const ICONS: [prefix: string, icon: LucideIcon][] = [
   ["task.", ClipboardCheck],
   ["requirement.", ClipboardCheck],
   ["test.", ClipboardCheck],
+  ["ambassador.", Handshake],
   ["advisor.", GraduationCap],
   ["profile.alumni", GraduationCap],
   ["club.", FileText],

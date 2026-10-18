@@ -2,31 +2,65 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Building2, Loader2, Search, UserMinus, UserPlus } from "lucide-react";
+import { Building2, Loader2, Search, UserMinus, UserPlus, X } from "lucide-react";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/form";
+import { Field, Input, Textarea } from "@/components/ui/form";
 import { Callout, EmptyState } from "@/components/ui/layout";
 import { PersonPicker, type PickerPerson } from "@/components/roles/PersonPicker";
 import { useRunAction } from "@/components/roles/useRunAction";
+import { declineAmbassadorRequestAction } from "@/components/ambassadors/actions";
+import { REQUEST_NOTE_MAX } from "@/lib/ambassadors/rules";
 import { endPlacement, place } from "../actions";
 
 export type PlacedAmbassador = { assignmentId: string; userId: string; name: string; handle: string; avatarUrl: string | null; avatarColor: string; sinceLabel: string };
 export type CollegeClub = { id: string; name: string; slug: string; logoUrl: string | null; logoColor: string; shortDescription: string; members: number; placed: PlacedAmbassador[] };
 export type Rep = PickerPerson & { placements: number };
+/** A club's open request for an ambassador (dates as ISO strings). */
+export type ClubRequest = { at: string; note: string | null; byName: string | null };
+type Filter = "all" | "requested" | "open";
 
-/** The college's clubs with their placed ambassadors; place or end placements inline. */
-export function Placements({ orgId, orgName, clubs, reps }: { orgId: string; orgName: string; clubs: CollegeClub[]; reps: Rep[] }) {
+const ago = (iso: string) => {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+};
+
+/** The college's clubs with their placed ambassadors; clubs that asked for one come first. Place, decline or end placements inline. */
+export function Placements({
+  orgId,
+  orgName,
+  clubs,
+  reps,
+  requests,
+  initialFilter = "all",
+}: {
+  orgId: string;
+  orgName: string;
+  clubs: CollegeClub[];
+  reps: Rep[];
+  requests: Record<string, ClubRequest>;
+  initialFilter?: Filter;
+}) {
   const [q, setQ] = useState("");
-  const [onlyOpen, setOnlyOpen] = useState(false);
+  const [chosen, setFilter] = useState<Filter>(initialFilter);
+  // Once the last request is answered its chip goes away, so fall back to every club.
+  const filter: Filter = chosen === "requested" && !clubs.some((c) => requests[c.id]) ? "all" : chosen;
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return clubs.filter((c) => (!onlyOpen || c.placed.length === 0) && (!t || c.name.toLowerCase().includes(t) || c.placed.some((p) => p.name.toLowerCase().includes(t))));
-  }, [clubs, q, onlyOpen]);
+    return clubs
+      .filter((c) => (filter === "all" || (filter === "open" ? c.placed.length === 0 : Boolean(requests[c.id]))) && (!t || c.name.toLowerCase().includes(t) || c.placed.some((p) => p.name.toLowerCase().includes(t))))
+      .sort((a, b) => Number(Boolean(requests[b.id])) - Number(Boolean(requests[a.id])));
+  }, [clubs, q, filter, requests]);
   const openCount = clubs.filter((c) => c.placed.length === 0).length;
+  const requestedCount = clubs.filter((c) => requests[c.id]).length;
+  const filters: [Filter, string][] = [
+    ["all", `All clubs (${clubs.length})`],
+    ...(requestedCount ? ([["requested", `Asked for one (${requestedCount})`]] as [Filter, string][]) : []),
+    ["open", `Needs an ambassador (${openCount})`],
+  ];
 
   return (
     <div className="space-y-4">
@@ -35,26 +69,27 @@ export function Placements({ orgId, orgName, clubs, reps }: { orgId: string; org
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" aria-hidden />
           <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clubs or ambassadors" className="pl-9" aria-label="Search clubs or ambassadors" />
         </div>
-        <div role="group" aria-label="Show" className="flex gap-1 rounded-xl bg-muted p-1 sm:ml-auto">
-          {[
-            [false, `All clubs (${clubs.length})`],
-            [true, `Needs an ambassador (${openCount})`],
-          ].map(([v, label]) => (
+        <div role="group" aria-label="Show" className="flex flex-wrap gap-1 rounded-xl bg-muted p-1 sm:ml-auto">
+          {filters.map(([v, label]) => (
             <button
-              key={String(v)}
+              key={v}
               type="button"
-              aria-pressed={onlyOpen === v}
-              onClick={() => setOnlyOpen(v as boolean)}
-              className={cn("rounded-lg px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-brand", onlyOpen === v ? "bg-surface text-ink shadow-sm" : "text-ink-3 hover:text-ink")}
+              aria-pressed={filter === v}
+              onClick={() => setFilter(v)}
+              className={cn("rounded-lg px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-brand", filter === v ? "bg-surface text-ink shadow-sm" : "text-ink-3 hover:text-ink")}
             >
-              {label as string}
+              {label}
             </button>
           ))}
         </div>
       </div>
 
       {shown.length === 0 ? (
-        <EmptyState icon={<Building2 />} title={q ? `No clubs match “${q}”` : onlyOpen ? "Every club has an ambassador" : "No active clubs in this college yet"} description={onlyOpen && !q ? "Nice work — every approved club in the college has a representative." : undefined} />
+        <EmptyState
+          icon={<Building2 />}
+          title={q ? `No clubs match “${q}”` : filter === "open" ? "Every club has an ambassador" : filter === "requested" ? "No open requests" : "No active clubs in this college yet"}
+          description={filter === "open" && !q ? "Nice work — every approved club in the college has a representative." : undefined}
+        />
       ) : (
         <ul className="grid gap-3 lg:grid-cols-2">
           {shown.map((c) => (
@@ -67,8 +102,17 @@ export function Placements({ orgId, orgName, clubs, reps }: { orgId: string; org
                   </Link>
                   <p className="truncate text-xs text-ink-3">{c.shortDescription || `${c.members} member${c.members === 1 ? "" : "s"}`}</p>
                 </div>
-                {c.placed.length === 0 ? <Badge tone="warning">No ambassador</Badge> : null}
+                {requests[c.id] ? <Badge tone="info">Asked for one</Badge> : c.placed.length === 0 ? <Badge tone="warning">No ambassador</Badge> : null}
               </div>
+              {requests[c.id] ? (
+                <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
+                  <p className="text-xs text-ink-3">
+                    Asked {ago(requests[c.id].at)}
+                    {requests[c.id].byName ? ` by ${requests[c.id].byName}` : ""}
+                  </p>
+                  {requests[c.id].note ? <p className="mt-1 text-ink-2">&ldquo;{requests[c.id].note}&rdquo;</p> : null}
+                </div>
+              ) : null}
               {c.placed.length ? (
                 <ul className="space-y-2">
                   {c.placed.map((p) => (
@@ -85,8 +129,9 @@ export function Placements({ orgId, orgName, clubs, reps }: { orgId: string; org
                   ))}
                 </ul>
               ) : null}
-              <div className="mt-auto">
+              <div className="mt-auto flex flex-wrap gap-2">
                 <PlaceDialog orgId={orgId} orgName={orgName} club={c} reps={reps} />
+                {requests[c.id] ? <DeclineRequestDialog orgId={orgId} orgName={orgName} club={c} /> : null}
               </div>
             </li>
           ))}
@@ -147,6 +192,57 @@ function PlaceDialog({ orgId, orgName, club, reps }: { orgId: string; orgName: s
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
             Place {person?.name.split(" ")[0] ?? "ambassador"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Turn a club's request down with an optional reason; the club's leaders are told. */
+function DeclineRequestDialog({ orgId, orgName, club }: { orgId: string; orgName: string; club: CollegeClub }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const { pending, error, setError, run } = useRunAction();
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setError(null);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <X className="h-4 w-4" aria-hidden /> Decline
+        </Button>
+      </DialogTrigger>
+      <DialogContent title={`Decline ${club.name}'s request?`} description={`${club.name}'s leaders get a notification from ${orgName}. They can ask again later.`}>
+        <Field label="Message to the club" hint="Optional, but it helps. For example, when you expect to have someone.">
+          {(id) => <Textarea id={id} value={note} onChange={(e) => setNote(e.target.value)} maxLength={REQUEST_NOTE_MAX} rows={3} placeholder="All of our reps are placed this term. Ask again in January?" />}
+        </Field>
+        {error ? (
+          <Callout tone="danger" className="mt-4">
+            {error}
+          </Callout>
+        ) : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            disabled={pending}
+            onClick={async () => {
+              const r = await run(() => declineAmbassadorRequestAction({ orgId, clubId: club.id, note: note.trim() || null }), { success: `Declined. ${club.name}'s leaders were notified.` });
+              if (r.ok) {
+                setOpen(false);
+                setNote("");
+              }
+            }}
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            Decline request
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -23,6 +23,8 @@ export type ToolContext = {
   clubId: string;
   clubName: string;
   capabilities: CapabilityOption[];
+  /** College Ambassadors orgs add ambassador seats; in other clubs the college's program fills those. */
+  ambassadorSeats: boolean;
 };
 
 export type { PickerPerson, CapabilityOption, RequirementLike };

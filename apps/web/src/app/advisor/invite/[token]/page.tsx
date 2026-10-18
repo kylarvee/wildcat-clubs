@@ -21,7 +21,7 @@ const DUTIES = [
   { icon: Landmark, title: "Keep the club on solid ground", body: `Help them follow ${INSTITUTION.shortName} policy, and be a contact for ${INSTITUTION.studentGovernment}.` },
   { icon: Wallet, title: "Review budgets and funding", body: "Look over the club's budget and funding requests before they go to the university." },
   { icon: CalendarCheck, title: "Show up when it counts", body: "Attend major events when you can. You don't need to be at every meeting." },
-  { icon: KeyRound, title: "Full access, no vote", body: `You can see and use all of the club's tools in ${PLATFORM.name}. Advisors don't vote in club elections.` },
+  { icon: KeyRound, title: "Full access and a say in leadership", body: `You can see and use all of the club's tools in ${PLATFORM.name}. By default, you and the President choose the club's leaders together. You don't vote when members elect them.` },
 ];
 
 function mask(email: string) {

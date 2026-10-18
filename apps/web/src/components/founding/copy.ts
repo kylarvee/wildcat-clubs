@@ -1,4 +1,5 @@
 import type { ClubScope, ClubStatus, ClubType, JoinPolicy, SuccessionMethod } from "@prisma/client";
+import { SUCCESSION_LABEL as ROLE_SUCCESSION_LABEL } from "@/lib/roles/labels";
 
 /** Founding-flow wording and choices, shared by server pages and client forms. */
 
@@ -51,7 +52,8 @@ export const STATUS_LABEL: Record<ClubStatus, string> = {
 export const STATUS_TONE = { DRAFT: "neutral", SUBMITTED: "info", CHANGES_REQUESTED: "warning", APPROVED: "success", REJECTED: "danger", RETIRED: "neutral" } as const;
 
 export const JOIN_LABEL: Record<JoinPolicy, string> = { OPEN: "Open — anyone who registers is a member", APPROVAL: "Leader approval — leaders review each request" };
-export const SUCCESSION_LABEL: Record<SuccessionMethod, string> = { SENIORITY: "Seniority — the President names their successor", MEMBER_VOTE: "Member vote — active members elect leaders", LEADERSHIP_VOTE: "Leadership vote — leaders vote for each other, never themselves" };
+/** The four ways to fill a seat — one wording everywhere (lib/roles/labels). */
+export const SUCCESSION_LABEL: Record<SuccessionMethod, string> = ROLE_SUCCESSION_LABEL;
 
 /** Curated club colors: Weber purple first, then tones that hold white text at AA contrast. */
 export const LOGO_PALETTE: { value: string; name: string }[] = [

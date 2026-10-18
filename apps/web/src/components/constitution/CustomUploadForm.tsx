@@ -60,12 +60,12 @@ export function CustomUploadForm({ clubId, joinPolicy, successionMethod, pending
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="How does it choose leaders?" required hint="Wildcat Clubs follows this once WSUSA approves.">
+            <Field label="Its primary way of choosing leaders" required hint="Wildcat Clubs starts every selection with it once WSUSA approves. The President and advisor can still use the others for a particular seat.">
               {(id) => (
                 <Select id={id} name="successionMethod" defaultValue={successionMethod}>
                   {SUCCESSION_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
-                      {o.label.replace(" (default)", "")}
+                      {o.label}
                     </option>
                   ))}
                 </Select>

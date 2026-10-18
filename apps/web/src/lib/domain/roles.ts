@@ -3,7 +3,7 @@ import type { ClubRole, ClubType, RoleEndReason } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
+import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, ROLE_LABEL, ROLE_RANK, type Capability, type ClubAccess } from "@/lib/authz";
 import { clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -12,6 +12,7 @@ import { openRequirementTasks, reopenRequirementTasks } from "@/lib/domain/requi
 import { resolveTasks } from "@/lib/domain/tasks";
 import { canViewFile } from "@/lib/domain/files";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
+import { AMBASSADOR_REQUEST } from "@/lib/ambassadors/rules";
 import { COLLEGE_AMBASSADOR_SEAT, isClubRepSeat, seatsFor } from "@/lib/roles/defaults";
 import { END_REASON_LABEL } from "@/lib/roles/labels";
 
@@ -40,6 +41,15 @@ export async function createDefaultPositions(clubId: string, type: ClubType, tx:
 
 function cleanPermissions(perms: string[] | undefined | null): Capability[] {
   return [...new Set((perms ?? []).filter((p): p is Capability => p in CAPABILITIES))];
+}
+
+/**
+ * Only a college's ambassador program puts people in a club's ambassador
+ * seats, but the club's President and VPs (and its advisors) still decide
+ * what a placed ambassador may do there, and may end a placement.
+ */
+function managesPlacedAmbassadors(access: ClubAccess) {
+  return access.viaPlatform !== null || access.isAdvisor || (!access.suspended && (access.role === "PRESIDENT" || access.role === "VP"));
 }
 
 /**
@@ -151,6 +161,10 @@ export async function assignRole(actor: Actor | null, input: unknown) {
   const position = await db.position.findUnique({ where: { id: v.positionId } });
   if (!position || position.clubId !== v.clubId || position.archivedAt) throw notFound("Seat");
   if (!access.assignableRoles.includes(position.role)) {
+    if (position.role === "AMBASSADOR") {
+      const club = await db.club.findUnique({ where: { id: v.clubId }, select: { type: true } });
+      if (club?.type !== "COLLEGE_AMBASSADORS") throw forbidden("Your college's ambassador program fills this seat. Ask it for an ambassador from your org chart.");
+    }
     throw forbidden(`You can't assign the ${ROLE_LABEL[position.role]} role.`);
   }
   const target = await db.user.findUnique({ where: { id: v.userId }, select: { id: true, kind: true, status: true } });
@@ -202,7 +216,8 @@ export async function endRoleAssignment(actor: Actor | null, assignmentId: strin
   const full = access.viaPlatform !== null || access.isAdvisor;
   // Same rule as memberships.removeMember: a co-advisor can't end another advisor's role.
   if (a.role === "ADVISOR" && !self && !access.viaPlatform) throw forbidden("Only an admin or the advisor can end an advisor's role.");
-  if (!self && !full && !access.assignableRoles.includes(a.role)) throw forbidden();
+  const mayEnd = access.assignableRoles.includes(a.role) || (a.role === "AMBASSADOR" && managesPlacedAmbassadors(access));
+  if (!self && !full && !mayEnd) throw forbidden();
   if (a.role === "PRESIDENT" && !full) {
     const others = await db.roleAssignment.count({ where: { clubId: a.clubId, role: "PRESIDENT", endedAt: null, id: { not: a.id } } });
     if (others === 0) throw forbidden("Name the next President before stepping down.");
@@ -239,7 +254,8 @@ export async function setRolePermissions(actor: Actor | null, assignmentId: stri
   if (!a || a.endedAt) throw notFound("Role");
   if (a.role !== "OFFICER" && a.role !== "AMBASSADOR") throw invalid("Only officer and ambassador permissions are customizable.");
   const access = await getClubAccess(actor, a.clubId);
-  if (!access?.assignableRoles.includes(a.role)) throw forbidden();
+  if (!access) throw notFound("Club");
+  if (!access.assignableRoles.includes(a.role) && !(a.role === "AMBASSADOR" && managesPlacedAmbassadors(access))) throw forbidden();
   const perms = cleanPermissions(permissions);
   await db.roleAssignment.update({ where: { id: a.id }, data: { permissions: perms } });
   await logActivity({ actorId: actor.id, action: "role.permissions_set", entityType: "roleAssignment", entityId: a.id, clubId: a.clubId, data: { permissions: perms } });
@@ -442,6 +458,8 @@ export async function placeAmbassador(actor: Actor | null, input: unknown) {
     clubId: org.id,
     data: { userId: person.id, clubId: club.id, seatGrew: holders >= seat.maxHolders },
   });
+  // The placement answers the club's request for an ambassador, if it made one.
+  await resolveTasks(AMBASSADOR_REQUEST, club.id, actor!.id);
   await notify({
     userIds: await clubCapabilityHolders(club.id, "orgchart"),
     exceptUserId: actor!.id,

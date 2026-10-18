@@ -1,14 +1,17 @@
 import type { Ctx, ClubM } from "../ctx";
 import { isQuiet } from "../data/clubs";
 import { ANNOUNCEMENTS, BOMBING_REVIEWS, CHAT, REVIEWS } from "../data/text";
-import { addDays, addHours, addMin, minDate } from "../lib/dates";
+import { addDays, addHours, addMin, atLocal, minDate } from "../lib/dates";
+import { seatsFor } from "@/lib/roles/defaults";
+import { leadersBelow, nextInLine, type PipelineSeat } from "@/lib/roles/pipeline";
+import { fmtDate } from "@/lib/time";
 import { attendanceCounts } from "./attendance";
 import { mayGraduation } from "./reference";
 
 /**
  * Calendar subscriptions, reviews (with one review-bombing burst and one
- * hidden review), announcements, club chats and direct messages, and
- * elections in every state the Elections tool handles.
+ * hidden review), announcements, club chats and direct messages, and the
+ * leadership pipeline in each of its four modes.
  */
 
 export function buildSubscriptions(ctx: Ctx) {
@@ -252,12 +255,22 @@ export function buildMessaging(ctx: Ctx) {
   ctx.refs.leadersGroup = thread("LEADERS_GROUP", "Engineering club presidents", members, lines.map(([slot, body]) => [members.indexOf(slots[slot]), body] as [number, string]), 20);
 }
 
+/**
+ * The leadership pipeline in every mode the Elections tool handles:
+ *   Psi Chi (psych)      MEMBER_VOTE, voting open now (Maya hasn't voted).
+ *   SWE (swe)            SELF_SELECT, closed and unanimous, waiting for a President (not the VP) to apply it.
+ *   Wrecker Bots         ADVISOR_PRESIDENT: the VP stepped down, Priya proposed a successor, Dr. Alvarez is to confirm.
+ *   Wildcat Investors    NEXT_IN_LINE: the VP stepped down; one officer said yes, Oscar hasn't answered, one said no.
+ *   Applied AI Lab       two applied member votes in its history.
+ * Candidates on the org chart below the seat are added from the pipeline, in
+ * pipeline order (lib/roles/pipeline), as the app does.
+ */
 export function buildElections(ctx: Ctx) {
   const { rng, NOW } = ctx;
   const seat = (club: ClubM, name: string) => club.seats.get(name)!;
-  const candidate = (electionId: string, userId: string, statement: string, nominatedById: string, at: Date) => {
+  const candidate = (electionId: string, userId: string, statement: string | null, nominatedById: string, at: Date, extra: { fromPipeline?: boolean; acceptedAt?: Date | null } = {}) => {
     const id = ctx.id();
-    ctx.rows.candidates.push({ id, electionId, userId, statement, nominatedById, createdAt: at });
+    ctx.rows.candidates.push({ id, electionId, userId, statement, nominatedById, createdAt: at, fromPipeline: extra.fromPipeline ?? false, acceptedAt: extra.acceptedAt ?? null });
     return id;
   };
   const votesFor = (electionId: string, voters: string[], cands: { id: string; userId: string; weight: number }[], from: Date, to: Date, noSelf = false) => {
@@ -272,65 +285,182 @@ export function buildElections(ctx: Ctx) {
     return total;
   };
   const current = (club: ClubM, seatName: string) => club.assignments.find((a) => a.seatName === seatName && !a.endedAt)?.userId ?? null;
+  /** The club's seats as lib/roles/pipeline sees them: chart order, with today's student holders. */
+  const pipelineOf = (club: ClubM): PipelineSeat[] =>
+    seatsFor(club.type).map((t, i) => {
+      const s = seat(club, t.name);
+      const holders = club.assignments.filter((a) => a.positionId === s.id && !a.endedAt && ctx.person(a.userId).kind === "STUDENT" && ctx.person(a.userId).status === "ACTIVE");
+      return { id: s.id, role: s.role, name: s.name, sortOrder: i, holders: holders.map((a) => ({ userId: a.userId, assignmentId: a.id, startedAt: a.startedAt })) };
+    });
+  /** A leader steps down from a seat, opening it in the pipeline. */
+  const stepDown = (club: ClubM, seatName: string, at: Date) => {
+    for (const a of club.assignments.filter((x) => x.seatName === seatName && !x.endedAt)) {
+      a.endedAt = at;
+      a.endReason = "RESIGNED";
+    }
+  };
+  const termName = ctx.termFor(NOW).name;
+  const leaderIds = (club: ClubM) => [...new Set(club.assignments.filter((a) => !a.endedAt && ["PRESIDENT", "VP", "OFFICER", "AMBASSADOR"].includes(a.role) && ctx.person(a.userId).kind === "STUDENT" && ctx.person(a.userId).status === "ACTIVE").map((a) => a.userId))];
 
-  // Psi Chi (psych): President, member vote, voting open now (Maya hasn't voted).
+  // ─── Psi Chi (psych): President, member vote, voting open now (Maya hasn't voted) ───
   {
     const club = ctx.club("psych");
     const id = ctx.id();
     const opens = addDays(NOW, -2.1);
     const closes = addDays(NOW, 5);
     const advisor = club.advisorIds[0];
+    const createdAt = addDays(NOW, -12.2);
     ctx.rows.elections.push({
       id, clubId: club.id, positionId: seat(club, "President").id, title: "President — Spring 2027", method: "MEMBER_VOTE", status: "VOTING",
-      votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt: addDays(NOW, -12.2),
+      votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt,
     });
     ctx.refs.psychElectionId = id;
-    const officerIds = ["Vice President", "Treasurer", "Secretary", "Events Coordinator", "Communications Officer", "Membership Officer"].map((s) => current(club, s)).filter((x): x is string => Boolean(x) && !ctx.person(x!).persona);
+    // The officers below the President start on the ballot from the org chart; one more member ran.
+    const pipeline = leadersBelow(pipelineOf(club), seat(club, "President").id, club.type).map((p) => p.userId).filter((u) => !ctx.person(u).persona);
     const others = club.members.filter((m) => m.status === "ACTIVE" && !ctx.person(m.userId).persona && ctx.person(m.userId).kind === "STUDENT" && (ctx.person(m.userId).gradDate ?? NOW) > addDays(NOW, 200)).sort((a, b) => b.eng.base - a.eng.base).map((m) => m.userId);
-    const names = [...new Set([...officerIds, ...others])].filter((u) => u !== ctx.refs.psychPresident).slice(0, 3);
+    const names = [...new Set([...pipeline, ...others])].filter((u) => u !== ctx.refs.psychPresident).slice(0, 3);
     const statements = [
       "I've run our research spotlight series this year and want to grow it into a real mentoring program with faculty labs.",
       "More socials, more grad-school help, and meetings that start and end on time. I'll listen first.",
       "I want Psych Club to partner with CAPS on mental health week and bring back the end-of-year banquet.",
     ];
-    const cands = names.map((u, i) => ({ id: candidate(id, u, statements[i], i === 0 ? u : ctx.refs.psychPresident, addDays(NOW, -rng.float(4, 10))), userId: u, weight: [1.4, 1, 0.8][i] }));
+    const cands = names.map((u, i) => {
+      const at = addDays(NOW, -rng.float(4, 10));
+      const fromPipeline = pipeline.includes(u);
+      return { id: candidate(id, u, statements[i], fromPipeline ? advisor : u, fromPipeline ? new Date(createdAt.getTime() + i) : at, { fromPipeline }), userId: u, weight: [1.4, 1, 0.8][i] };
+    });
     const voters = rng.sample(club.members.filter((m) => m.status === "ACTIVE" && m.userId !== ctx.p("maya").id && ctx.person(m.userId).kind === "STUDENT").map((m) => m.userId), 19);
     votesFor(id, voters, cands, opens, NOW);
+    ctx.activity({ at: createdAt, actorId: advisor, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title: "President — Spring 2027", seat: "President", method: "MEMBER_VOTE", candidates: pipeline.length }, isPublic: true });
   }
 
-  // Society of Women Engineers: leadership vote, closed, waiting for the result to be applied.
+  // ─── SWE: self-select, closed and unanimous, waiting for its President, its advisor or an admin (not the VP) to apply it ───
   {
     const club = ctx.club("swe");
     const id = ctx.id();
+    const createdAt = addDays(NOW, -13.4);
     const opens = addDays(NOW, -9.2);
     const closes = addDays(NOW, -2.1);
-    const leaders = club.assignments.filter((a) => !a.endedAt && ["PRESIDENT", "VP", "OFFICER"].includes(a.role)).map((a) => a.userId);
-    const officerCands = club.assignments.filter((a) => !a.endedAt && a.role === "OFFICER" && !ctx.person(a.userId).persona).map((a) => a.userId);
-    const pool = officerCands.length >= 2 ? officerCands : [...officerCands, ...club.members.filter((m) => m.status === "ACTIVE" && !ctx.person(m.userId).persona && !officerCands.includes(m.userId) && ctx.person(m.userId).kind === "STUDENT" && m.userId !== ctx.refs.swePresident).map((m) => m.userId)];
-    const [a, b] = pool;
-    const cands = [
-      { id: candidate(id, a, "I've organized our outreach days for two years. I want SWE at every Ogden middle school by spring.", ctx.refs.swePresident, addDays(NOW, -12)), userId: a, weight: 3 },
-      { id: candidate(id, b, "Let's grow our mentoring circles and get more members to the national conference.", ctx.refs.swePresident, addDays(NOW, -12)), userId: b, weight: 1 },
-    ];
+    const advisor = club.advisorIds[0];
+    const president = seat(club, "President");
+    // Everyone below the President started on the list; all but two withdrew (Vanessa would rather stay VP).
+    const pipeline = leadersBelow(pipelineOf(club), president.id, club.type);
+    const stay = pipeline.filter((p) => !ctx.person(p.userId).persona && p.role === "OFFICER").slice(0, 2);
+    const [a, b] = stay.length === 2 ? stay.map((p) => p.userId) : [...stay.map((p) => p.userId), ...club.members.filter((m) => m.status === "ACTIVE" && !ctx.person(m.userId).persona && ctx.person(m.userId).kind === "STUDENT" && m.userId !== ctx.refs.swePresident && !stay.some((p) => p.userId === m.userId)).map((m) => m.userId)].slice(0, 2);
     ctx.rows.elections.push({
-      id, clubId: club.id, positionId: seat(club, "President").id, title: "President — Spring 2027", method: "LEADERSHIP_VOTE", status: "CLOSED",
-      votingOpensAt: opens, votingClosesAt: closes, winnerId: a, createdById: club.advisorIds[0], createdAt: addDays(NOW, -13.4),
+      id, clubId: club.id, positionId: president.id, title: "President — Spring 2027", method: "SELF_SELECT", status: "CLOSED",
+      votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt,
     });
     ctx.refs.sweElectionId = id;
-    const cast = votesFor(id, [...new Set(leaders)], cands, opens, closes, true);
-    // Make sure the recorded winner actually has the most votes.
-    const tally = new Map<string, number>();
-    for (const v of ctx.rows.votes.filter((x) => x.electionId === id)) tally.set(v.candidateId, (tally.get(v.candidateId) ?? 0) + 1);
-    if ((tally.get(cands[1].id) ?? 0) >= (tally.get(cands[0].id) ?? 0)) {
-      for (const v of ctx.rows.votes.filter((x) => x.electionId === id && x.candidateId === cands[1].id && x.voterId !== a)) {
-        v.candidateId = cands[0].id;
-        break;
-      }
-    }
-    void cast;
+    ctx.activity({ at: createdAt, actorId: advisor, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title: "President — Spring 2027", seat: "President", method: "SELF_SELECT", candidates: pipeline.length }, isPublic: true });
+    pipeline.forEach((p, i) => {
+      if (p.userId === a || p.userId === b) return;
+      ctx.activity({ at: addDays(createdAt, 1 + i * 0.4), actorId: p.userId, action: "election.withdrawn", entityType: "election", entityId: id, clubId: club.id, data: { userId: p.userId, self: true } });
+    });
+    const order = (u: string) => {
+      const i = pipeline.findIndex((p) => p.userId === u);
+      return i === -1 ? pipeline.length : i;
+    };
+    const ca = candidate(id, a, "I've organized our outreach days for two years. I want SWE at every Ogden middle school by spring.", advisor, new Date(createdAt.getTime() + order(a)), { fromPipeline: order(a) < pipeline.length });
+    candidate(id, b, "Let's grow our mentoring circles and get more members to the national conference.", advisor, new Date(createdAt.getTime() + order(b)), { fromPipeline: order(b) < pipeline.length });
+    // Unanimous: every leader but the choice voted, all for them (nobody votes for themselves).
+    const leaders = leaderIds(club);
+    const voters = leaders.filter((u) => u !== a);
+    for (const v of voters) ctx.rows.votes.push({ id: ctx.id(), electionId: id, voterId: v, candidateId: ca, createdAt: new Date(opens.getTime() + rng.next() * (closes.getTime() - opens.getTime())) });
+    // Frozen when voting closed, as lib/domain/elections does.
+    ctx.activity({ at: closes, actorId: null, action: "election.closed", entityType: "election", entityId: id, clubId: club.id, data: { votes: voters.length, eligibleVoters: leaders.length, unanimous: ca } });
   }
 
-  // Applied AI Lab: two applied presidential elections in its history.
+  // ─── RC Wrecker Bots (robotics): Advisor & President. The VP stepped down; Priya proposed a successor; Dr. Alvarez confirms ───
+  {
+    const club = ctx.club("robotics");
+    const priya = ctx.p("priya");
+    const vp = seat(club, "Vice President");
+    stepDown(club, "Vice President", addDays(NOW, -9.3));
+    const id = ctx.id();
+    const createdAt = addDays(NOW, -6.2);
+    const proposedAt = addDays(NOW, -1.8);
+    const decideBy = atLocal(addDays(NOW, 8), 17);
+    const title = `Vice President — ${termName}`;
+    const pipeline = leadersBelow(pipelineOf(club), vp.id, club.type);
+    const ids = pipeline.map((p, i) => candidate(id, p.userId, null, priya.id, new Date(createdAt.getTime() + i), { fromPipeline: true }));
+    // Priya proposed the first officer in pipeline order.
+    const pick = pipeline[0];
+    ctx.rows.elections.push({
+      id, clubId: club.id, positionId: vp.id, title, method: "ADVISOR_PRESIDENT", status: "NOMINATING",
+      votingOpensAt: createdAt, votingClosesAt: decideBy, createdById: priya.id, createdAt,
+      proposedCandidateId: ids[0], proposedById: priya.id, proposedAt,
+    });
+    ctx.refs.roboticsProposalId = id;
+    const href = `/clubs/${club.slug}/manage/elections/${id}`;
+    const memberHref = `/clubs/${club.slug}/elections/${id}`;
+    const pickName = ctx.person(pick.userId).name;
+    ctx.activity({ at: createdAt, actorId: priya.id, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title, seat: vp.name, method: "ADVISOR_PRESIDENT", candidates: pipeline.length }, isPublic: true });
+    ctx.activity({ at: proposedAt, actorId: priya.id, action: "election.proposed", entityType: "election", entityId: id, clubId: club.id, data: { userId: pick.userId } });
+    const advisors = club.assignments.filter((a) => a.role === "ADVISOR" && !a.endedAt).map((a) => a.userId);
+    for (const advisorId of advisors) {
+      ctx.rows.tasks.push({
+        id: ctx.id(), kind: "APPROVAL", title: `Confirm ${pickName} as ${vp.name}`,
+        description: `${priya.name} proposed ${pickName} for ${vp.name} of ${club.name}. Confirming puts them in the seat; you can also send it back.`,
+        assigneeType: "USER", assigneeId: advisorId, clubId: club.id, href, dueAt: decideBy, status: "OPEN",
+        sourceType: "electionProposal", sourceId: id, createdById: priya.id, createdAt: proposedAt,
+      });
+      ctx.rows.notifications.push({ id: ctx.id(), userId: advisorId, kind: "election.proposed", title: `Waiting on you: ${pickName} for ${vp.name}`, body: `${priya.name} proposed ${pickName} for ${vp.name} of ${club.name}. Confirm it, or send it back.`, href, createdAt: proposedAt, readAt: null });
+    }
+    for (const p of pipeline) {
+      ctx.rows.notifications.push({ id: ctx.id(), userId: p.userId, kind: "election.candidate_added", title: `You're a candidate for ${vp.name}`, body: `You're on ${club.name}'s org chart below ${vp.name}, so you're a candidate automatically. You can withdraw if you'd rather not.`, href: memberHref, createdAt, readAt: addHours(createdAt, 3) });
+    }
+    ctx.rows.notifications.push({ id: ctx.id(), userId: pick.userId, kind: "election.proposed", title: `You've been proposed for ${vp.name}`, body: `${priya.name} proposed you for ${vp.name} of ${club.name}. It takes effect once it's confirmed. You can withdraw if you'd rather not.`, href: memberHref, createdAt: proposedAt, readAt: null });
+  }
+
+  // ─── Wildcat Investors (fic): Next in line. The VP stepped down; the officers were asked to move up ───
+  {
+    const club = ctx.club("fic");
+    const vp = seat(club, "Vice President");
+    stepDown(club, "Vice President", addDays(NOW, -10.4));
+    const president = current(club, "President") ?? club.advisorIds[0];
+    const id = ctx.id();
+    const createdAt = addDays(NOW, -8.1);
+    const respondBy = atLocal(addDays(NOW, 3.9), 17);
+    const title = `Vice President — ${termName}`;
+    const asked = nextInLine(pipelineOf(club), vp.id, club.type);
+    const oscar = ctx.p("oscar").id;
+    // One officer behind Oscar (Treasurer) in line said yes; Oscar hasn't answered; everyone else said no.
+    // If Oscar says yes before answers close, he's ahead of them in line and moves up instead.
+    const yesAt = addDays(NOW, -5.2);
+    const yes = asked.find((p) => p.userId !== oscar && asked.indexOf(p) > asked.findIndex((x) => x.userId === oscar)) ?? asked.find((p) => p.userId !== oscar);
+    const declined = new Set(asked.filter((p) => p.userId !== oscar && p !== yes));
+    ctx.rows.elections.push({
+      id, clubId: club.id, positionId: vp.id, title, method: "NEXT_IN_LINE", status: "VOTING",
+      votingOpensAt: createdAt, votingClosesAt: respondBy, createdById: president, createdAt,
+    });
+    ctx.refs.ficNextInLineId = id;
+    const memberHref = `/clubs/${club.slug}/elections/${id}`;
+    ctx.activity({ at: createdAt, actorId: president, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title, seat: vp.name, method: "NEXT_IN_LINE", candidates: asked.length }, isPublic: true });
+    asked.forEach((p, i) => {
+      const said = declined.has(p) ? "no" : p === yes ? "yes" : null;
+      // Saying no takes them off the list, so only the others keep a row.
+      const candidateId = said === "no" ? ctx.id() : candidate(id, p.userId, null, president, new Date(createdAt.getTime() + i), { fromPipeline: true, acceptedAt: said === "yes" ? yesAt : null });
+      const answeredAt = said === "no" ? addDays(NOW, -6.5 + i * 0.3) : said === "yes" ? yesAt : null;
+      const declinedHere = said === "no";
+      ctx.rows.tasks.push({
+        id: ctx.id(), kind: "APPROVAL", title: `Move up to ${vp.name}?`,
+        description: `You're next in line in ${club.name}. Say yes or no by ${fmtDate(respondBy, "EEE, MMM d 'at' h:mm a")}; the first in line who says yes takes the seat.`,
+        assigneeType: "USER", assigneeId: p.userId, clubId: club.id, href: memberHref, dueAt: respondBy, status: answeredAt ? "DONE" : "OPEN",
+        sourceType: "electionAnswer", sourceId: candidateId, createdById: president, createdAt,
+        completedAt: answeredAt, completedById: answeredAt ? p.userId : null,
+      });
+      ctx.rows.notifications.push({
+        id: ctx.id(), userId: p.userId, kind: "election.next_in_line", title: `Move up to ${vp.name} of ${club.name}?`,
+        body: `You're next in line. Say yes or no by ${fmtDate(respondBy, "EEE, MMM d 'at' h:mm a")}. The first in line who says yes takes the seat.`,
+        href: memberHref, createdAt, readAt: answeredAt ?? null,
+      });
+      if (answeredAt) ctx.activity({ at: answeredAt, actorId: p.userId, action: declinedHere ? "election.declined" : "election.accepted", entityType: "election", entityId: id, clubId: club.id, data: { userId: p.userId, ...(declinedHere ? { self: true } : {}) } });
+    });
+    if (yes) ctx.rows.notifications.push({ id: ctx.id(), userId: president, kind: "election.accepted", title: `${ctx.person(yes.userId).name} said yes to moving up to ${vp.name}`, body: `The first in line who says yes by ${fmtDate(respondBy, "EEE, MMM d 'at' h:mm a")} takes the seat.`, href: `/clubs/${club.slug}/manage/elections/${id}`, createdAt: yesAt, readAt: null });
+  }
+
+  // ─── Applied AI Lab: two applied presidential elections in its history ───
   {
     const club = ctx.club("ailab");
     const gwen = ctx.p("gwen").id;
@@ -353,7 +483,7 @@ export function buildElections(ctx: Ctx) {
         weight: i === 0 ? 3 : 1,
       }));
       votesFor(id, rng.sample(atTime.map((m) => m.userId), Math.min(atTime.length, year === 2026 ? 31 : 18)), cands, opens, closes);
-      ctx.activity({ at: h, actorId: creator, action: "election.applied", entityType: "election", entityId: id, clubId: club.id, data: { title, winnerId: winner }, isPublic: true });
+      ctx.activity({ at: h, actorId: creator, action: "election.applied", entityType: "election", entityId: id, clubId: club.id, data: { title, method: "MEMBER_VOTE", seat: "President", winnerId: winner }, isPublic: true });
     }
   }
 }

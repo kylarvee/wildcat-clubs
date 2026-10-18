@@ -1,9 +1,10 @@
 import "server-only";
-import type { ClubRole, MembershipStatus, RoleEndReason, RoleRequirement } from "@prisma/client";
+import type { ClubRole, ClubType, MembershipStatus, RoleEndReason, RoleRequirement } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
 import { requirementStatus } from "@/lib/authz/requirements";
 import { seatSort } from "@/lib/domain/orgchart";
+import { pipelineOrder, type PipelineSeat } from "@/lib/roles/pipeline";
 
 /**
  * Read models for the org chart, roster and role history. Read-only; every
@@ -116,6 +117,35 @@ export async function orgChartData(clubId: string): Promise<OrgChartData> {
       .map((p) => ({ id: p.id, name: p.name, role: p.role, archivedAt: p.archivedAt! }))
       .sort((a, b) => b.archivedAt.getTime() - a.archivedAt.getTime()),
     advisors: assignments.filter((a) => a.role === "ADVISOR").map((a) => toHolder(a).person),
+  };
+}
+
+export type ClubPipeline = { clubType: ClubType; seats: (PipelineSeat & { maxHolders: number })[] };
+
+const PIPELINE_ROLES: ClubRole[] = ["PRESIDENT", "VP", "OFFICER", "AMBASSADOR"];
+
+/**
+ * The club's live seats in pipeline order with their current student
+ * holders — what lib/roles/pipeline works out next in line and default
+ * candidates from. Only active students count; advisors sit outside the
+ * pipeline.
+ */
+export async function clubPipeline(clubId: string): Promise<ClubPipeline> {
+  const [club, positions, holders] = await Promise.all([
+    db.club.findUniqueOrThrow({ where: { id: clubId }, select: { type: true } }),
+    db.position.findMany({ where: { clubId, archivedAt: null, role: { in: PIPELINE_ROLES } }, select: { id: true, role: true, name: true, sortOrder: true, maxHolders: true } }),
+    db.roleAssignment.findMany({
+      where: { clubId, endedAt: null, positionId: { not: null }, role: { in: PIPELINE_ROLES }, user: { status: "ACTIVE", kind: "STUDENT" } },
+      select: { id: true, userId: true, positionId: true, startedAt: true },
+      orderBy: { startedAt: "asc" },
+    }),
+  ]);
+  return {
+    clubType: club.type,
+    seats: pipelineOrder(positions).map((p) => ({
+      ...p,
+      holders: holders.filter((h) => h.positionId === p.id).map((h) => ({ userId: h.userId, assignmentId: h.id, startedAt: h.startedAt })),
+    })),
   };
 }
 

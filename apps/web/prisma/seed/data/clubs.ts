@@ -541,7 +541,7 @@ const STORY: StoryDef[] = [
   },
   {
     key: "fic", real: "Wildcat Investors", type: "REGISTERED", scope: "COLLEGE", college: "gsbe",
-    focusMajor: "Finance", status: "APPROVED", life: "active", founded: [2022, 9], size: 48, color: "#0f766e", topic: "business", activity: 0.9,
+    focusMajor: "Finance", status: "APPROVED", life: "active", founded: [2022, 9], size: 48, succession: "NEXT_IN_LINE", color: "#0f766e", topic: "business", activity: 0.9,
     meeting: M(2, 17, 30, 60, 1, "WB", "Room 108"),
     related: ["accounting", "entre", "marketing", "ailab"],
   },
@@ -570,14 +570,14 @@ const STORY: StoryDef[] = [
   {
     key: "robotics", real: "RC Wrecker Bots Club", type: "SPONSORED", scope: "COLLEGE", college: "east",
     department: "Electrical & Computer Engineering", focusMajor: "Electrical Engineering", status: "APPROVED", life: "active", founded: [2022, 9], size: 90,
-    joinPolicy: "APPROVAL", color: "#1d4ed8", topic: "tech", activity: 1.2,
+    joinPolicy: "APPROVAL", succession: "ADVISOR_PRESIDENT", color: "#1d4ed8", topic: "tech", activity: 1.2,
     meeting: M(2, 18, 0, 120, 1, "NB", "Room 150 (Makerspace)", "Build Night"),
     related: ["acm", "swe", "motorsports", "cyber"],
   },
   {
     key: "swe", real: "Society of Women Engineers (SWE)", type: "SPONSORED", scope: "COLLEGE", college: "east",
     department: "Mechanical Engineering", focusMajor: "Mechanical Engineering", status: "APPROVED", life: "active", founded: [2022, 10], size: 44,
-    succession: "LEADERSHIP_VOTE", color: "#7c3aed", topic: "tech", activity: 0.95,
+    succession: "SELF_SELECT", color: "#7c3aed", topic: "tech", activity: 0.95,
     meeting: M(4, 17, 30, 60, 2, "NB", "Room 220"),
     related: ["robotics", "acm", "cyber"],
   },
@@ -948,6 +948,16 @@ function seatPlanFor(o: DirEntry["officers"]): Record<string, number> {
   return plan;
 }
 
+/**
+ * Most clubs keep the default primary method (Advisor & President); a handful
+ * of the ones that meet use each of the other three. Takes one draw per club,
+ * as before, so the rest of the definitions don't shift.
+ */
+function successionFor(roll: number, life: Life): SuccessionMethod | undefined {
+  if (life === "dormant") return undefined;
+  return roll < 0.08 ? "SELF_SELECT" : roll < 0.15 ? "NEXT_IN_LINE" : roll < 0.21 ? "MEMBER_VOTE" : undefined;
+}
+
 function directoryDef(e: DirEntry, r: ReturnType<typeof createRng>): ClubDef {
   const [cat, t, where, dept, topic, major] = SPECS[e.name];
   const category = CAT[cat];
@@ -989,7 +999,7 @@ function directoryDef(e: DirEntry, r: ReturnType<typeof createRng>): ClubDef {
     founded,
     size: life === "dormant" ? r.pick([0, 0, 1, 1, 2]) : e.members,
     joinPolicy: pledge ? "APPROVAL" : undefined,
-    succession: cat === "FSL" || cat === "HS" ? r.pick(["LEADERSHIP_VOTE", "MEMBER_VOTE"] as SuccessionMethod[]) : r.chance(0.22) ? "MEMBER_VOTE" : undefined,
+    succession: successionFor(r.next(), life),
     color: PALETTE[hash(e.name) % PALETTE.length],
     activity: life === "active" ? r.float(0.55, 0.85) : life === "small" ? r.float(0.4, 0.6) : 0.35,
     meeting: meetingFor(e.name, where, dept, topic, life, r),

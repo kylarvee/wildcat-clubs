@@ -240,6 +240,21 @@ export type MClubMetrics = {
   hasMetrics: boolean;
 };
 
+/** A run of search text; `hit` runs are the words that matched (show them highlighted). */
+export type MTextRun = { text: string; hit: boolean };
+
+/** Where a search found its words: "Found in Event · “Girls in STEM Robot Day”" plus the passage around them. */
+export type MSearchMatch = {
+  /** "Event", "Announcement", "Constitution", "Student review"… */
+  label: string;
+  /** The item's title with the matched words marked; empty for fixed sections (About, Club details…). */
+  title: MTextRun[];
+  /** The passage around the match; null when only the title matched. */
+  snippet: MTextRun[] | null;
+  /** Site-relative web path to where the text lives ("/events/…", "/clubs/…#announcements"). */
+  path: string;
+};
+
 export type MClubListItem = MClubRef & {
   shortDescription: string;
   typeLabel: string;
@@ -249,10 +264,23 @@ export type MClubListItem = MClubRef & {
   joinPolicy: JoinPolicy;
   metrics: MClubMetrics;
   viewer: { member: boolean; pending: boolean; subscribed: boolean; leader: boolean } | null;
+  /** With a search, for clubs near the top: where the words were found, when the name and description don't show it. */
+  foundIn?: MSearchMatch | null;
+  /** Up to two short reasons the club is suggested ("Matches your major (Nursing)", "Popular this term"). */
+  reasons?: string[];
 };
 
-/** GET /api/m/clubs?q= */
-export type MClubList = { items: MClubListItem[]; total: number };
+/**
+ * GET /api/m/clubs?q=&sort= — best match first with a query, Recommended
+ * (popularity plus your own majors, clubs and check-ins) without one. `sort`
+ * takes the web list's values (name, rating, members…).
+ */
+export type MClubList = {
+  items: MClubListItem[];
+  total: number;
+  /** With a query: "all" = every word matched, "close" = close spellings, "some" = only some of the words. */
+  search?: { mode: "all" | "close" | "some"; matches: number } | null;
+};
 
 export type MAttendanceSummary = {
   attended: number;

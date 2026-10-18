@@ -26,13 +26,13 @@ permissions are paused.
 |---|---|---|---|
 | Sam Rivera | sam.rivera@mail.weber.edu | New student | First visit, registering, join gates, first check-in |
 | Maya Chen | maya.chen@mail.weber.edu | Club member | Check-in (live now), voting, reviews, calendar, attendance |
-| Oscar Nguyen | oscar.nguyen@mail.weber.edu | Officer (Treasurer) | Budget & funding, officer test, requirement grace period |
-| Vanessa Brooks | vanessa.brooks@mail.weber.edu | Vice President | Co-host approval, VP limits, elections, member details that still need confirming |
-| Priya Patel | priya.patel@mail.weber.edu | President | Running a big gated club, QR check-in screen, succession |
+| Oscar Nguyen | oscar.nguyen@mail.weber.edu | Officer (Treasurer) | Budget & funding, officer test, requirement grace period, being asked to move up |
+| Vanessa Brooks | vanessa.brooks@mail.weber.edu | Vice President | Co-host approval, VP limits, a self-select result she can't apply, member details that still need confirming |
+| Priya Patel | priya.patel@mail.weber.edu | President | Running a big gated club, QR check-in screen, the leadership pipeline |
 | Amir Haddad | amir.haddad@mail.weber.edu | College ambassador | Ambassador placements without capabilities |
 | Frank Okafor | frank.okafor@mail.weber.edu | Club founder | Founding a club: draft, advisor invite, submission |
 | Gwen Torres | gwen.torres@mail.weber.edu | Alumni | Retired profile, role history, projects |
-| Dr. Elena Alvarez | elena.alvarez@weber.edu | Club advisor | Full permissions in two clubs |
+| Dr. Elena Alvarez | elena.alvarez@weber.edu | Club advisor | Full permissions in two clubs, confirming a proposed Vice President |
 | Prof. Nathan Reed | nathan.reed@weber.edu | Invited advisor | Accepting an advisor invitation |
 | Alex Morgan | alex.morgan@weber.edu | Administrator (WSUSA) | Every admin queue |
 | Sydney Park | sydney.park@weber.edu | System administrator | System settings, AI and integration switches, outbox |
@@ -85,9 +85,10 @@ confirmed for this year.
 2. **Later today:** Psi Chi's *Grad School Q&A with Psychology Faculty*
    starts about three hours after the seed ran (code **LATER7**; check-in opens
    30 minutes before).
-3. **Vote:** Psi Chi → *President — Spring 2027* (member vote, three
-   candidates, closes five days after seeding). Maya is an active member and
-   hasn't voted.
+3. **Vote:** Psi Chi → *President — Spring 2027* (member vote, the club's
+   primary method; three candidates — the two officers below the President
+   came from the org chart, a third member ran; closes five days after
+   seeding). Maya is an active member and hasn't voted.
 4. **Review** Pre-Med Club or Psi Chi. Her Hiking and Outdoors Club review can
    be edited or deleted.
 5. **Attendance tracker** (`/me/attendance`) and her record on each club page.
@@ -123,21 +124,34 @@ about 10 days after seeding (30-day grace) and **Club Officer Training** about
    week out, 5:30 PM, Shepherd Union 404A). Checking in completes the training
    requirement.
 6. Optional: the **Funding Rules Refresher** test (open to anyone).
+7. **Move up?** Wildcat Investors' Vice President stepped down, so the club
+   (whose primary method is **Next in line**) asked its officers whether
+   they'll move up. One officer behind Oscar in line said yes, the others
+   said no, and Oscar hasn't answered: *Move up to Vice President?* is in
+   his Tasks and on the club page. Yes puts him first in line (he'd move up
+   when the round closes and the result is applied); no takes him off the
+   list. Answers are due about four days after seeding.
 
 ## Vanessa Brooks — vice president
 
 **Where Vanessa stands:** VP of the Society of Women Engineers (SWE) since May
-2026 (Secretary the year before). SWE picks officers by **leadership vote**. She
-has met both officer requirements. She's also a member of the RC Wrecker Bots
+2026 (Secretary the year before). SWE's primary way of choosing leaders is
+**Self-select**: its leaders vote, never for themselves, and it counts only if
+it's unanimous. She has met both officer requirements. She's also a member of the RC Wrecker Bots
 Club. Her member details are filled in but **not confirmed** this year, and she
 hasn't signed the *Club Member Agreements* form.
 
 1. **Tasks → co-host request:** Cyber Security Club (CSC) asked SWE to co-host
    *Women in Cybersecurity Panel* (about nine days out). Approve it and it lands
    on SWE's calendar.
-2. **Org chart:** she can assign officers and ambassadors but **not** President
-   or VP, and can't retire the club.
-3. **Elections:** *President — Spring 2027* (leadership vote) is **CLOSED** and
+2. **Org chart:** she can assign officers but **not** President or VP, and
+   can't retire the club. SWE has no College Ambassador, and only EAST
+   Ambassadors can place one: the card under the chart has **Request a college
+   ambassador** (with an optional note). The request lands in the program's
+   inbox.
+3. **Elections:** *President — Spring 2027* (self-select) is **CLOSED**: everyone
+   below the President started as a candidate, all but two withdrew (Vanessa
+   among them), and every other leader chose the same one — unanimous. It's
    waiting to be applied. As VP she can't apply a presidential result; SWE's
    president (graduating in December), its advisor or an admin can.
 4. SWE's *Girls in STEM Robot Day supplies* funding request is submitted.
@@ -161,14 +175,26 @@ is still hers to fill out. The club runs its own *Event Safety Quiz*.
 3. **Org chart & history:** role history back to fall 2022 with hand-offs,
    December graduations, resignations and empty seats. She can name a
    successor or co-president and could retire the club.
-4. **Events:** upcoming co-hosted *Wrecker Bots × CSWS: Intro to Embedded
-   Programming* and *Girls in STEM Robot Day*; idea drafts waiting for a date.
-5. **Budget:** *Combat robotics competition travel* is approved with an open
+4. **The leadership pipeline** (top of the org chart): every seat in order
+   with its holders and who's next in line. The Vice President stepped down
+   about nine days before seeding, so Priya started *Vice President — Fall
+   2026* with the club's primary method, **Advisor & President**: the
+   officers below the VP became candidates, and she proposed the first of
+   them in line. It's waiting for Dr. Alvarez to confirm (Priya can withdraw
+   it). Any other open seat shows **Fill this seat**, which starts a
+   selection in the primary mode or any of the other three. The College
+   Ambassador seat belongs to the college's program (EAST Ambassadors), so it
+   has no Fill or Assign button. Priya asked EAST Ambassadors for one about two
+   days ago: the card under the chart shows the request as **Requested**, with
+   **Withdraw request**.
+5. **Events:** upcoming co-hosted *Wrecker Bots × CSWS: Intro to Embedded
+   Programming* and *Girls in STEM Robot Day*.
+6. **Budget:** *Combat robotics competition travel* is approved with an open
    invoice.
-6. **Club tests:** results for the Event Safety Quiz.
-7. **Messages:** the *Engineering club presidents* leaders group and DMs with
+7. **Club tests:** results for the Event Safety Quiz.
+8. **Messages:** the *Engineering club presidents* leaders group and DMs with
    Maya and Vanessa.
-8. **Network map:** the RC Wrecker Bots Club should be highlighted and sit near
+9. **Network map:** the RC Wrecker Bots Club should be highlighted and sit near
    the other EAST clubs.
 
 ## Amir Haddad — college ambassador
@@ -182,7 +208,9 @@ Association (WEA).
 1. His profile lists the ambassador roles with the org that placed him.
 2. Open Beta Alpha Psi's workspace: he's a leader there, but every tool is
    locked until the club grants him a capability.
-3. Sign in as Alex to see Goddard School Ambassadors' placement view.
+3. Sign in as Alex to see Goddard School Ambassadors' placement view: clubs
+   ask for an ambassador from their org chart, and requests show first there
+   with **Place an ambassador** or **Decline**.
 
 ## Frank Okafor — club founder
 
@@ -226,9 +254,15 @@ advisor's term ended). Full permissions in both.
 
 1. Every tool in both workspaces is unlocked; she sees the Wrecker Bots' join
    requests.
-2. Pre-Med Club: an outgoing co-host request to the National Student Nurses
+2. **Tasks → *Confirm … as Vice President*** (also on her dashboard): Priya
+   proposed an officer for the Wrecker Bots' open VP seat. Confirming puts
+   them in the seat, and the officer seat they leave opens up in the
+   pipeline; she can also send it back.
+3. Pre-Med Club: an outgoing co-host request to the National Student Nurses
    Association (NSNA) Ogden Campus and a partially approved funding request.
-3. Advisors can assign any role and apply election results.
+4. Advisors can assign any role and apply election results.
+5. Pre-Med Club's org chart: the College Ambassador card says the College of
+   Science doesn't have an ambassador program yet (WSUSA starts them).
 
 ## Prof. Nathan Reed — invited advisor
 
@@ -260,8 +294,14 @@ about a real club.
   task in Tasks).
 - **Officer requirements:** one officer is past the grace period, so their
   permissions are paused (the seed prints who).
+- **Ambassador programs** (Club reviews → Ambassador programs): only admins
+  start a program and choose its advisor ("Change" appoints someone else and
+  ends the previous advisor's role). In **EAST Ambassadors → Ambassador
+  placements**, the RC Wrecker Bots Club is waiting on its request (badge
+  "Asked for one"). Place one of the program's club representatives, or
+  decline with a note; Priya's card updates either way.
 
-Also try: policies (nine published, one draft, one shown from a PDF),
+Also try: policies (eleven published, one draft, one shown from a PDF),
 trainings, university-wide announcements, analytics, directory and people.
 
 ## Sydney Park — system administrator
@@ -321,6 +361,13 @@ push), scheduled jobs, and granting admin.
   Resources (featured on the club page), Constitution & Bylaws (PDFs) and
   leaders-only Officer Notes; dormant clubs keep just their constitution and
   bylaws. Bytes live in `apps/web/storage/seed/`.
+- **Leadership pipeline:** each club's bylaws name a primary way to fill
+  seats. Most clubs use the default, Advisor & President; a handful each use
+  Next in line (Wildcat Investors), Self-select (SWE) and Member vote (Psi
+  Chi, Applied AI Lab). Selections in the data: Psi Chi's open member vote,
+  SWE's unanimous self-select waiting to be applied, the Wrecker Bots'
+  proposal waiting for its advisor, Wildcat Investors' next-in-line round and
+  Applied AI Lab's two applied member votes.
 - **Role history contributions:** in most approved and retired clubs, one or
   two past leaders have a project tied to the seat they held, usually with a
   file (a club file they made that term, or a write-up in their own files).

@@ -1,4 +1,5 @@
 import type { ClubType, JoinPolicy, SuccessionMethod } from "@prisma/client";
+import { DEFAULT_SUCCESSION, isSuccessionMethod } from "@/lib/roles/pipeline";
 
 /**
  * The default Constitution and Bylaws for Weber State clubs, written to match
@@ -99,11 +100,16 @@ const TYPE_LABEL: Record<ClubType, string> = {
 
 // ─── Shared choice lists ─────────────────────────────────────────────────────
 
+/** The four ways to fill a seat (lib/roles/pipeline). The bylaws name one as the club's primary method. */
 export const SUCCESSION_OPTIONS: (ChoiceOption & { value: SuccessionMethod })[] = [
-  { value: "SENIORITY", label: "Seniority (default)", description: "The President names their successor and hands off the role in the org chart." },
-  { value: "MEMBER_VOTE", label: "Member vote", description: "Active members elect the President and Vice President by secret ballot in Wildcat Clubs." },
-  { value: "LEADERSHIP_VOTE", label: "Leadership vote", description: "Current leaders vote for the next leaders — never for themselves." },
+  { value: "ADVISOR_PRESIDENT", label: "Advisor & President (recommended)", description: "The President or the advisor proposes the next leader, and the other confirms. No ballots." },
+  { value: "NEXT_IN_LINE", label: "Next in line", description: "The people in the seats just below are asked to move up. The first in line who says yes takes the seat." },
+  { value: "SELF_SELECT", label: "Self-select", description: "The current leaders choose by secret ballot, and the choice has to be unanimous." },
+  { value: "MEMBER_VOTE", label: "Member vote", description: "Active members elect leaders by secret ballot in Wildcat Clubs." },
 ];
+
+/** Values older drafts may still hold, mapped the way existing clubs were. */
+const LEGACY_SUCCESSION: Record<string, SuccessionMethod> = { SENIORITY: "ADVISOR_PRESIDENT", LEADERSHIP_VOTE: "SELF_SELECT" };
 
 export const JOIN_OPTIONS: (ChoiceOption & { value: JoinPolicy })[] = [
   { value: "OPEN", label: "Open membership", description: "Students become members as soon as they register or check in at an event." },
@@ -116,7 +122,7 @@ const MEMBER_VOTE_OPTIONS: ChoiceOption[] = [
   { value: "TWO_THIRDS_LEADERS", label: "Two-thirds of the leaders" },
 ];
 
-const optionLabel = (options: ChoiceOption[], value: string) => (options.find((o) => o.value === value)?.label ?? value).replace(/ \(default\)$/, "");
+const optionLabel = (options: ChoiceOption[], value: string) => (options.find((o) => o.value === value)?.label ?? value).replace(/ \((default|recommended)\)$/, "");
 const voteText = (value: string) => optionLabel(MEMBER_VOTE_OPTIONS, value).replace(/^A /, "a ").replace(/^Two/, "two");
 
 export function successionLabel(method: string) {
@@ -318,7 +324,7 @@ const CONSTITUTION: SectionDef[] = [
     ],
     body: (c) => [
       "The Club has at least one advisor who is a WSU faculty or staff member. Advisors are invited by name and @weber.edu email through Wildcat Clubs and become advisors when they accept.",
-      "The advisor guides the Club's leaders, helps the Club follow WSU policy, reviews budgets and funding requests, and has full access to the Club's tools in Wildcat Clubs. Advisors do not vote in Club elections.",
+      "The advisor guides the Club's leaders, helps the Club follow WSU policy, reviews budgets and funding requests, and has full access to the Club's tools in Wildcat Clubs. Advisors do not vote in Club elections, but they share decisions about succession with the President as the Bylaws describe.",
       `The leaders meet with the advisor ${clause(c.v("advisorMeetings"))}.`,
       `If the Club loses its advisor, the leaders invite a new one within ${c.v("advisorReplaceDays")} days.`,
     ],
@@ -426,10 +432,10 @@ const CONSTITUTION: SectionDef[] = [
     id: "elections",
     title: "Elections & Succession",
     core: true,
-    summary: "Leaders are chosen by the succession method in the Bylaws.",
+    summary: "Leaders are chosen by the primary succession method in the Bylaws.",
     fields: [],
     body: (c) => [
-      `Leaders are chosen by the succession method set in the Bylaws (currently: ${successionLabel(c.raw("successionMethod") || "SENIORITY").toLowerCase()}).`,
+      `Leaders are chosen by the primary succession method set in the Bylaws (currently ${successionLabel(c.raw("successionMethod") || DEFAULT_SUCCESSION)}). The President and the advisor may use any of the other methods the Bylaws describe for a particular seat, at their discretion.`,
       "Results take effect when they are recorded in the Club's org chart in Wildcat Clubs. Outgoing leaders hand off their responsibilities, files and accounts before leaving office.",
       "The Bylaws set terms of office, how vacancies are filled, and how votes are held.",
     ],
@@ -536,23 +542,47 @@ const CONSTITUTION: SectionDef[] = [
 
 // ─── Bylaws ──────────────────────────────────────────────────────────────────
 
-const SUCCESSION_TEXT: Record<SuccessionMethod, string[]> = {
-  SENIORITY: [
-    "The Club uses seniority succession. Before leaving office, the President names a successor — normally the Vice President or another experienced leader who is an active member — and hands off the role in the Club's org chart in Wildcat Clubs. The handoff takes effect when it is saved, and the outgoing President becomes a member or alumni.",
-    "The President appoints the Vice President and officers in the org chart; the Vice President may appoint officers. Where the Constitution allows co-presidents, the President may also name a Co-President.",
-    "If the President leaves without naming a successor, the Vice President becomes President. If there is no Vice President, the advisor appoints an interim President until the leaders name a permanent one.",
+/** Each method in a sentence, as the bylaws list the ones a club may also use. */
+const METHOD_SUMMARY: Record<SuccessionMethod, string> = {
+  ADVISOR_PRESIDENT: "Advisor & President: the President or the advisor proposes one candidate, and the other confirms.",
+  NEXT_IN_LINE: "Next in line: the people in the seats just below are asked whether they will move up, and the first in line who says yes takes the seat.",
+  SELF_SELECT: "Self-select: the current leaders choose by secret ballot, and the choice counts only if it is unanimous.",
+  MEMBER_VOTE: "Member vote: active members elect the leader by secret ballot.",
+};
+
+/** How the primary method works, in full. */
+const METHOD_DETAIL: Record<SuccessionMethod, string[]> = {
+  ADVISOR_PRESIDENT: [
+    "The Club's primary method is Advisor & President. When a seat needs filling, the President or the advisor proposes one candidate in Wildcat Clubs, and the other confirms. If the Club has no advisor, the President decides alone; if it has no President, the advisor decides alone. A person proposed for President never confirms their own appointment. WSUSA administrators may also act for the Club.",
+  ],
+  NEXT_IN_LINE: [
+    "The Club's primary method is Next in line. When a seat needs filling, the people in the seats just below it — the Vice Presidents for President, the officers for Vice President — are asked in Wildcat Clubs whether they will move up. The first in line who says yes by the response date takes the seat, and the seat they leave opens up to be filled the same way.",
+    "If nobody says yes, the seat is filled by one of the other methods.",
+  ],
+  SELF_SELECT: [
+    "The Club's primary method is Self-select. The current leaders (President, Vice Presidents, officers and ambassadors) choose by secret ballot in the Wildcat Clubs elections tool. No one votes for themselves.",
+    "The choice counts only if it is unanimous: every leader other than the person chosen votes, and all for that person. If the leaders don't agree, they choose again or the seat is filled by one of the other methods.",
   ],
   MEMBER_VOTE: [
-    "The Club uses member-vote succession. Active members elect the President and Vice President by secret ballot in the Wildcat Clubs elections tool.",
-    "Any active member may be nominated, including by themselves, if they meet the leader requirements in the Constitution.",
-    "The candidate with the most votes wins, subject to Voting Procedures. The result is applied in the Club's org chart in Wildcat Clubs. The newly elected President appoints officers unless the Club also holds elections for those seats.",
-  ],
-  LEADERSHIP_VOTE: [
-    "The Club uses leadership-vote succession. The current leaders (President, Vice President and officers) elect the next President and Vice President by secret ballot in the Wildcat Clubs elections tool.",
-    "Any active member may be nominated. Leaders never vote for themselves: a leader who is a candidate for a seat does not vote in that seat's election.",
-    "The candidate with the most votes wins, subject to Voting Procedures, and the result is applied in the Club's org chart in Wildcat Clubs.",
+    "The Club's primary method is Member vote. Active members elect leaders by secret ballot in the Wildcat Clubs elections tool. Any active member may run, including by nominating themselves, if they meet the leader requirements in the Constitution.",
+    "The candidate with the most votes wins, subject to Voting Procedures.",
   ],
 };
+
+/**
+ * The bylaws' Succession Method text: the club's primary method, then the
+ * other three, which the President and the advisor may use for a particular
+ * seat at their discretion.
+ */
+function successionBlocks(raw: string): BodyItem[] {
+  const method = isSuccessionMethod(raw) ? raw : DEFAULT_SUCCESSION;
+  return [
+    ...METHOD_DETAIL[method],
+    "The President and the advisor may instead use one of these other methods for a particular seat, at their discretion:",
+    list(SUCCESSION_OPTIONS.filter((o) => o.value !== method).map((o) => METHOD_SUMMARY[o.value])),
+    "However a seat is filled, the people on the Club's org chart below it are considered first: they become candidates automatically, and any of them may decline. The result takes effect when it is recorded in the Club's org chart in Wildcat Clubs.",
+  ];
+}
 
 const BYLAWS: SectionDef[] = [
   {
@@ -572,19 +602,19 @@ const BYLAWS: SectionDef[] = [
     id: "succession",
     title: "Succession Method",
     core: true,
-    summary: "How the club chooses its next leaders. Wildcat Clubs follows this choice.",
+    summary: "How the club chooses its next leaders: one primary method, with the others there when the President and advisor need them.",
     fields: [
       {
         id: "successionMethod",
-        label: "Succession method",
+        label: "Primary succession method",
         type: "choice",
         required: true,
-        default: "SENIORITY",
+        default: DEFAULT_SUCCESSION,
         options: SUCCESSION_OPTIONS,
-        hint: "Wildcat Clubs applies this to your club when you adopt the documents.",
+        hint: "Name one primary method. Wildcat Clubs starts every selection with it once you adopt the documents, and the President and advisor may use any of the other methods for a particular seat at their discretion.",
       },
     ],
-    body: (c) => SUCCESSION_TEXT[(c.raw("successionMethod") as SuccessionMethod) in SUCCESSION_TEXT ? (c.raw("successionMethod") as SuccessionMethod) : "SENIORITY"],
+    body: (c) => successionBlocks(c.raw("successionMethod")),
   },
   {
     id: "terms",
@@ -626,7 +656,7 @@ const BYLAWS: SectionDef[] = [
     fields: [{ id: "vacancyDays", label: "Days to fill an officer vacancy", type: "number", required: true, default: "14", min: 1, max: 90 }],
     body: (c) => [
       "If the President's seat is vacant, the Vice President serves as acting President until it is filled under Succession Method.",
-      `If another seat is vacant, the President appoints a replacement in the org chart within ${c.v("vacancyDays")} days${c.raw("successionMethod") && c.raw("successionMethod") !== "SENIORITY" ? ", who serves until the next election" : ""}.`,
+      `If another seat is vacant, it is filled under Succession Method within ${c.v("vacancyDays")} days. Until then, the President may ask another leader to cover its duties.`,
       "If both the President's and the Vice President's seats are vacant, the advisor appoints an interim President and lets WSUSA know.",
     ],
   },
@@ -782,12 +812,17 @@ const BYLAWS: SectionDef[] = [
       { id: "electionMonth", label: "Elections or hand-offs happen in (month)", type: "text", required: true, default: "March" },
       { id: "nominationDays", label: "Days nominations stay open", type: "number", required: true, default: "7", min: 1, max: 30 },
     ],
-    body: (c) => [
-      c.raw("successionMethod") === "MEMBER_VOTE" || c.raw("successionMethod") === "LEADERSHIP_VOTE"
-        ? `Leadership elections are held each year in ${c.v("electionMonth")}, so new leaders are ready before the end of spring semester. Nominations stay open for at least ${c.v("nominationDays")} days before voting opens.`
-        : `The President names their successor each year by ${c.v("electionMonth")}, so the new leaders are ready before the end of spring semester. Members may suggest candidates for at least ${c.v("nominationDays")} days before the choice is made.`,
-      "The leaders announce the schedule to members through Wildcat Clubs at least two weeks in advance.",
-    ],
+    body: (c) => {
+      const method = c.raw("successionMethod");
+      return [
+        method === "MEMBER_VOTE" || method === "SELF_SELECT"
+          ? `Leadership elections are held each year in ${c.v("electionMonth")}, so new leaders are ready before the end of spring semester. Nominations stay open for at least ${c.v("nominationDays")} days before voting opens.`
+          : method === "NEXT_IN_LINE"
+            ? `Each year in ${c.v("electionMonth")}, the people next in line are asked whether they will move up, so new leaders are ready before the end of spring semester. They have at least ${c.v("nominationDays")} days to answer.`
+            : `The President and the advisor choose each year's leaders by ${c.v("electionMonth")}, so the new leaders are ready before the end of spring semester. Members may suggest candidates for at least ${c.v("nominationDays")} days before the choice is made.`,
+        "The leaders announce the schedule to members through Wildcat Clubs at least two weeks in advance.",
+      ];
+    },
   },
 ];
 
@@ -846,9 +881,10 @@ export function normalizeDraftData(raw: unknown): DraftData {
   }
   const fields = { ...base.fields };
   if (r.fields && typeof r.fields === "object") {
-    for (const [id, val] of Object.entries(r.fields)) {
+    for (const [id, raw] of Object.entries(r.fields)) {
       const def = FIELDS.get(id);
-      if (!def || typeof val !== "string") continue;
+      if (!def || typeof raw !== "string") continue;
+      const val = id === "successionMethod" ? (LEGACY_SUCCESSION[raw] ?? raw) : raw;
       if (def.type === "choice" && !def.options?.some((o) => o.value === val)) continue;
       fields[id] = val.slice(0, FIELD_MAX[def.type]);
     }
@@ -861,9 +897,10 @@ export function enabledSections(data: DraftData, kind: DocKind): SectionDef[] {
   return SECTIONS[kind].filter((s) => s.core || on.has(s.id));
 }
 
+/** The draft's primary succession method (what adopting it sets on the club). */
 export function successionOf(data: DraftData): SuccessionMethod {
   const v = data.fields.successionMethod;
-  return v === "MEMBER_VOTE" || v === "LEADERSHIP_VOTE" ? v : "SENIORITY";
+  return isSuccessionMethod(v) ? v : DEFAULT_SUCCESSION;
 }
 
 export function joinPolicyOf(data: DraftData): JoinPolicy {

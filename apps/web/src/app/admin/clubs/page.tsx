@@ -20,6 +20,7 @@ import { AddDepartmentForm } from "@/components/founding/admin/AddDepartmentForm
 import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
 import { StartAmbassadorProgram } from "@/components/founding/admin/StartAmbassadorProgram";
+import { ChooseAdvisorDialog } from "@/components/ambassadors/ChooseAdvisorDialog";
 import { JOIN_LABEL, STATUS_LABEL, STATUS_TONE, SUCCESSION_LABEL, TYPE_LABEL } from "@/components/founding/copy";
 
 export const metadata: Metadata = { title: "Club reviews" };
@@ -212,7 +213,7 @@ async function CustomDocuments() {
               </div>
               <dl className="grid gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm sm:grid-cols-2">
                 <div>
-                  <dt className="text-xs text-ink-3">Leaders are chosen by</dt>
+                  <dt className="text-xs text-ink-3">Primary way leaders are chosen</dt>
                   <dd className="text-ink">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod] : "Not stated"}{s.successionMethod && s.successionMethod !== d.club.successionMethod ? " (a change)" : ""}</dd>
                 </div>
                 <div>
@@ -324,29 +325,48 @@ async function AllClubs({ status, q }: { status?: string; q?: string }) {
   );
 }
 
-/** One College Ambassadors org per college (ARCHITECTURE §6): start them here, run them in their workspace. */
+/** One College Ambassadors org per college (ARCHITECTURE §6): start them and choose their advisors here, run them in their workspace. */
 async function AmbassadorPrograms() {
-  const colleges = await db.college.findMany({
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      shortName: true,
-      clubs: {
-        where: { type: "COLLEGE_AMBASSADORS", status: { not: "RETIRED" } },
-        select: {
-          id: true,
-          slug: true,
-          name: true,
-          logoUrl: true,
-          logoColor: true,
-          roleAssignments: { where: { endedAt: null, role: "PRESIDENT" }, select: { user: { select: { name: true } } } },
-          ambassadorPlacements: { where: { endedAt: null }, select: { id: true } },
-          _count: { select: { memberships: { where: { status: "ACTIVE" } } } },
+  const [colleges, staff] = await Promise.all([
+    db.college.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        shortName: true,
+        clubs: {
+          where: { type: "COLLEGE_AMBASSADORS", status: { not: "RETIRED" } },
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            logoUrl: true,
+            logoColor: true,
+            roleAssignments: { where: { endedAt: null, role: { in: ["PRESIDENT", "ADVISOR"] } }, orderBy: { startedAt: "asc" }, select: { role: true, user: { select: { name: true } } } },
+            ambassadorPlacements: { where: { endedAt: null }, select: { id: true } },
+            _count: { select: { memberships: { where: { status: "ACTIVE" } } } },
+          },
         },
       },
-    },
-  });
+    }),
+    db.user.findMany({
+      where: { kind: "FACULTY_STAFF", status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, handle: true, avatarUrl: true, avatarColor: true, jobTitle: true, department: { select: { name: true, collegeId: true } } },
+    }),
+  ]);
+  /** Faculty and staff for one college's picker: its own people first, each with their title and department. */
+  const peopleFor = (collegeId: string) =>
+    [...staff]
+      .sort((a, b) => Number(b.department?.collegeId === collegeId) - Number(a.department?.collegeId === collegeId))
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        handle: s.handle,
+        avatarUrl: s.avatarUrl,
+        avatarColor: s.avatarColor,
+        note: [s.jobTitle, s.department?.name].filter(Boolean).join(" · ") || undefined,
+      }));
   return (
     <div className="space-y-4">
       <p className="max-w-3xl text-sm text-ink-2">
@@ -358,6 +378,7 @@ async function AmbassadorPrograms() {
           <tr>
             <TH>College</TH>
             <TH>Program</TH>
+            <TH>Advisor</TH>
             <TH>President</TH>
             <TH>Members</TH>
             <TH>Clubs with an ambassador</TH>
@@ -369,6 +390,8 @@ async function AmbassadorPrograms() {
         <TBody>
           {colleges.map((c) => {
             const org = c.clubs[0];
+            const president = org?.roleAssignments.find((r) => r.role === "PRESIDENT")?.user.name;
+            const advisor = org?.roleAssignments.find((r) => r.role === "ADVISOR")?.user.name ?? null;
             return (
               <TR key={c.id}>
                 <TD className="font-medium">{c.name}</TD>
@@ -382,7 +405,17 @@ async function AmbassadorPrograms() {
                     <span className="text-ink-3">No program yet</span>
                   )}
                 </TD>
-                <TD>{org ? (org.roleAssignments[0]?.user.name ?? <Badge tone="warning">Vacant</Badge>) : "—"}</TD>
+                <TD>
+                  {org ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {advisor ?? <Badge tone="warning">None yet</Badge>}
+                      <ChooseAdvisorDialog orgId={org.id} orgName={org.name} collegeName={c.name} currentName={advisor} people={peopleFor(c.id)} />
+                    </div>
+                  ) : (
+                    "—"
+                  )}
+                </TD>
+                <TD>{org ? (president ?? <Badge tone="warning">Vacant</Badge>) : "—"}</TD>
                 <TD className="tabular-nums">{org ? org._count.memberships : "—"}</TD>
                 <TD className="tabular-nums">{org ? org.ambassadorPlacements.length : "—"}</TD>
                 <TD className="text-right">

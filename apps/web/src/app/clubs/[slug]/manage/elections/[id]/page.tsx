@@ -1,29 +1,51 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { SuccessionMethod } from "@prisma/client";
 import { CheckCircle2, ExternalLink, Info } from "lucide-react";
 import { db } from "@/lib/db";
 import { ALL_CAPABILITIES, CAPABILITIES, ROLE_LABEL } from "@/lib/authz";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { currentLeaderIds, electionResults, eligibleVoterIds, syncElection } from "@/lib/domain/elections";
-import { electionCandidates, resultRows } from "@/lib/roles/election-queries";
+import { electionResults, eligibleVoterIds, keyHolders, nextInLineOutcome, syncElection } from "@/lib/domain/elections";
+import { candidateSource, electionCandidates, resultRows } from "@/lib/roles/election-queries";
 import { activeStudentMembers } from "@/lib/roles/queries";
-import { ElectionResultsView, ElectionStatusBadge, ElectionTimeline } from "@/components/elections/ElectionBits";
+import { selectionSetup } from "@/lib/roles/selection-setup";
+import { confirmersFor, isKeyHolder, leadersBelow, organizersAddCandidates, usesBallots } from "@/lib/roles/pipeline";
+import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
+import { ElectionResultsView, ElectionStatusBadge, ElectionTimeline, fmtWhen, MethodBadge } from "@/components/elections/ElectionBits";
 import { Avatar } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Callout, EmptyState, PageHeader, ProgressBar } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
-import { ApplyResultPanel, CancelElectionButton, CloseVotingButton, NominateDialog, OpenVotingButton, RemoveCandidateButton } from "../_components/ElectionControls";
+import { CreateElectionDialog } from "../_components/CreateElectionDialog";
+import {
+  ApplyResultPanel,
+  CancelElectionButton,
+  CloseVotingButton,
+  ConfirmProposalPanel,
+  NominateDialog,
+  OpenVotingButton,
+  ProposePanel,
+  RemoveCandidateButton,
+  WithdrawProposalButton,
+} from "../_components/ElectionControls";
 
-export const metadata = { title: "Manage election" };
+export const metadata = { title: "Fill a seat" };
+
+/** "Pat" / "Pat and Sam" / "Pat, Sam and Lee". */
+function names(list: string[]) {
+  if (list.length <= 2) return list.join(" and ");
+  return `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
+}
 
 export default async function ManageElectionPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await params;
-  const { club, access, allowed } = await loadClubWorkspace(slug, "elections");
+  const { user, club, access, allowed } = await loadClubWorkspace(slug, "elections");
   if (!allowed) {
     return (
       <div>
-        <PageHeader title="Election" />
+        <PageHeader title="Fill a seat" />
         <NoPermission what="elections" suspended={access.suspended} />
       </div>
     );
@@ -31,44 +53,97 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
   const e = await syncElection(id);
   if (!e || e.clubId !== club.id) notFound();
 
-  const candidates = await electionCandidates(e.id);
-  const [voters, results, members, leaders, holders] = await Promise.all([
-    eligibleVoterIds(e.clubId, e.method),
-    electionResults(e.id),
-    e.status === "NOMINATING" ? activeStudentMembers(club.id) : Promise.resolve([]),
-    e.status === "NOMINATING" && e.method === "LEADERSHIP_VOTE" ? currentLeaderIds(club.id) : Promise.resolve(null),
+  const open = e.status === "NOMINATING" || (e.method === "NEXT_IN_LINE" && e.status === "VOTING");
+  const [candidates, setup, holders] = await Promise.all([
+    electionCandidates(e.id),
+    selectionSetup(club.id),
     db.roleAssignment.findMany({ where: { positionId: e.position.id, endedAt: null }, include: { user: { select: { id: true, name: true } } } }),
   ]);
-  const onBallot = new Set(candidates.map((c) => c.userId));
-  const leaderSet = leaders ? new Set(leaders) : null;
-  const nominees = members
-    .filter((m) => !leaderSet || leaderSet.has(m.id))
-    .map((m) => (onBallot.has(m.id) ? { ...m, disabledReason: "Already on the ballot" } : m));
-  const canApply = access.assignableRoles.includes(e.position.role);
-  const live = e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED";
+  const [voters, results, outcome, keys, members] = await Promise.all([
+    usesBallots(e.method) ? eligibleVoterIds(e.clubId, e.method) : Promise.resolve([] as string[]),
+    electionResults(e.id),
+    e.method === "NEXT_IN_LINE" ? nextInLineOutcome(e.id) : Promise.resolve(null),
+    e.method === "ADVISOR_PRESIDENT" ? keyHolders(club.id) : Promise.resolve(null),
+    e.status === "NOMINATING" && organizersAddCandidates(e.method) ? activeStudentMembers(club.id) : Promise.resolve([]),
+  ]);
 
-  const rows = results ? resultRows(results, candidates, e.winnerId) : [];
+  const canApply = access.assignableRoles.includes(e.position.role);
+  const admin = access.viaPlatform !== null;
   const byId = new Map(candidates.map((c) => [c.id, c]));
-  const leadersRows = results ? results.leaders.map((cid) => ({ id: cid, name: byId.get(cid)?.name ?? "Candidate", avatarUrl: byId.get(cid)?.avatarUrl ?? null, avatarColor: byId.get(cid)?.avatarColor ?? "#77707f", votes: results.rows.find((r) => r.candidateId === cid)?.votes ?? 0 })) : [];
-  const clearWinner = leadersRows.length === 1 ? leadersRows[0] : null;
-  const winnerUserId = clearWinner ? byId.get(clearWinner.id)?.userId : null;
-  const replacing = holders.filter((h) => h.user.id !== winnerUserId).map((h) => h.user.name);
+  const onList = new Set(candidates.map((c) => c.userId));
+  const nominees = members.map((m) => (onList.has(m.id) ? { ...m, disabledReason: "Already a candidate" } : m));
+  // Where each candidate sits now, and the seat they'd leave by moving up.
+  const below = leadersBelow(setup.pipeline.seats, e.position.id, setup.pipeline.clubType);
+  const movingFrom = Object.fromEntries(candidates.flatMap((c) => {
+    const p = below.find((x) => x.userId === c.userId);
+    return p ? [[c.id, p.seatName] as const] : [];
+  }));
+  const seatOf = (userId: string) => below.find((p) => p.userId === userId)?.seatName ?? (holders.some((h) => h.user.id === userId) ? e.position.name : null);
+  const replacingFor = (userId: string | null | undefined) => holders.filter((h) => h.user.id !== userId).map((h) => h.user.name);
+  const sittingIds = candidates.filter((c) => holders.some((h) => h.user.id === c.userId)).map((c) => c.id);
   // Officer and ambassador seats get the same permissions step as assigning them in the org chart.
-  const setup =
+  const permSetup =
     e.position.role === "OFFICER" || e.position.role === "AMBASSADOR"
       ? { options: ALL_CAPABILITIES.map((k) => ({ key: k, label: CAPABILITIES[k].label, description: CAPABILITIES[k].description })), defaults: e.position.defaultPermissions }
       : null;
-  const sittingIds = candidates.filter((c) => holders.some((h) => h.user.id === c.userId)).map((c) => c.id);
+  const seatForRestart = setup.seats.filter((s) => s.id === e.position.id).map((s) => ({ ...s, busy: false }));
+  const restart = (label: string, method: SuccessionMethod, variant: "primary" | "outline" = "outline") =>
+    seatForRestart.length ? (
+      <CreateElectionDialog
+        slug={club.slug}
+        clubId={club.id}
+        seats={seatForRestart}
+        primary={club.successionMethod}
+        defaults={setup.defaults}
+        termLabel={setup.termLabel}
+        fixedSeatId={e.position.id}
+        initialMethod={method}
+        restartElectionId={e.id}
+        triggerLabel={label}
+        triggerVariant={variant}
+      />
+    ) : null;
+  const otherMode: SuccessionMethod = club.successionMethod !== e.method ? club.successionMethod : e.method === "ADVISOR_PRESIDENT" ? "MEMBER_VOTE" : "ADVISOR_PRESIDENT";
+
+  // ─── Advisor & President ───
+  const people = new Map((await db.user.findMany({ where: { id: { in: [...(keys?.presidentIds ?? []), ...(keys?.advisorIds ?? []), e.proposedById ?? "", e.confirmedById ?? ""] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+  const proposed = e.proposedCandidateId ? (byId.get(e.proposedCandidateId) ?? null) : null;
+  const confirmers = keys && proposed ? confirmersFor({ ...keys, proposerId: e.proposedById ?? "", candidateUserId: proposed.userId, seatRole: e.position.role }) : [];
+  const mayPropose = Boolean(keys && canApply && (admin || isKeyHolder(user.id, keys)));
+  const mayConfirm = Boolean(proposed && canApply && (admin || confirmers.includes(user.id)) && !(e.position.role === "PRESIDENT" && proposed.userId === user.id));
+  const isProposer = Boolean(e.proposedById && e.proposedById === user.id);
+  const wouldConfirm = keys ? confirmersFor({ ...keys, proposerId: user.id, candidateUserId: "", seatRole: e.position.role }) : [];
+  const proposeNext = wouldConfirm.length === 0 ? "A WSUSA administrator confirms it next." : wouldConfirm.includes(user.id) && wouldConfirm.length === 1 ? `You confirm it yourself next: ${club.name} has ${keys?.advisorIds.length ? "no President" : "no advisor"} to do it.` : `${names(wouldConfirm.filter((x) => x !== user.id).map((x) => people.get(x) ?? "The other side"))} confirms it next.`;
+
+  // ─── Ballots ───
+  const rows = results ? resultRows(results, candidates, e.winnerId, e.method) : [];
+  const leadersRows = results ? results.leaders.map((cid) => ({ id: cid, name: byId.get(cid)?.name ?? "Candidate", avatarUrl: byId.get(cid)?.avatarUrl ?? null, avatarColor: byId.get(cid)?.avatarColor ?? "#77707f", votes: results.rows.find((r) => r.candidateId === cid)?.votes ?? 0 })) : [];
+  const unanimous = results?.unanimousCandidateId ? (leadersRows.find((r) => r.id === results.unanimousCandidateId) ?? { id: results.unanimousCandidateId, name: byId.get(results.unanimousCandidateId)?.name ?? "Candidate", avatarUrl: null, avatarColor: "#77707f", votes: 0 }) : null;
+  const clearWinner = e.method === "SELF_SELECT" ? unanimous : leadersRows.length === 1 ? leadersRows[0] : null;
+  const firstYes = outcome?.firstYesId ? (byId.get(outcome.firstYesId) ?? null) : null;
+  const saidYes = candidates.filter((c) => c.acceptedAt).length;
+  const winnerName = e.winnerId ? (candidates.find((c) => c.userId === e.winnerId)?.name ?? null) : null;
+  const cannotApply = (
+    <Callout tone="info" icon={<Info />}>
+      Only someone who can assign the {ROLE_LABEL[e.position.role]} role — {e.position.role === "PRESIDENT" || e.position.role === "VP" ? "the President, the advisor or a WSUSA administrator" : "the President, a Vice President, the advisor or an administrator"} — can fill this seat.
+    </Callout>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ href: `/clubs/${club.slug}/manage/elections`, label: "Elections" }, { label: e.title }]}
         title={e.title}
-        description={`Fills ${e.position.name} (${ROLE_LABEL[e.position.role]}) · ${e.method === "MEMBER_VOTE" ? "member vote" : "leadership vote"}`}
+        description={
+          <>
+            Fills {e.position.name}
+            {e.position.name !== ROLE_LABEL[e.position.role] ? ` (${ROLE_LABEL[e.position.role]})` : ""} · <strong>{SUCCESSION_NAME[e.method]}</strong>
+            {e.method === club.successionMethod ? " (the club's primary method)" : " (chosen for this seat)"}. {SUCCESSION_STEPS[e.method]}
+          </>
+        }
         actions={
           <>
-            <ElectionStatusBadge status={e.status} />
+            <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
             <ButtonLink href={`/clubs/${club.slug}/elections/${e.id}`} variant="outline" size="sm">
               Member view <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </ButtonLink>
@@ -76,11 +151,138 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
         }
       />
 
-      <ElectionTimeline status={e.status} createdAt={e.createdAt} votingOpensAt={e.votingOpensAt} votingClosesAt={e.votingClosesAt} appliedAt={e.appliedAt} />
+      <ElectionTimeline status={e.status} method={e.method} createdAt={e.createdAt} votingOpensAt={e.votingOpensAt} votingClosesAt={e.votingClosesAt} appliedAt={e.appliedAt} proposedAt={e.proposedAt} />
 
-      {e.status === "NOMINATING" ? (
+      {/* ─── Advisor & President ─── */}
+      {e.method === "ADVISOR_PRESIDENT" && e.status === "NOMINATING" ? (
         <Card>
-          <CardHeader title="Nominations are open" description="Voting opens automatically at the scheduled time, or now if you're ready." />
+          <CardHeader
+            title={proposed ? `${proposed.name} is proposed` : "Propose someone"}
+            description={`The President and the advisor decide together: one proposes, the other confirms. Decide by ${fmtWhen(e.votingClosesAt)}${e.votingClosesAt < new Date() ? " (that date has passed, but you can still decide)" : ""}.`}
+          />
+          <CardBody className="space-y-4">
+            {proposed ? (
+              <>
+                <div className="flex items-center gap-3 rounded-xl border border-line bg-muted/40 p-3">
+                  <Avatar name={proposed.name} src={proposed.avatarUrl} color={proposed.avatarColor} />
+                  <div className="min-w-0 text-sm">
+                    <p className="font-medium text-ink">{proposed.name}</p>
+                    <p className="text-ink-2">
+                      Proposed by {people.get(e.proposedById ?? "") ?? "a club leader"}
+                      {e.proposedAt ? ` ${fmtWhen(e.proposedAt)}` : ""}
+                      {seatOf(proposed.userId) ? ` · now ${seatOf(proposed.userId)}` : ""}
+                    </p>
+                  </div>
+                </div>
+                {mayConfirm ? (
+                  <ConfirmProposalPanel
+                    slug={club.slug}
+                    electionId={e.id}
+                    seatName={e.position.name}
+                    candidate={{ name: proposed.name }}
+                    replacing={replacingFor(proposed.userId)}
+                    movingFrom={movingFrom[proposed.id] ?? null}
+                    setup={permSetup}
+                    sitting={sittingIds.includes(proposed.id)}
+                    canSendBack={!isProposer}
+                  />
+                ) : (
+                  <p className="text-sm text-ink-2">
+                    {confirmers.length ? `Waiting for ${names(confirmers.map((x) => people.get(x) ?? "the other side"))} to confirm.` : "Nobody in the club can confirm this one, so a WSUSA administrator will."}
+                    {e.position.role === "PRESIDENT" && proposed.userId === user.id ? " You can't confirm your own appointment as President." : ""}
+                  </p>
+                )}
+                {isProposer || (admin && !mayConfirm) ? <WithdrawProposalButton slug={club.slug} electionId={e.id} name={proposed.name} /> : null}
+              </>
+            ) : mayPropose ? (
+              <ProposePanel
+                slug={club.slug}
+                electionId={e.id}
+                seatName={e.position.name}
+                candidates={candidates.map((c) => ({ id: c.id, name: c.name, avatarUrl: c.avatarUrl, avatarColor: c.avatarColor, detail: seatOf(c.userId) ?? candidateSource(c) }))}
+                nextStep={proposeNext}
+              />
+            ) : (
+              <p className="flex items-start gap-2 text-sm text-ink-2">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
+                {canApply ? "Waiting for the President or an advisor to propose someone." : `Waiting for the President or an advisor to propose someone. You can add candidates; they make the choice.`}
+              </p>
+            )}
+            <div className="flex justify-end border-t border-line pt-3">
+              <CancelElectionButton slug={club.slug} electionId={e.id} />
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {/* ─── Next in line ─── */}
+      {e.method === "NEXT_IN_LINE" && e.status === "VOTING" ? (
+        <Card>
+          <CardHeader title="Waiting for answers" description={`Answers are due ${fmtWhen(e.votingClosesAt)}. The first in line who says yes moves up.`} />
+          <CardBody className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-sm text-ink-2">
+                <strong className="tabular-nums text-ink">{saidYes}</strong> of {candidates.length} still in line said yes
+              </p>
+              <ProgressBar value={saidYes} max={Math.max(1, candidates.length)} />
+            </div>
+            {candidates.length === 0 ? <Callout tone="warning">Everyone who was asked said no. Start over with another way to fill the seat.</Callout> : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <CloseVotingButton slug={club.slug} electionId={e.id} answers />
+              {candidates.length === 0 ? restart("Use another way", otherMode, "primary") : null}
+              <div className="ml-auto">
+                <CancelElectionButton slug={club.slug} electionId={e.id} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {e.method === "NEXT_IN_LINE" && e.status === "CLOSED" ? (
+        <Card>
+          <CardHeader title="Answers are in" />
+          <CardBody>
+            {firstYes ? (
+              canApply ? (
+                <ApplyResultPanel
+                  slug={club.slug}
+                  electionId={e.id}
+                  seatName={e.position.name}
+                  winner={{ id: firstYes.id, name: firstYes.name, avatarUrl: firstYes.avatarUrl, avatarColor: firstYes.avatarColor, votes: 0 }}
+                  tied={[]}
+                  replacing={replacingFor(firstYes.userId)}
+                  setup={permSetup}
+                  sittingIds={sittingIds}
+                  movingFrom={movingFrom}
+                  kind="nextInLine"
+                />
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-ink">
+                    <strong>{firstYes.name}</strong> is the first in line who said yes.
+                  </p>
+                  {cannotApply}
+                </div>
+              )
+            ) : (
+              <div className="space-y-3">
+                <Callout tone="warning" title="Nobody said yes">
+                  No one next in line wants to move up to {e.position.name} right now. Fill it another way: the people below it stay candidates.
+                </Callout>
+                <div className="flex flex-wrap items-center gap-2">
+                  {restart("Use another way", otherMode, "primary")}
+                  <CancelElectionButton slug={club.slug} electionId={e.id} />
+                </div>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {/* ─── Ballots ─── */}
+      {usesBallots(e.method) && e.status === "NOMINATING" ? (
+        <Card>
+          <CardHeader title={e.method === "MEMBER_VOTE" ? "Nominations are open" : "Gathering candidates"} description={`Voting opens automatically ${fmtWhen(e.votingOpensAt)}, or now if you're ready.`} />
           <CardBody className="flex flex-wrap items-center gap-3">
             <OpenVotingButton slug={club.slug} electionId={e.id} disabled={candidates.length === 0} />
             {candidates.length === 0 ? <span className="text-sm text-ink-3">Add at least one candidate first.</span> : null}
@@ -91,9 +293,9 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
         </Card>
       ) : null}
 
-      {e.status === "VOTING" ? (
+      {usesBallots(e.method) && e.status === "VOTING" ? (
         <Card>
-          <CardHeader title="Voting is open" description="Counts stay hidden until voting closes, so no one is swayed by early results." />
+          <CardHeader title="Voting is open" description={e.method === "SELF_SELECT" ? "Counts stay hidden until voting closes. It counts only if every leader votes for the same person." : "Counts stay hidden until voting closes, so no one is swayed by early results."} />
           <CardBody className="space-y-4">
             <div className="space-y-1.5">
               <p className="text-sm text-ink-2">
@@ -125,7 +327,18 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
               rows.length === 0 ? (
                 <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
                   <p className="text-sm text-ink-2">There&apos;s nothing to apply.</p>
+                  {restart("Start again", e.method)}
                   <CancelElectionButton slug={club.slug} electionId={e.id} />
+                </div>
+              ) : e.method === "SELF_SELECT" && !unanimous ? (
+                <div className="space-y-3 border-t border-line pt-4">
+                  <Callout tone="warning" title="No unanimous choice">
+                    A self-select counts only when every leader votes, all for the same person, so this result can&apos;t be applied. Start again, or fill {e.position.name} another way.
+                  </Callout>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {restart("Start again", "SELF_SELECT", "primary")}
+                    {restart("Use another way", otherMode)}
+                  </div>
                 </div>
               ) : canApply ? (
                 <div className="border-t border-line pt-4">
@@ -135,62 +348,100 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
                     seatName={e.position.name}
                     winner={clearWinner}
                     tied={clearWinner ? [] : leadersRows}
-                    replacing={replacing}
-                    setup={setup}
+                    replacing={replacingFor(clearWinner ? byId.get(clearWinner.id)?.userId : null)}
+                    setup={permSetup}
                     sittingIds={sittingIds}
+                    movingFrom={movingFrom}
+                    kind={e.method === "SELF_SELECT" ? "unanimous" : "vote"}
                   />
                 </div>
               ) : (
-                <Callout tone="info" icon={<Info />}>
-                  Only someone who can assign the {ROLE_LABEL[e.position.role]} role — {e.position.role === "PRESIDENT" || e.position.role === "VP" ? "the President, the advisor or a WSUSA administrator" : "the President, a Vice President, the advisor or an administrator"} — can apply this result.
-                </Callout>
+                <div className="space-y-3 border-t border-line pt-4">
+                  {e.method === "SELF_SELECT" && unanimous ? (
+                    <p className="flex items-center gap-2 text-sm text-ink">
+                      <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
+                      <span>
+                        Unanimous: every other leader chose <strong>{unanimous.name}</strong>.
+                      </span>
+                    </p>
+                  ) : null}
+                  {cannotApply}
+                </div>
               )
-            ) : (
-              <Callout tone="success" icon={<CheckCircle2 />} title="Result applied">
-                The winner holds {e.position.name} now.{" "}
-                <Link href={`/clubs/${club.slug}/manage/org-chart`} className="underline">
-                  See the org chart
-                </Link>
-              </Callout>
-            )}
+            ) : null}
           </CardBody>
         </Card>
       ) : null}
 
-      {e.status === "CANCELLED" ? <Callout tone="info">This election was cancelled. No result was applied.</Callout> : null}
+      {e.status === "APPLIED" ? (
+        <Callout tone="success" icon={<CheckCircle2 />} title="Seat filled">
+          {winnerName ?? "The winner"} holds {e.position.name} now
+          {e.method === "ADVISOR_PRESIDENT" && e.confirmedById ? ` — proposed by ${people.get(e.proposedById ?? "") ?? "a club leader"} and confirmed by ${people.get(e.confirmedById) ?? "the other side"}` : ""}.{" "}
+          <Link href={`/clubs/${club.slug}/manage/org-chart`} className="underline">
+            See the org chart
+          </Link>
+        </Callout>
+      ) : null}
+
+      {e.status === "CANCELLED" ? <Callout tone="info">This was called off. Nobody took the seat from it.</Callout> : null}
 
       <Card>
         <CardHeader
-          title={`Candidates (${candidates.length})`}
-          description={e.method === "LEADERSHIP_VOTE" ? "Candidates must be current club leaders." : "Candidates must be active student members."}
-          action={e.status === "NOMINATING" ? <NominateDialog slug={club.slug} electionId={e.id} people={nominees} /> : null}
+          title={e.method === "NEXT_IN_LINE" ? `Next in line (${candidates.length})` : `Candidates (${candidates.length})`}
+          description={
+            e.method === "NEXT_IN_LINE"
+              ? "In pipeline order. Anyone who said no came off the list."
+              : e.method === "MEMBER_VOTE"
+                ? "Everyone on the org chart below the seat starts on the ballot. Active members can also run, and you can add anyone."
+                : "Everyone on the org chart below the seat starts on the list, and you can add any active member. Anyone can withdraw."
+          }
+          action={e.status === "NOMINATING" && organizersAddCandidates(e.method) ? <NominateDialog slug={club.slug} electionId={e.id} people={nominees} /> : null}
         />
         {candidates.length === 0 ? (
           <CardBody>
-            <EmptyState className="border-0 py-8" title="No candidates yet" description="Members can run from the election page, or you can nominate someone." />
+            <EmptyState className="border-0 py-8" title="No candidates yet" description={e.method === "MEMBER_VOTE" ? "Members can run from the election page, or you can add someone." : "Add an active member to the list."} />
           </CardBody>
         ) : (
-          <ul className="divide-y divide-line">
-            {candidates.map((c) => (
+          <ol className="divide-y divide-line">
+            {candidates.map((c, i) => (
               <li key={c.id} className="flex items-start gap-3 px-5 py-4">
+                {e.method === "NEXT_IN_LINE" ? <span className="mt-1.5 w-5 shrink-0 text-right text-xs tabular-nums text-ink-3">{i + 1}.</span> : null}
                 <Avatar name={c.name} src={c.avatarUrl} color={c.avatarColor} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <Link href={`/u/${c.handle}`} className="text-sm font-medium text-ink hover:underline">
-                    {c.name}
-                  </Link>
-                  <p className="text-xs text-ink-3">{c.nominatedBy.id === c.userId ? "Self-nominated" : `Nominated by ${c.nominatedBy.name}`}</p>
-                  {c.statement ? <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-sm text-ink-2">{c.statement}</p> : <p className="mt-1.5 text-sm italic text-ink-3">No statement yet.</p>}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/u/${c.handle}`} className="text-sm font-medium text-ink hover:underline">
+                      {c.name}
+                    </Link>
+                    {e.method === "NEXT_IN_LINE" ? (
+                      c.acceptedAt ? (
+                        <Badge tone="success">Said yes</Badge>
+                      ) : (
+                        <Badge tone="neutral">{e.status === "VOTING" ? "Hasn't answered" : "Didn't answer"}</Badge>
+                      )
+                    ) : null}
+                    {firstYes?.id === c.id && e.status !== "APPLIED" ? <Badge tone="brand">First in line who said yes</Badge> : null}
+                    {proposed?.id === c.id && e.status === "NOMINATING" ? <Badge tone="brand">Proposed</Badge> : null}
+                  </div>
+                  <p className="text-xs text-ink-3">
+                    {[seatOf(c.userId), candidateSource(c), c.acceptedAt ? `said yes ${fmtWhen(c.acceptedAt)}` : null].filter(Boolean).join(" · ")}
+                  </p>
+                  {usesBallots(e.method) ? c.statement ? <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-sm text-ink-2">{c.statement}</p> : <p className="mt-1.5 text-sm italic text-ink-3">No statement yet.</p> : null}
                 </div>
-                {e.status === "NOMINATING" ? <RemoveCandidateButton slug={club.slug} candidateId={c.id} name={c.name} /> : null}
+                {open ? <RemoveCandidateButton slug={club.slug} candidateId={c.id} name={c.name} /> : null}
               </li>
             ))}
-          </ul>
+          </ol>
         )}
       </Card>
 
-      {live && holders.length ? (
+      {e.status !== "APPLIED" && e.status !== "CANCELLED" && holders.length ? (
         <p className="text-sm text-ink-3">
-          {e.position.name} is held by {holders.map((h) => h.user.name).join(" and ")} today. Applying the result replaces them unless they win.
+          {e.position.name} is held by {names(holders.map((h) => h.user.name))} today. Filling it replaces them unless they&apos;re chosen again.
+        </p>
+      ) : null}
+      {e.method !== club.successionMethod && e.status !== "APPLIED" && e.status !== "CANCELLED" ? (
+        <p className="text-sm text-ink-3">
+          <MethodBadge method={club.successionMethod} primary /> is {club.name}&apos;s primary method; this seat uses {SUCCESSION_NAME[e.method]} this time.
         </p>
       ) : null}
     </div>

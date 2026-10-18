@@ -6,6 +6,8 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { CLUB_TYPE_LABEL, CLUB_TYPE_TONE, pct } from "@/components/clubs/labels";
 import { ClubStatusBadge, RatingInline } from "@/components/clubs/ClubCard";
 import { RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
+import { FoundIn } from "@/components/search/FoundIn";
+import { Reasons } from "@/components/search/Reasons";
 
 /** List view of the clubs list: one row per club, for comparing numbers side by side. */
 export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; states: Map<string, ViewerClubState>; signedIn: boolean }) {
@@ -44,6 +46,8 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
                       {c.placement}
                       {c.focus ? ` · ${c.focus}` : ""}
                     </p>
+                    {c.match ? <FoundIn match={c.match} compact className="mt-1" /> : null}
+                    {c.reasons.length ? <Reasons reasons={c.reasons} inline className="mt-1" /> : null}
                   </div>
                 </div>
               </TD>

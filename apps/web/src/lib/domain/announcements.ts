@@ -11,6 +11,7 @@ import { richToText, sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { assertCan, assertClubCap, assertSignedIn, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
 import { clubLeaderRoleWhere } from "@/lib/domain/messaging";
+import { reindexClubSoon } from "@/lib/search/fresh";
 import { ANNOUNCEMENT_TITLE_MAX, AUDIENCES } from "@/components/announcements/labels";
 
 /**
@@ -178,6 +179,8 @@ export async function createClubAnnouncement(actor: Actor | null, clubId: string
     data: { title: data.title, audience: data.audience, pinned: data.pinned },
     isPublic: data.audience === "PUBLIC",
   });
+  // Public posts are searchable (lib/search); members- and leaders-only ones never are.
+  if (data.audience === "PUBLIC") reindexClubSoon(clubId);
   const recipients = (await clubAudienceIds(clubId, data.audience)).filter((id) => id !== actor!.id);
   notifyLater({ userIds: recipients, ...notificationFor(data, club), exceptUserId: actor!.id });
   return { id: a.id, notified: recipients.length };
@@ -207,6 +210,7 @@ export async function updateAnnouncement(actor: Actor | null, id: string, input:
     clubId: before.clubId,
     data: { title: data.title, audience: data.audience, pinned: data.pinned, ...(before.audience !== data.audience ? { previousAudience: before.audience } : {}) },
   });
+  if (before.audience === "PUBLIC" || data.audience === "PUBLIC") reindexClubSoon(before.clubId);
   let notified = 0;
   if (before.audience !== data.audience) {
     const [was, now] = await Promise.all([audienceIds(before.clubId, before.audience), audienceIds(before.clubId, data.audience)]);
@@ -222,6 +226,7 @@ export async function deleteAnnouncement(actor: Actor | null, id: string): Promi
   const a = await loadOwned(actor, id);
   await db.announcement.delete({ where: { id: a.id } });
   await logActivity({ actorId: actor!.id, action: "announcement.deleted", entityType: "announcement", entityId: a.id, clubId: a.clubId, data: { title: a.title } });
+  if (a.audience === "PUBLIC") reindexClubSoon(a.clubId);
 }
 
 /** Pins to (or unpins from) the top of the club page or the university list. Doesn't notify. */

@@ -82,7 +82,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     websiteUrl: null,
     socialLinks: [],
     joinPolicy: c.def.joinPolicy ?? "OPEN",
-    successionMethod: c.def.succession ?? "SENIORITY",
+    successionMethod: c.def.succession ?? "ADVISOR_PRESIDENT",
     autoApproveCohosts: Boolean(c.def.autoApproveCohosts),
     createdById: c.founderId,
     createdAt: c.createdAt,

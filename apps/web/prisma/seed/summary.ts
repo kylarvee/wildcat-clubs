@@ -66,15 +66,15 @@ export async function printSummary(db: PrismaClient, ctx: Ctx, log: (s: string) 
   const tips: Record<string, string> = {
     sam: `No clubs, no history. Register for a club (try ${nm("chess")}, then ${nm("robotics")}'s approval gate) and subscribe to a calendar.`,
     maya: `Member of ${nm("psych")}, ${nm("premed")}, ${nm("climbing")}, ${nm("service")}. LIVE NOW: check in to “Care Kit Assembly” (code ${live.checkinCode}, until ${human(live.endsAt)}); later today: “Grad School Q&A” (code ${later.checkinCode}). Vote in the Psi Chi election; review Pre-Med or Psi Chi (eligible); 1 unread DM from Priya.`,
-    oscar: `Treasurer of ${nm("fic")} (started ~20 days ago): budget items, one DRAFT and one SUBMITTED funding request; Club Officer Policy Test due in ~10 days, training in ~25 (makeup session on the calendar).`,
-    vanessa: `VP of ${nm("swe")}: approve ${nm("cyber")}'s co-host request (task); SWE's closed President election is waiting — a VP can't apply it.`,
-    priya: `President of ${nm("robotics")} (~90 members, approval gate): 5 join requests waiting; co-hosts with CSWS and SWE; extra build night is live now (code ${build.checkinCode}) — open the QR screen.`,
+    oscar: `Treasurer of ${nm("fic")} (started ~20 days ago): budget items, one DRAFT and one SUBMITTED funding request; Club Officer Policy Test due in ~10 days, training in ~25 (makeup session on the calendar). First in line for ${nm("fic")}'s open VP seat: answer "Move up to Vice President?" (task).`,
+    vanessa: `VP of ${nm("swe")}: approve ${nm("cyber")}'s co-host request (task); SWE's unanimous self-select for President is waiting — a VP can't apply it.`,
+    priya: `President of ${nm("robotics")} (~90 members, approval gate): 5 join requests waiting; co-hosts with CSWS and SWE; extra build night is live now (code ${build.checkinCode}) — open the QR screen. Proposed a new VP (waiting for Dr. Alvarez); the org chart's ambassador card asks EAST Ambassadors.`,
     amir: `Club Representative Ambassador (${nm("gsbe-amb")}), placed in ${nm("accounting")} and ${nm("marketing")}.`,
     frank: `${nm("beekeeping")} is a half-finished DRAFT (advisor invite pending with Prof. Reed); ${nm("boardgames")} is SUBMITTED and waiting on WSUSA.`,
     gwen: `Alumni (graduated May 2026). Former ${nm("ailab")} President 2024–2026; projects with files on her profile.`,
-    elena: `Advisor of ${nm("robotics")} and ${nm("premed")} — full permissions in both.`,
+    elena: `Advisor of ${nm("robotics")} and ${nm("premed")} — full permissions in both. Confirm Priya's VP proposal (task).`,
     nathan: `Pending request to advise ${nm("beekeeping")} (in Tasks).`,
-    alex: `Admin queues: ${nm("boardgames")} review, Aviation department request, ${nm("theatre")} custom bylaws, 3 funding requests, 2 open invoices, ${nm("discgolf")} review bombing, 5 reports (on ${nm("discgolf")} and ${nm("paintball")}).`,
+    alex: `Admin queues: ${nm("boardgames")} review, Aviation department request, ${nm("theatre")} custom bylaws, 3 funding requests, 2 open invoices, ${nm("discgolf")} review bombing, 5 reports (on ${nm("discgolf")} and ${nm("paintball")}). Ambassador programs: choose each program's advisor; ${ctx.refs.ambassadorRequestClub ?? "an EAST club"} is waiting on EAST Ambassadors for an ambassador.`,
     sydney: "System settings, AI switches, integrations, admins, outbox and scheduled jobs.",
   };
 

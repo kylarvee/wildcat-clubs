@@ -57,10 +57,16 @@ export default async function ClubSettingsPage({ params }: { params: Promise<{ s
           <KeyValue
             items={[
               { label: "How students join (constitution)", value: JOIN_LABEL[club.joinPolicy] },
-              { label: "How leaders are chosen (bylaws)", value: SUCCESSION_LABEL[club.successionMethod] },
+              { label: "Primary way leaders are chosen (bylaws)", value: SUCCESSION_LABEL[club.successionMethod] },
             ]}
           />
-          <p className="mt-4 text-xs text-ink-3">To change either one, update your constitution or bylaws in the builder and adopt the new version — or upload custom documents for WSUSA approval.</p>
+          <p className="mt-4 text-xs text-ink-3">
+            Every seat is filled this way unless the President and advisor choose one of the other ways for a particular seat — see{" "}
+            <Link href={`${base}/elections`} className="underline">
+              Elections
+            </Link>
+            . To change either setting, update your constitution or bylaws in the builder and adopt the new version — or upload custom documents for WSUSA approval.
+          </p>
         </CardBody>
       </Card>
 
@@ -70,6 +76,7 @@ export default async function ClubSettingsPage({ params }: { params: Promise<{ s
           <AdvisorPanel
             clubId={club.id}
             canInvite={access.canInviteAdvisor && live}
+            noInviteNote={club.type === "COLLEGE_AMBASSADORS" ? "WSUSA chooses this program's advisor. To change it, contact WSUSA." : undefined}
             staffDomain={INSTITUTION.staffEmailDomain}
             advisors={advisorRoles.map((r) => r.user)}
             invites={invites.map((i) => ({ id: i.id, name: i.name, email: i.email, sentLabel: fmtLongDate(i.createdAt), hasAccount: Boolean(i.inviteeId) }))}

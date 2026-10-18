@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Plus, SearchX, Sparkles } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { listClubs, shouldPromptForApp } from "@/lib/clubs/queries";
+import { logSearchSoon } from "@/lib/search/log";
 import { INSTITUTION } from "@/lib/institution";
 import { ButtonLink } from "@/components/ui/button";
 import { Container, EmptyState, PageHeader } from "@/components/ui/layout";
@@ -14,7 +16,7 @@ import { clubListHref, hasActiveFilters, parseClubListParams } from "@/component
 
 export const metadata: Metadata = {
   title: "Clubs",
-  description: `Browse every WSUSA-approved student club at ${INSTITUTION.name}. Sort by rating, activity and membership, and register in a click.`,
+  description: `Browse and search every WSUSA-approved student club at ${INSTITUTION.name}: their events, announcements and documents, not just their names. Register in a click.`,
 };
 
 /** Clubs shown per step; "Show more" adds another step (the count and filters cover them all). */
@@ -28,9 +30,18 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
   const limit = Number.isFinite(showParam) && showParam > STEP ? Math.min(Math.ceil(showParam / STEP) * STEP, 2000) : STEP;
   // "My clubs" means nothing to a signed-out visitor.
   const params = user ? parsed : { ...parsed, mine: false };
-  const [result, promptForApp] = await Promise.all([listClubs(params, user), user ? shouldPromptForApp(user.id) : Promise.resolve(false)]);
+  const [result, promptForApp] = await Promise.all([listClubs(params, user, { snippets: limit }), user ? shouldPromptForApp(user.id) : Promise.resolve(false)]);
   const shownItems = result.items.slice(0, limit);
   const signedIn = Boolean(user);
+  // One row per search someone ran (words, matches, signed in — no account), so WSUSA sees what students look for.
+  // The search box waits for a pause before it updates the URL, so this is once per search, not per keystroke.
+  // Not new searches: "Show more", the archive, My clubs, and re-renders after Register/Subscribe (a server
+  // action), prefetches and dev hot reloads.
+  if (result.search && !params.archived && !params.mine && sp.show === undefined) {
+    const h = await headers();
+    if (!h.has("next-action") && !h.has("next-router-prefetch") && !h.has("next-hmr-refresh")) logSearchSoon({ query: result.search.query, results: result.search.matches, signedIn });
+  }
+  const nothingFound = Boolean(params.q) && result.items.length === 0 && result.search?.matches === 0;
   const startHref = user ? "/clubs/new" : `/login?next=${encodeURIComponent("/clubs/new")}`;
   const canStart = !user || can(user, "club.create");
 
@@ -41,7 +52,7 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
         description={
           params.archived
             ? "Clubs that have wound down. Their history, officers and documents stay on record — handy if you want to bring one back."
-            : `Every ${INSTITUTION.studentGovernment}-approved club in one place. Search, sort by what matters to you, and register in a click.`
+            : `Every ${INSTITUTION.studentGovernment}-approved club in one place. Search looks inside each club's events, announcements and documents too, so nothing stays buried — and you can register in a click.`
         }
         actions={
           canStart ? (
@@ -53,9 +64,31 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
       />
 
       <AppPromptProvider enabled={promptForApp}>
-        <ClubBrowser params={params} colleges={result.colleges} signedIn={signedIn} archivedCount={result.archivedCount} shown={result.items.length} total={result.total}>
+        <ClubBrowser
+          params={params}
+          colleges={result.colleges}
+          signedIn={signedIn}
+          archivedCount={result.archivedCount}
+          shown={result.items.length}
+          total={result.total}
+          searchMode={result.search?.mode ?? null}
+        >
           {result.items.length === 0 ? (
-            result.total === 0 ? (
+            nothingFound && !params.archived ? (
+              <EmptyState
+                icon={<SearchX />}
+                title={`No clubs match “${params.q}” yet`}
+                description={`We looked through every club's page, events, announcements and documents. Try another word — or if your people aren't here yet, start the club yourself and ${INSTITUTION.studentGovernment} will help you get it approved.`}
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <ButtonLink href={clubListHref(params, { q: "", type: null, category: null, college: null, scope: null, status: null, mine: false })} variant="outline">
+                      Clear search
+                    </ButtonLink>
+                    {canStart ? <ButtonLink href={startHref}>Start a club</ButtonLink> : null}
+                  </div>
+                }
+              />
+            ) : result.total === 0 ? (
               <EmptyState
                 icon={<Sparkles />}
                 title={params.archived ? "No archived clubs" : "No clubs here yet"}
@@ -77,7 +110,7 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
                 description={params.mine ? "You haven't joined a club that matches. Try clearing a filter or browse everything." : "Try a different search or clear a filter or two."}
                 action={
                   hasActiveFilters(params) ? (
-                    <ButtonLink href={clubListHref(params, { q: "", type: null, college: null, scope: null, status: null, mine: false })} variant="outline">
+                    <ButtonLink href={clubListHref(params, { q: "", type: null, category: null, college: null, scope: null, status: null, mine: false })} variant="outline">
                       Clear filters
                     </ButtonLink>
                   ) : null

@@ -6,7 +6,7 @@ import { can, CAPABILITIES, getClubAccess, ROLE_LABEL, type Capability } from "@
 import { joinClub, subscribeCalendar, unsubscribeCalendar } from "@/lib/domain/memberships";
 import { addPersonalTask } from "@/lib/domain/tasks";
 import { updateProfile } from "@/lib/domain/profiles";
-import { addIdea, createEvent, type CreateEventInput } from "@/lib/domain/events";
+import { createEvent, type CreateEventInput } from "@/lib/domain/events";
 import { createClub } from "@/lib/domain/clubs";
 import { inviteAdvisor } from "@/lib/domain/advisors";
 import { assignRole } from "@/lib/domain/roles";
@@ -290,33 +290,6 @@ const updateProfileTool = writeTool({
         const r = await updateProfile(actor, { name: u.name, avatarUrl: u.avatarUrl, ...next, majors: student ? majors.map(({ majorId, isMinor }) => ({ majorId, isMinor })) : [] });
         const href = `/u/${r.handle}`;
         return { data: { result: "profile updated", changed, profile: href }, outcome: "Saved your profile.", href, revalidate: [href, "/settings"] };
-      },
-    };
-  },
-});
-
-// ─── add_event_idea ─────────────────────────────────────────────────────────
-
-const addIdeaTool = writeTool({
-  name: "add_event_idea",
-  running: "Preparing an event idea",
-  description: "Add an idea (a draft event with no date) to a club's idea list in the Events Builder. Needs the Events permission in that club. Needs confirmation.",
-  schema: z.object({ club: clubRef, title: z.string().min(1).max(140), notes: z.string().max(5000).optional().describe("Plain text notes") }),
-  async prepare(ctx, input) {
-    const club = await resolveClub(ctx.actor, input.club, { approvedOnly: true });
-    await requireClubCap(ctx, club.id, club.name, "events");
-    const title = input.title.trim();
-    const notes = input.notes?.trim() || null;
-    return {
-      card: {
-        title: `Add an event idea to ${club.name}`,
-        details: [`${quote(title, 80)} goes on ${club.name}'s idea list, with no date yet.`, ...(notes ? ["Your notes are saved with it."] : []), "Only your club's event planners see ideas until one is put on the calendar."],
-        confirmLabel: "Add idea",
-      },
-      async execute() {
-        const r = await addIdea(ctx.actor, { clubId: club.id, title, notes });
-        const href = `/clubs/${club.slug}/manage/events`;
-        return { data: { result: "idea added", event_id: r.id, link: href }, outcome: `Added ${quote(title, 60)} to ${club.name}'s ideas.`, href, revalidate: [href] };
       },
     };
   },
@@ -760,7 +733,6 @@ export const WRITE_TOOLS = [
   unsubscribeTool,
   addTaskTool,
   updateProfileTool,
-  addIdeaTool,
   createEventTool,
   postAnnouncementTool,
   startClubTool,

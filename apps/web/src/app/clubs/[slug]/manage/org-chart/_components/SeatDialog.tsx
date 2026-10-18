@@ -81,7 +81,11 @@ export function SeatDialog({ ctx, seat, open, onOpenChange }: { ctx: ToolContext
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent wide title={editing ? `Edit ${seat!.name}` : "Add a seat"} description={editing ? `${seat!.roleLabel} seat` : "Officer and ambassador seats show on the org chart under the vice presidents."}>
+      <DialogContent
+        wide
+        title={editing ? `Edit ${seat!.name}` : "Add a seat"}
+        description={editing ? `${seat!.roleLabel} seat` : ctx.ambassadorSeats ? "Officer and ambassador seats show on the org chart under the vice presidents." : "Officer seats show on the org chart under the vice presidents."}
+      >
         <form
           className="space-y-5"
           onSubmit={(e) => {
@@ -98,7 +102,7 @@ export function SeatDialog({ ctx, seat, open, onOpenChange }: { ctx: ToolContext
             </Field>
           </div>
 
-          {!editing ? (
+          {!editing && ctx.ambassadorSeats ? (
             <fieldset>
               <legend className="mb-1.5 text-sm font-medium text-ink">Tier</legend>
               <div className="grid gap-2 sm:grid-cols-2">

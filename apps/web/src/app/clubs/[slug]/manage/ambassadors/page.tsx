@@ -2,23 +2,26 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { loadClubWorkspace } from "@/lib/clubs/context";
+import { AMBASSADOR_REQUEST } from "@/lib/ambassadors/rules";
 import { isClubRepSeat } from "@/lib/roles/defaults";
 import { fmtMonthRange } from "@/lib/roles/history";
 import { Avatar } from "@/components/ui/avatar";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Callout, PageHeader, Section, Stat } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
-import { Placements, type CollegeClub, type Rep } from "./_components/Placements";
+import { Placements, type ClubRequest, type CollegeClub, type Rep } from "./_components/Placements";
 
 export const metadata = { title: "Ambassador placements" };
 
 /**
  * College Ambassadors orgs embed their Club Representative Ambassadors in the
  * college's clubs. Each placement is an AMBASSADOR role in the club's
- * "College Ambassador" seat, linked back to this org.
+ * "College Ambassador" seat, linked back to this org. Clubs ask for one from
+ * their org chart; open requests come first here (domain/ambassadors).
  */
-export default async function AmbassadorPlacementsPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function AmbassadorPlacementsPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { slug } = await params;
+  const showRequested = (await searchParams).requested === "1";
   const { club: org, access, allowed } = await loadClubWorkspace(slug, "roster");
   if (org.type !== "COLLEGE_AMBASSADORS") notFound();
   if (!allowed) {
@@ -40,7 +43,7 @@ export default async function AmbassadorPlacementsPage({ params }: { params: Pro
     );
   }
 
-  const [clubs, placements, orgRoles] = await Promise.all([
+  const [clubs, placements, orgRoles, requestTasks] = await Promise.all([
     db.club.findMany({
       where: { collegeId: org.collegeId, status: "APPROVED", type: { not: "COLLEGE_AMBASSADORS" }, id: { not: org.id } },
       orderBy: { name: "asc" },
@@ -55,7 +58,16 @@ export default async function AmbassadorPlacementsPage({ params }: { params: Pro
       where: { clubId: org.id, endedAt: null, role: "AMBASSADOR", user: { status: "ACTIVE", kind: "STUDENT" } },
       include: { position: { select: { role: true, name: true } }, user: { select: { id: true, name: true, handle: true, avatarUrl: true, avatarColor: true } } },
     }),
+    db.task.findMany({
+      where: { sourceType: AMBASSADOR_REQUEST, status: "OPEN", clubId: org.id },
+      orderBy: { createdAt: "asc" },
+      select: { sourceId: true, createdAt: true, description: true, createdBy: { select: { name: true } } },
+    }),
   ]);
+  const requests: Record<string, ClubRequest> = {};
+  for (const t of requestTasks) {
+    if (t.sourceId && !requests[t.sourceId]) requests[t.sourceId] = { at: t.createdAt.toISOString(), note: t.description ?? null, byName: t.createdBy?.name ?? null };
+  }
 
   const collegeClubs: CollegeClub[] = clubs.map((c) => ({
     id: c.id,
@@ -86,10 +98,11 @@ export default async function AmbassadorPlacementsPage({ params }: { params: Pro
         description={`Embed ${org.name}'s club representatives in ${org.college.name} clubs. Each one shows on that club's org chart as its College Ambassador.`}
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Clubs in the college" value={collegeClubs.length} />
         <Stat label="With an ambassador" value={covered} hint={collegeClubs.length ? `${Math.round((covered / collegeClubs.length) * 100)}% coverage` : undefined} />
         <Stat label="Need one" value={collegeClubs.length - covered} />
+        <Stat label="Asked for one" value={Object.keys(requests).length} />
         <Stat label="Club reps" value={reps.length} />
       </div>
 
@@ -103,7 +116,7 @@ export default async function AmbassadorPlacementsPage({ params }: { params: Pro
         </Callout>
       ) : null}
 
-      <Placements orgId={org.id} orgName={org.name} clubs={collegeClubs} reps={reps} />
+      <Placements orgId={org.id} orgName={org.name} clubs={collegeClubs} reps={reps} requests={requests} initialFilter={showRequested && Object.keys(requests).length ? "requested" : "all"} />
 
       {reps.length ? (
         <Section title="Your club representatives" description="Who represents the college where.">

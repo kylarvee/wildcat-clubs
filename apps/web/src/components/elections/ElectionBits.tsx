@@ -1,14 +1,26 @@
-import type { ElectionStatus } from "@prisma/client";
+import type { ElectionStatus, SuccessionMethod } from "@prisma/client";
 import { Check, Trophy } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { format } from "date-fns";
-import { ELECTION_STATUS_LABEL, ELECTION_STATUS_TONE } from "@/lib/roles/labels";
+import { selectionStatus, SUCCESSION_NAME } from "@/lib/roles/labels";
 import { fmtRange, inCampusTime } from "@/lib/time";
 
-export function ElectionStatusBadge({ status }: { status: ElectionStatus }) {
-  return <Badge tone={ELECTION_STATUS_TONE[status]}>{ELECTION_STATUS_LABEL[status]}</Badge>;
+/** A selection's status in its mode's own words ("Voting open", "Waiting for answers", "Waiting to confirm"…). */
+export function ElectionStatusBadge({ status, method, proposedCandidateId }: { status: ElectionStatus; method: SuccessionMethod; proposedCandidateId?: string | null }) {
+  const s = selectionStatus({ status, method, proposedCandidateId });
+  return <Badge tone={s.tone}>{s.label}</Badge>;
+}
+
+/** Which of the four ways this seat is being filled. */
+export function MethodBadge({ method, primary }: { method: SuccessionMethod; primary?: boolean }) {
+  return (
+    <Badge tone="neutral" title={primary ? "The club's primary method" : undefined}>
+      {SUCCESSION_NAME[method]}
+      {primary ? <span className="sr-only"> (the club&apos;s primary method)</span> : null}
+    </Badge>
+  );
 }
 
 /** "Thu, Oct 16 at 6:30 PM" in campus time. */
@@ -16,33 +28,54 @@ export function fmtWhen(d: Date) {
   return format(inCampusTime(d), "EEE, MMM d 'at' h:mm a");
 }
 
-/** Nominations → voting → results, with where the election is now. */
-export function ElectionTimeline({
-  status,
-  createdAt,
-  votingOpensAt,
-  votingClosesAt,
-  appliedAt,
-}: {
-  status: ElectionStatus;
-  createdAt: Date;
-  votingOpensAt: Date;
-  votingClosesAt: Date;
-  appliedAt: Date | null;
-}) {
+type Step = { label: string; detail: string };
+
+function stepsFor(p: { status: ElectionStatus; method: SuccessionMethod; createdAt: Date; votingOpensAt: Date; votingClosesAt: Date; appliedAt: Date | null; proposedAt: Date | null }): { steps: Step[]; at: number } {
+  const closed = p.status === "CLOSED" || p.status === "APPLIED";
+  const filled: Step = { label: "Seat filled", detail: p.appliedAt ? fmtWhen(p.appliedAt) : "Once it's confirmed in the org chart" };
+  if (p.method === "ADVISOR_PRESIDENT") {
+    const at = p.status === "APPLIED" ? 3 : p.proposedAt ? 1 : 0;
+    return {
+      at: p.status === "CANCELLED" ? -1 : at,
+      steps: [
+        { label: "Candidates", detail: `From the org chart, ${fmtWhen(p.createdAt)}` },
+        { label: "Proposed", detail: p.proposedAt ? fmtWhen(p.proposedAt) : `By the President or an advisor, by ${fmtWhen(p.votingClosesAt)}` },
+        { label: "Confirmed", detail: p.appliedAt ? fmtWhen(p.appliedAt) : "By the other of the two" },
+      ],
+    };
+  }
+  if (p.method === "NEXT_IN_LINE") {
+    const order: ElectionStatus[] = ["VOTING", "CLOSED", "APPLIED"];
+    return {
+      at: p.status === "CANCELLED" ? -1 : order.indexOf(p.status) + 1,
+      steps: [
+        { label: "Asked", detail: fmtWhen(p.createdAt) },
+        { label: "Answers", detail: closed ? `Closed ${fmtWhen(p.votingClosesAt)}` : `Due ${fmtWhen(p.votingClosesAt)}` },
+        { label: "Result", detail: closed ? "The first in line who said yes" : `After ${fmtWhen(p.votingClosesAt)}` },
+        filled,
+      ],
+    };
+  }
   const order: ElectionStatus[] = ["NOMINATING", "VOTING", "CLOSED", "APPLIED"];
-  const at = status === "CANCELLED" ? -1 : order.indexOf(status);
-  const steps = [
-    { label: "Nominations", detail: `Opened ${fmtWhen(createdAt)}`, i: 0 },
-    { label: "Voting", detail: fmtRange(votingOpensAt, votingClosesAt), i: 1 },
-    { label: "Results", detail: status === "CLOSED" || status === "APPLIED" ? `Closed ${fmtWhen(votingClosesAt)}` : `After ${fmtWhen(votingClosesAt)}`, i: 2 },
-    { label: "Applied to the org chart", detail: appliedAt ? fmtWhen(appliedAt) : "Once results are confirmed", i: 3 },
-  ];
+  return {
+    at: p.status === "CANCELLED" ? -1 : order.indexOf(p.status),
+    steps: [
+      { label: p.method === "SELF_SELECT" ? "Candidates" : "Nominations", detail: `Opened ${fmtWhen(p.createdAt)}` },
+      { label: p.method === "SELF_SELECT" ? "Leaders vote" : "Voting", detail: fmtRange(p.votingOpensAt, p.votingClosesAt) },
+      { label: "Results", detail: closed ? `Closed ${fmtWhen(p.votingClosesAt)}` : `After ${fmtWhen(p.votingClosesAt)}` },
+      filled,
+    ],
+  };
+}
+
+/** Where a selection is now, in its mode's steps (nominations → voting → results → filled, and so on). */
+export function ElectionTimeline(p: { status: ElectionStatus; method: SuccessionMethod; createdAt: Date; votingOpensAt: Date; votingClosesAt: Date; appliedAt: Date | null; proposedAt?: Date | null }) {
+  const { steps, at } = stepsFor({ ...p, proposedAt: p.proposedAt ?? null });
   return (
-    <ol className="grid gap-3 sm:grid-cols-4" aria-label="Election timeline">
-      {steps.map((s) => {
-        const done = at > s.i;
-        const current = at === s.i;
+    <ol className={cn("grid gap-3", steps.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-4")} aria-label="Timeline">
+      {steps.map((s, i) => {
+        const done = at > i;
+        const current = at === i;
         return (
           <li key={s.label} className={cn("rounded-xl border px-3 py-2.5", current ? "border-brand bg-brand-50" : done ? "border-line bg-surface" : "border-dashed border-line-2 bg-surface")} aria-current={current ? "step" : undefined}>
             <p className={cn("flex items-center gap-1.5 text-sm font-semibold", current ? "text-brand" : done ? "text-ink" : "text-ink-3")}>

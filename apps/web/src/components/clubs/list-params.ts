@@ -6,10 +6,12 @@ import { CLUB_CATEGORIES, CLUB_SCOPES, CLUB_TYPES } from "@/components/clubs/lab
  * shareable link. Server pages and the client filter bar both parse it here.
  */
 
-export const CLUB_SORTS = ["name", "rating", "members", "retention", "activity", "college", "major", "type"] as const;
+export const CLUB_SORTS = ["recommended", "relevance", "name", "rating", "members", "retention", "activity", "college", "major", "type"] as const;
 export type ClubSort = (typeof CLUB_SORTS)[number];
 
 export const SORT_LABEL: Record<ClubSort, string> = {
+  recommended: "Recommended",
+  relevance: "Best match",
   name: "Name",
   rating: "Student rating",
   members: "Active members",
@@ -22,6 +24,8 @@ export const SORT_LABEL: Record<ClubSort, string> = {
 
 /** Numbers read best high → low; words read best A → Z. */
 export const SORT_DEFAULT_DIR: Record<ClubSort, "asc" | "desc"> = {
+  recommended: "desc",
+  relevance: "desc",
   name: "asc",
   rating: "desc",
   members: "desc",
@@ -31,6 +35,16 @@ export const SORT_DEFAULT_DIR: Record<ClubSort, "asc" | "desc"> = {
   major: "asc",
   type: "asc",
 };
+
+/** Ranked sorts (lib/search/rank) always list the best first, so they take no direction. */
+export function isRankedSort(sort: ClubSort): sort is "recommended" | "relevance" {
+  return sort === "recommended" || sort === "relevance";
+}
+
+/** The order a list gets when the URL doesn't name one: Best match while searching, Recommended otherwise. */
+export function defaultSort(q: string): ClubSort {
+  return q ? "relevance" : "recommended";
+}
 
 export const STATUS_FILTERS = ["active", "pilot", "inactive"] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -67,11 +81,16 @@ function oneOf<T extends string>(value: string | undefined, options: readonly T[
 }
 
 export function parseClubListParams(raw: Raw): ClubListParams {
-  const sort = oneOf(get(raw, "sort"), CLUB_SORTS) ?? "name";
-  const dir = oneOf(get(raw, "dir"), ["asc", "desc"] as const) ?? SORT_DEFAULT_DIR[sort];
+  const q = (get(raw, "q") ?? "").trim().slice(0, 100);
+  const askedDir = oneOf(get(raw, "dir"), ["asc", "desc"] as const);
+  // Links from before Recommended existed: a direction without a sort meant the A–Z list.
+  let sort: ClubSort = oneOf(get(raw, "sort"), CLUB_SORTS) ?? (askedDir ? "name" : defaultSort(q));
+  // Best match needs something to match.
+  if (sort === "relevance" && !q) sort = "recommended";
+  const dir = isRankedSort(sort) ? "desc" : (askedDir ?? SORT_DEFAULT_DIR[sort]);
   const college = get(raw, "college");
   return {
-    q: (get(raw, "q") ?? "").trim().slice(0, 100),
+    q,
     type: oneOf(get(raw, "type"), CLUB_TYPES),
     category: oneOf(get(raw, "category"), CLUB_CATEGORIES),
     college: college && /^[a-z0-9-]{1,80}$/.test(college) ? college : null,
@@ -88,8 +107,12 @@ export function parseClubListParams(raw: Raw): ClubListParams {
 /** Builds a /clubs URL, leaving defaults out so links stay short. */
 export function clubListHref(p: ClubListParams, patch: Partial<ClubListParams> = {}): string {
   const n = { ...p, ...patch };
+  // A new search (or clearing it) moves a list that was in its default order to the new default: Best match ⇄ Recommended.
+  if (patch.q !== undefined && !patch.sort && p.sort === defaultSort(p.q)) n.sort = defaultSort(n.q);
+  if (n.sort === "relevance" && !n.q) n.sort = "recommended";
   // Changing the sort resets the direction to that sort's natural one unless one was given.
-  if (patch.sort && !patch.dir) n.dir = SORT_DEFAULT_DIR[patch.sort];
+  if (patch.sort && !patch.dir) n.dir = SORT_DEFAULT_DIR[n.sort];
+  if (isRankedSort(n.sort)) n.dir = "desc";
   const s = new URLSearchParams();
   if (n.q) s.set("q", n.q);
   if (n.type) s.set("type", n.type);
@@ -99,7 +122,7 @@ export function clubListHref(p: ClubListParams, patch: Partial<ClubListParams> =
   if (n.status) s.set("status", n.status);
   if (n.mine) s.set("mine", "1");
   if (n.archived) s.set("archived", "1");
-  if (n.sort !== "name") s.set("sort", n.sort);
+  if (n.sort !== defaultSort(n.q)) s.set("sort", n.sort);
   if (n.dir !== SORT_DEFAULT_DIR[n.sort]) s.set("dir", n.dir);
   if (n.view !== "grid") s.set("view", n.view);
   const qs = s.toString();

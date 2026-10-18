@@ -6,12 +6,15 @@
 // See ARCHITECTURE.md → "Data ownership" for which tool owns which table.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  /// pg_trgm: fuzzy club-name matching in the club search engine (lib/search); unaccent: accent-insensitive search.
+  extensions = [pg_trgm, unaccent]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -324,10 +327,18 @@ enum JoinPolicy {
   APPROVAL
 }
 
+/// How a club fills a leadership seat: the four modes of the leadership
+/// pipeline (lib/domain/elections). A club's constitution names its primary
+/// mode (Club.successionMethod); leaders may use any mode for a given seat.
 enum SuccessionMethod {
-  SENIORITY
+  /// Next in line: the people in the seat just below may move up; the first in pipeline order who says yes does.
+  NEXT_IN_LINE
+  /// Self-select: the club's current leaders choose, unanimously.
+  SELF_SELECT
+  /// All active members vote.
   MEMBER_VOTE
-  LEADERSHIP_VOTE
+  /// The advisor and the President choose together (one proposes, the other confirms). The default.
+  ADVISOR_PRESIDENT
 }
 
 model Club {
@@ -354,11 +365,14 @@ model Club {
   googleAccountVerifiedAt   DateTime?
   googleAccountVerifiedById String?
   joinPolicy                JoinPolicy       @default(OPEN)
-  successionMethod          SuccessionMethod @default(SENIORITY)
+  successionMethod          SuccessionMethod @default(ADVISOR_PRESIDENT)
   autoApproveCohosts        Boolean          @default(false)
   createdById               String
   createdBy                 User             @relation("ClubCreator", fields: [createdById], references: [id])
   createdAt                 DateTime         @default(now())
+  /// Any change to the club row; the search index (lib/search) uses it to know what's stale.
+  updatedAt                 DateTime         @default(now()) @updatedAt
+  searchDoc                 ClubSearchDoc?
   submittedAt               DateTime?
   approvedAt                DateTime?
   retiredAt                 DateTime?
@@ -473,7 +487,7 @@ model ConstitutionDraft {
   owner            User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   title            String
   data             Json
-  successionMethod SuccessionMethod @default(SENIORITY)
+  successionMethod SuccessionMethod @default(ADVISOR_PRESIDENT)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   documents        ClubDocument[]
@@ -1280,35 +1294,46 @@ enum ElectionStatus {
 }
 
 model Election {
-  id             String              @id @default(cuid())
-  clubId         String
-  club           Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  positionId     String
-  position       Position            @relation(fields: [positionId], references: [id])
-  title          String
-  method         SuccessionMethod // MEMBER_VOTE or LEADERSHIP_VOTE
-  status         ElectionStatus      @default(NOMINATING)
-  votingOpensAt  DateTime
-  votingClosesAt DateTime
-  winnerId       String?
-  createdById    String
-  createdBy      User                @relation(fields: [createdById], references: [id])
-  createdAt      DateTime            @default(now())
-  appliedAt      DateTime?
-  candidates     ElectionCandidate[]
-  votes          Vote[]
+  id                  String              @id @default(cuid())
+  clubId              String
+  club                Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  positionId          String
+  position            Position            @relation(fields: [positionId], references: [id])
+  title               String
+  /// Which pipeline mode fills the seat this time (defaults to the club's primary mode).
+  method              SuccessionMethod
+  status              ElectionStatus      @default(NOMINATING)
+  /// ADVISOR_PRESIDENT: the choice one of them proposed, and the other's confirmation.
+  proposedCandidateId String?
+  proposedById        String?
+  proposedAt          DateTime?
+  confirmedById       String?
+  confirmedAt         DateTime?
+  votingOpensAt       DateTime
+  votingClosesAt      DateTime
+  winnerId            String?
+  createdById         String
+  createdBy           User                @relation(fields: [createdById], references: [id])
+  createdAt           DateTime            @default(now())
+  appliedAt           DateTime?
+  candidates          ElectionCandidate[]
+  votes               Vote[]
 }
 
 model ElectionCandidate {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   electionId    String
-  election      Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  election      Election  @relation(fields: [electionId], references: [id], onDelete: Cascade)
   userId        String
-  user          User     @relation("Candidate", fields: [userId], references: [id], onDelete: Cascade)
+  user          User      @relation("Candidate", fields: [userId], references: [id], onDelete: Cascade)
   statement     String?
   nominatedById String
-  nominatedBy   User     @relation("Nominator", fields: [nominatedById], references: [id])
-  createdAt     DateTime @default(now())
+  nominatedBy   User      @relation("Nominator", fields: [nominatedById], references: [id])
+  /// Added automatically from the org chart (the leadership pipeline), not nominated.
+  fromPipeline  Boolean   @default(false)
+  /// NEXT_IN_LINE: when they said yes to moving up (null = hasn't answered; declining withdraws them).
+  acceptedAt    DateTime?
+  createdAt     DateTime  @default(now())
   votes         Vote[]
 
   @@unique([electionId, userId])
@@ -1600,4 +1625,32 @@ enum ClubCategory {
   SERVICE_ADVOCACY
   STUDENT_LIFE
   RELIGIOUS
+}
+
+// ─── Club search ─────────────────────────────────────────────────────────────
+
+/// Derived, never edited: what the club search engine (lib/search) matches
+/// against, rebuilt from the club's own visible content by lib/search/index-build.
+/// Only PUBLIC content goes in publicDoc; campusDoc adds what any signed-in
+/// Weber State account may see. Members- and leaders-only content never goes in.
+model ClubSearchDoc {
+  clubId    String                   @id
+  club      Club                     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  publicDoc Unsupported("tsvector")?
+  campusDoc Unsupported("tsvector")?
+  /// The pieces snippets come from: [{ kind, title, text, href, campusOnly }]
+  passages  Json                     @default("[]")
+  indexedAt DateTime                 @default(now())
+}
+
+/// What people type into the clubs search, with no account attached, so WSUSA
+/// can see what students look for and don't find.
+model SearchQuery {
+  id       String   @id @default(cuid())
+  query    String
+  results  Int
+  signedIn Boolean
+  at       DateTime @default(now())
+
+  @@index([at])
 }

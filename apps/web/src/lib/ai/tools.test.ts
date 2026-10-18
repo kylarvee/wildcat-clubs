@@ -9,7 +9,7 @@ describe("tool registry", () => {
     for (const n of ["search_clubs", "get_club", "my_clubs_and_roles", "my_profile", "my_tasks", "my_calendar", "my_attendance", "list_policies", "get_policy", "explain_permissions", "event_details"]) {
       expect(findTool(n)?.kind).toBe("read");
     }
-    for (const n of ["join_club", "subscribe_calendar", "unsubscribe_calendar", "add_personal_task", "update_my_profile", "add_event_idea", "create_event", "post_announcement", "start_club_draft", "invite_advisor", "assign_role"]) {
+    for (const n of ["join_club", "subscribe_calendar", "unsubscribe_calendar", "add_personal_task", "update_my_profile", "create_event", "post_announcement", "start_club_draft", "invite_advisor", "assign_role"]) {
       expect(findTool(n)?.kind).toBe("write");
     }
     expect(new Set(names).size).toBe(names.length);

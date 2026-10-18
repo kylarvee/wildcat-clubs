@@ -55,13 +55,17 @@ ADVISOR    (faculty/staff, @weber.edu) everything in the clubs they advise
 PRESIDENT  everything in their club, incl. naming a successor/co-president and retiring the club
 VP         everything the president can, except assigning President/VP or retiring
 OFFICER    the capabilities on their seat (chosen when promoted; defaults per seat)
-AMBASSADOR like an officer; no capabilities unless the club grants them
+AMBASSADOR like an officer; no capabilities unless the club grants them. In a regular club, only
+           the college's ambassador program fills this seat (clubs ask for one)
 MEMBER     member features (calendar, chat, reviews once eligible)
 PUBLIC     clubs list, club pages (public parts), network canvas, public calendar, policies
 ```
 
 * **Role rule:** you may assign only roles ranked below yours; the President may also name a
-  President. (So a VP can't promote themself or backfill VP; officers assign nothing.)
+  President. (So a VP can't promote themself or backfill VP; officers assign nothing.) Nobody
+  assigns AMBASSADOR in a regular club: those seats are filled by placement from the college's
+  ambassador program, though the club's President/VPs may set a placed ambassador's capabilities
+  or end the placement.
 * **Capabilities** (modular officer permissions): `profile, roster, orgchart, events, attendance,
   budget, files, announcements, elections, constitution, tests`.
 * **Club phase:** founding clubs (DRAFT/SUBMITTED/CHANGES_REQUESTED) only have `profile, orgchart,
@@ -86,6 +90,8 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | Membership | Register button (web/mobile) **or** check-in auto-enroll — both call `memberships.joinClub()`; roster tool approves | everywhere |
 | Calendar subscriptions | Subscribe toggle (club pages, dashboard) | united calendar, ICS feeds |
 | Roles & seats | Org Chart tool (`roles.assignRole`); elections & hand-offs apply through it | org chart, profiles, role history |
+| College Ambassador placements | The program's Ambassador placements page (`roles.placeAmbassador`); clubs ask with **Request a college ambassador** (`ambassadors.requestAmbassador`) | org charts, the program's placements, inboxes |
+| An ambassador program's advisor | Admin → Club reviews → Ambassador programs (`ambassadors.setAmbassadorAdvisor`) | the program's org chart and settings |
 | Events, schedule, location, co-hosts, **event costs** | Events Builder | calendars, ICS, club page, budget, attendance |
 | Attendance | Attendance Tool only (QR scan, the code shown at the event, one-tap for online events, leader manual add) | tracker, activity, reviews gate, network, clubs list |
 | General costs & funding requests | Funding & Budgeting tool | admin approvals, invoices |
@@ -131,7 +137,7 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 | Critical WSUSA tasks members or leaders must fill out | No second tool: a WSUSA **form** is a Test-Tool test with grading off, required through Admin → Requirements (members, leader roles or both). Anything WSUSA requires or assigns is a `required` task: first in every list, its own card on /tasks, a badge on the dashboard, the top of mobile Home. Only leaders can be gated; overdue members just see it overdue. A new requirement's clock starts the day it's added, so nobody starts out overdue. |
 | VP permissions vs. role assignment | Rank rule: assign only below your rank; President may also name a President. |
 | Auto-enroll on check-in vs. membership gates | Check-in always records attendance. Open clubs: you become a member. Gated clubs: a join request is filed. |
-| Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`), started by an admin (Admin → Club reviews → Ambassador programs). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. |
+| Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`), started only by an admin (Admin → Club reviews → Ambassador programs; students can't found one). The admin also appoints its **advisor** there: one faculty/staff member per program, the college's point person, who runs its elections and leadership pipeline with its President (`ambassadors.setAmbassadorAdvisor`; programs take no advisor invitations). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. A club can't fill its own College Ambassador seat: its leaders press **Request a college ambassador** on the org chart, which files an APPROVAL task in the program's inbox (`sourceType` `ambassadorRequest`, `sourceId` = the club, one open at a time). It closes when the program places someone, declines with a note, or the club withdraws it. |
 | Calendar subscription vs. registration | Separate. Registering subscribes you; you can subscribe without registering (once signed in). |
 | Club "college" field (some independent / university-wide / sports) | `scope` = College · University-wide · Independent · Sports; `collegeId` only for College. |
 | Department "Other" | Founder types it (`requestedDepartmentName`); an admin task adds it to the list and links the club. |
@@ -139,6 +145,8 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 | Anonymous reports | No reporter id is stored at all; the reporter gets a case code to check status. Every opening by an admin requires acknowledging the anonymity notice and is logged. Never in notifications, the activity log, exports or the AI. |
 | Review bombing | Reviews need ≥3 attended events (sysadmin-set, uniform). One review per person per club. ≥3 ratings ≤2★ within 48h opens an admin task. Admins can hide reviews; members can flag. |
 | Secret ballots | Votes record voter (one vote each) but no screen ever joins voter to choice. Results apply through the Org Chart path. |
+| How leaders are chosen (seniority vs. votes vs. appointment) | Every org chart is a **leadership pipeline** (`lib/roles/pipeline`): President → Vice President → officer seats in order → members. The college's ambassador seats sit outside a regular club's pipeline. Filling a seat is one selection on the Election lifecycle, in one of four modes: **Advisor & President** (the default; one proposes, the other confirms, no ballots), **Next in line** (the seats just below are asked; the first in line who says yes moves up), **Self-select** (current leaders' secret ballot; counts only if unanimous; no one votes for themselves) and **Member vote** (active members' secret ballot). People below the seat start as candidates. A club's constitution names its primary mode (`successionMethod`), and the President and advisor may use any other mode for a given seat. Results apply through `roles.assignRole`/`endRoleAssignment`, and whoever moves up leaves their old seat. |
+| Club search (names only vs. what's on the page) | One engine (`lib/search`) serves /clubs, the mobile clubs list and the assistant. Each approved club's visible content is a weighted Postgres full-text document in two versions: public, and public plus "Weber State only". That content is the name and acronym, labels, descriptions, seats, events, public announcements, constitution, reviews and public file names. Members- and leaders-only content never goes in. Ranking = relevance (with a query) + popularity from `lib/metrics` + personal signals (majors, co-members, attendance, follows). Each card shows at most two reasons, and they only ever give counts. "Found in …" snippets show where a match came from. Writes reindex their club right away and the "Club search" job catches the rest. Searches are logged with no account attached, so WSUSA can see what students look for and don't find. |
 | LinkedIn auto-populate | LinkedIn has no open profile API. Import the **Positions.csv** from LinkedIn's "Get a copy of your data" export. |
 | Google Chat / Drive / Calendar | Built on our own tables now (works with no Google setup); adapters mirror to Workspace when a sysadmin turns each integration on. |
 
@@ -158,6 +166,8 @@ lib/auth/                 sessions (cookie + bearer), Google sign-in, accounts, 
 lib/authz/                THE permission authority (+ requirement gating, capability holders)
 lib/domain/               THE write path (one module per area) + kit.ts conventions
 lib/metrics/              derived numbers (read-only)
+lib/search/               club search: index build, matching, ranking (pure), snippets, query log
+lib/roles/pipeline.ts     leadership pipeline order and the four selection modes' rules (pure)
 lib/lake/activity.ts      the activity stream
 lib/integrations/         Google, email, push, Anthropic adapters (mock when off)
 lib/events/recurrence.ts  recurrence expansion (semester-aware)

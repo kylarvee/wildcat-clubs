@@ -57,7 +57,7 @@ function inviteEmailBody(input: { name: string; inviterName: string; clubName: s
     "What advising means:",
     "• You guide the club's student leaders and help them follow university policy.",
     `• You review the club's budget and funding requests and are a contact for ${INSTITUTION.studentGovernment}.`,
-    `• You get full access to the club's tools in ${PLATFORM.name}. You don't vote in club elections.`,
+    `• You get full access to the club's tools in ${PLATFORM.name}. By default, you and the President choose the club's leaders together. You don't vote when members elect them.`,
     "• Most advisors meet with club leaders a few times a semester and attend major events when they can.",
     "",
     `Open the link below to read more and accept or decline. If you don't have a ${PLATFORM.name} account yet, sign in with your @${INSTITUTION.staffEmailDomain} Google account and one is created for you.`,

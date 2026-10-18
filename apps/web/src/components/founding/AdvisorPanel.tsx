@@ -23,12 +23,15 @@ export function AdvisorPanel({
   advisors,
   invites,
   staffDomain,
+  noInviteNote,
 }: {
   clubId: string;
   canInvite: boolean;
   advisors: AdvisorRow[];
   invites: PendingInviteRow[];
   staffDomain: string;
+  /** Shown instead of the invite form when nobody here can invite (e.g. WSUSA appoints an ambassador program's advisor). */
+  noInviteNote?: string;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +129,11 @@ export function AdvisorPanel({
       ) : null}
 
       {!canInvite ? (
-        advisors.length === 0 ? <p className="text-sm text-ink-3">Your President, Vice President or advisor can invite an advisor.</p> : null
+        noInviteNote ? (
+          <p className="text-sm text-ink-3">{noInviteNote}</p>
+        ) : advisors.length === 0 ? (
+          <p className="text-sm text-ink-3">Your President, Vice President or advisor can invite an advisor.</p>
+        ) : null
       ) : showForm ? (
         <form onSubmit={inviteForm.onSubmit} className="space-y-3 rounded-xl border border-line bg-muted/30 p-4" noValidate aria-busy={inviteForm.pending}>
           <div className="grid gap-3 sm:grid-cols-2">

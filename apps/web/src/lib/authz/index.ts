@@ -136,8 +136,9 @@ export type ClubAccess = {
 };
 
 const computeClubAccess = cache(async (actorId: string | null, platformRole: string | null, clubId: string): Promise<ClubAccess | null> => {
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, status: true, approvedAt: true } });
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { id: true, status: true, approvedAt: true, type: true } });
   if (!club) return null;
+  const ambassadorOrg = club.type === "COLLEGE_AMBASSADORS";
 
   const viaPlatform = platformRole === "ADMIN" || platformRole === "SYSADMIN" ? (platformRole as "ADMIN" | "SYSADMIN") : null;
 
@@ -174,7 +175,7 @@ const computeClubAccess = cache(async (actorId: string | null, platformRole: str
   for (const c of [...caps]) if (!allowed.has(c)) caps.delete(c);
 
   const effective = suspended ? -1 : rank;
-  const assignableRoles: ClubRole[] =
+  const ranked: ClubRole[] =
     full && club.status !== "RETIRED"
       ? ["PRESIDENT", "VP", "OFFICER", "AMBASSADOR"]
       : role === "PRESIDENT" && effective >= 0 && club.status !== "RETIRED"
@@ -182,6 +183,8 @@ const computeClubAccess = cache(async (actorId: string | null, platformRole: str
         : role === "VP" && effective >= 0 && club.status !== "RETIRED"
           ? ["OFFICER", "AMBASSADOR"]
           : [];
+  // A regular club's ambassador seats are filled only by its college's ambassador program (roles.placeAmbassador).
+  const assignableRoles = ambassadorOrg ? ranked : ranked.filter((r) => r !== "AMBASSADOR");
 
   return {
     clubId,
@@ -197,7 +200,8 @@ const computeClubAccess = cache(async (actorId: string | null, platformRole: str
     suspended,
     assignableRoles,
     canRetire: club.status !== "RETIRED" && (full || (role === "PRESIDENT" && !suspended)),
-    canInviteAdvisor: club.status !== "RETIRED" && (full || ((role === "PRESIDENT" || role === "VP") && !suspended)),
+    // WSUSA appoints an ambassador program's advisor (ambassadors.setAmbassadorAdvisor); nobody invites one.
+    canInviteAdvisor: club.status !== "RETIRED" && !ambassadorOrg && (full || ((role === "PRESIDENT" || role === "VP") && !suspended)),
   };
 });
 

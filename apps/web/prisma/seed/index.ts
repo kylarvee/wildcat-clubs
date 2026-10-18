@@ -25,6 +25,7 @@ import { buildAnnouncements, buildElections, buildMessaging, buildReviews, build
 import { buildFunding } from "./steps/money";
 import { buildFiles } from "./steps/files";
 import { buildInbox } from "./steps/inbox";
+import { buildSearch } from "./steps/search";
 import { printSummary } from "./summary";
 
 async function truncateAll(db: PrismaClient) {
@@ -66,6 +67,7 @@ async function main() {
     log(`Built in ${((Date.now() - started) / 1000).toFixed(1)}s — writing…`);
 
     await insertAll(db, ctx, ref, users, log);
+    await buildSearch(db, ctx, log);
     await printSummary(db, ctx, log);
     log(`Done in ${((Date.now() - started) / 1000).toFixed(1)}s.`);
   } finally {

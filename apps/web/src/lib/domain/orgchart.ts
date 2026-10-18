@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, conflict, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createDefaultPositions } from "@/lib/domain/roles";
 import { seatsFor } from "@/lib/roles/defaults";
+import { reindexClubSoon } from "@/lib/search/fresh";
 
 /**
  * Org chart seats — the structure, not the people. Seats are edited here by
@@ -15,8 +16,10 @@ import { seatsFor } from "@/lib/roles/defaults";
  * through lib/domain/roles (assignRole, hand-offs, elections, placements).
  *
  * Rules kept deliberately simple:
- *   - New seats are OFFICER or AMBASSADOR. President and VP seats come with
- *     every club, are "core", and can be renamed but never archived.
+ *   - New seats are OFFICER, or AMBASSADOR in a college's ambassador program.
+ *     A regular club's ambassador seat is filled by that program (see
+ *     domain/ambassadors). President and VP seats come with every club, are
+ *     "core", and can be renamed but never archived.
  *   - A seat's role never changes after creation (it would rewrite history).
  *   - A seat can't be archived while someone holds it or an election for it
  *     is still running; its history stays either way.
@@ -79,6 +82,7 @@ export async function startDefaultSeats(actor: Actor | null, clubId: string) {
   if (existing > 0) throw conflict("This club already has seats. Use “Restore defaults” to bring back missing ones.");
   await createDefaultPositions(clubId, club.type);
   await logActivity({ actorId: actor!.id, action: "orgchart.defaults_started", entityType: "club", entityId: clubId, clubId });
+  reindexClubSoon(clubId);
 }
 
 /**
@@ -136,6 +140,7 @@ export async function restoreDefaultSeats(actor: Actor | null, clubId: string) {
     const custom = seats.filter((s) => !used.has(s.id)).sort(seatSort);
     for (const [j, s] of custom.entries()) await tx.position.update({ where: { id: s.id }, data: { sortOrder: templates.length + j } });
     await logActivity({ actorId: actor!.id, action: "orgchart.defaults_restored", entityType: "club", entityId: clubId, clubId, data: { restored } }, tx);
+    reindexClubSoon(clubId);
   });
   return { restored };
 }
@@ -144,6 +149,10 @@ export async function restoreDefaultSeats(actor: Actor | null, clubId: string) {
 export async function createSeat(actor: Actor | null, input: unknown) {
   const v = parse(CreateSeat, input);
   await assertClubCap(actor, v.clubId, "orgchart");
+  if (v.role === "AMBASSADOR") {
+    const club = await db.club.findUnique({ where: { id: v.clubId }, select: { type: true } });
+    if (club?.type !== "COLLEGE_AMBASSADORS") throw invalid("Ambassador seats are filled by your college's ambassador program. Ask it for an ambassador from your org chart instead.");
+  }
   await assertNameFree(v.clubId, v.name);
   const last = await db.position.findFirst({ where: { clubId: v.clubId, role: v.role }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
   const anyLast = await db.position.findFirst({ where: { clubId: v.clubId }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
@@ -159,6 +168,7 @@ export async function createSeat(actor: Actor | null, input: unknown) {
     },
   });
   await logActivity({ actorId: actor!.id, action: "orgchart.seat_created", entityType: "position", entityId: seat.id, clubId: v.clubId, data: { name: seat.name, role: seat.role } });
+  reindexClubSoon(v.clubId);
   return seat;
 }
 
@@ -191,6 +201,7 @@ export async function updateSeat(actor: Actor | null, seatId: string, input: unk
     clubId: seat.clubId,
     data: { name: updated.name, changed: Object.keys(v) },
   });
+  if (updated.name !== seat.name) reindexClubSoon(seat.clubId);
   return updated;
 }
 
@@ -224,6 +235,7 @@ export async function archiveSeat(actor: Actor | null, seatId: string) {
   if (running > 0) throw conflict(`There's an election for ${seat.name} that hasn't finished. Cancel or apply it first.`);
   const updated = await db.position.update({ where: { id: seat.id }, data: { archivedAt: new Date() } });
   await logActivity({ actorId: actor!.id, action: "orgchart.seat_archived", entityType: "position", entityId: seat.id, clubId: seat.clubId, data: { name: seat.name } });
+  reindexClubSoon(seat.clubId);
   return updated;
 }
 
@@ -235,5 +247,6 @@ export async function restoreSeat(actor: Actor | null, seatId: string) {
   await assertNameFree(seat.clubId, seat.name, seat.id);
   const updated = await db.position.update({ where: { id: seat.id }, data: { archivedAt: null } });
   await logActivity({ actorId: actor!.id, action: "orgchart.seat_restored", entityType: "position", entityId: seat.id, clubId: seat.clubId, data: { name: seat.name } });
+  reindexClubSoon(seat.clubId);
   return updated;
 }

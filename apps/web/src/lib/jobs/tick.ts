@@ -3,6 +3,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { advanceElections } from "@/lib/domain/elections";
 import { notifyOverdueRequirements, syncAllRequirementHolders } from "@/lib/domain/requirements";
 import { markMissedAssignments, prefillPendingSuggestions, runTestCycles, submitAbandonedAttempts } from "@/lib/domain/tests";
+import { pruneSearchLog, reindexStale, SEARCH_LOG_DAYS } from "@/lib/search/index-build";
 
 /**
  * CONTRACT (owner: tests & policy builder). Scheduled jobs, run by
@@ -80,6 +81,18 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     await job("Elections", async () => {
       const r = await advanceElections(now);
       return r.advanced ? `Moved ${plural(r.advanced, "election")} to its next stage.` : "No elections were due to open or close.";
+    }),
+  );
+  reports.push(
+    // Catches what the write paths' reindexClubSoon didn't (constitutions, seats, files, renames):
+    // clubs whose content is newer than their search document, plus any document a day old.
+    await job("Club search", async () => {
+      const r = await reindexStale();
+      const pruned = await pruneSearchLog(undefined, now);
+      const parts = [r.indexed ? `Re-indexed ${plural(r.indexed, "club")} whose pages changed` : "Every club's search page was up to date"];
+      if (r.removed) parts.push(`dropped ${plural(r.removed, "club")} no longer listed`);
+      if (pruned) parts.push(`cleared ${plural(pruned, "search")} older than ${SEARCH_LOG_DAYS} days`);
+      return parts.join("; ") + ".";
     }),
   );
   return reports;

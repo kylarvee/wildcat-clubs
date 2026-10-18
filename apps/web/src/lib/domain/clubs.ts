@@ -12,6 +12,7 @@ import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyAdmins } from "@/lib/domain/notify";
 import { guessMime, MAX_UPLOAD_BYTES, putBytes } from "@/lib/files/storage";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
+import { reindexClubSoon } from "@/lib/search/fresh";
 import { SOCIAL_PLATFORMS } from "@/components/clubs/labels";
 
 /**
@@ -350,6 +351,7 @@ export async function updateClubProfile(actor: Actor | null, input: unknown) {
   if (changed.length === 0) return club;
 
   const updated = await db.club.update({ where: { id: club.id }, data });
+  reindexClubSoon(club.id);
 
   // A department request follows what the founder typed: cancel stale ones, file a new one if WSUSA is already involved.
   if (club.requestedDepartmentName !== updated.requestedDepartmentName) {
@@ -491,6 +493,7 @@ export async function addClubDocument(
     data: { clubId: v.clubId, kind: "OTHER", title: v.title, source: "CUSTOM_UPLOAD", status: "ACTIVE", fileId: file.id, createdById: actor!.id },
   });
   await logActivity({ actorId: actor!.id, action: "club.document_added", entityType: "clubDocument", entityId: doc.id, clubId: v.clubId, data: { title: v.title }, isPublic: v.visibility === "PUBLIC" });
+  reindexClubSoon(v.clubId);
   return doc;
 }
 
@@ -502,6 +505,7 @@ export async function removeClubDocument(actor: Actor | null, docId: string) {
   await assertClubCap(actor, doc.clubId, "profile");
   await db.clubDocument.update({ where: { id: doc.id }, data: { status: "SUPERSEDED", decidedAt: new Date() } });
   await logActivity({ actorId: actor.id, action: "club.document_removed", entityType: "clubDocument", entityId: doc.id, clubId: doc.clubId, data: { title: doc.title } });
+  reindexClubSoon(doc.clubId);
 }
 
 export function checkUpload(file: { name: string; bytes: Buffer } | null | undefined, allowed: RegExp, message: string) {
@@ -669,6 +673,8 @@ export async function decideClub(actor: Actor | null, input: unknown) {
     }
     await logActivity({ actorId: actor.id, action: `club.${d.status.toLowerCase()}`, entityType: "club", entityId: club.id, clubId: club.id, data: { note: v.note }, isPublic: v.decision === "APPROVE" }, tx);
   });
+  // Approval puts the club in search; the indexer leaves out (and drops) clubs that aren't approved.
+  reindexClubSoon(club.id);
   if (v.decision !== "APPROVE") {
     await resolveTasks("departmentRequest", club.id, actor.id, db, "CANCELLED");
     await resolveTasks("googleAccount", club.id, actor.id, db, "CANCELLED");
@@ -713,6 +719,7 @@ export async function addDepartmentForClub(actor: Actor | null, clubId: string, 
     await resolveTasks("departmentRequest", club.id, actor.id, tx);
     await logActivity({ actorId: actor.id, action: existing ? "department.linked" : "department.created", entityType: "department", entityId: department.id, clubId: club.id, data: { name: department.name } }, tx);
   });
+  reindexClubSoon(club.id);
   await notify({
     userIds: await clubLeaderIds(club.id, ["PRESIDENT", "VP", "ADVISOR"]),
     kind: "club.department_added",
@@ -774,6 +781,8 @@ export async function retireClub(actor: Actor | null, input: unknown) {
     await tx.clubDecision.create({ data: { clubId: club.id, action: "RETIRED", note: v.reason, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.retired", entityType: "club", entityId: club.id, clubId: club.id, data: { reason: v.reason, previousStatus: club.status }, isPublic: true }, tx);
   });
+  // Retired clubs leave search (the archive keeps its own simple match).
+  reindexClubSoon(club.id);
   // Ended roles: requirements they no longer owe close now (tasks and officer tests), not on the next job tick.
   for (const id of leaders) await reopenRequirementTasks(id);
   await notify({
@@ -818,6 +827,7 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
     await tx.clubDecision.create({ data: { clubId: club.id, action: "REINSTATED", note: v.note, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.reinstated", entityType: "club", entityId: club.id, clubId: club.id, data: { status, restoredRoles: roles.length, restoredMembers: memberships.length }, isPublic: true }, tx);
   });
+  reindexClubSoon(club.id);
   // Leaders get their seats back as new assignments, so the role history shows the gap.
   for (const r of roles) {
     await grantRole({ clubId: r.clubId, userId: r.userId, role: r.role, positionId: r.positionId, permissions: r.permissions, viaClubId: r.viaClubId, assignedById: actor.id });

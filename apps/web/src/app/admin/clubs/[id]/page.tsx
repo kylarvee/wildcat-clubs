@@ -152,7 +152,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                   { label: "Focus", value: club.focusMajor?.name ?? club.focusOther ?? "—" },
                   { label: "Members", value: registered },
                   { label: "Joining", value: JOIN_LABEL[club.joinPolicy] },
-                  { label: "Succession", value: SUCCESSION_LABEL[club.successionMethod] },
+                  { label: "Succession (primary method)", value: SUCCESSION_LABEL[club.successionMethod] },
                 ]}
               />
               {club.descriptionHtml ? (
@@ -229,8 +229,8 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                       ) : null}
                     </div>
                     <p className="text-sm text-ink-2">
-                      Uploaded by {d.createdBy.name} on {fmtLongDate(d.createdAt)}. On approval: leaders chosen by{" "}
-                      <span className="font-medium">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod].split(" — ")[0].toLowerCase() : "(unchanged)"}</span>; joining is{" "}
+                      Uploaded by {d.createdBy.name} on {fmtLongDate(d.createdAt)}. On approval: primary way leaders are chosen,{" "}
+                      <span className="font-medium">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod].split(" — ")[0] : "(unchanged)"}</span>; joining is{" "}
                       <span className="font-medium">{s.joinPolicy ? JOIN_LABEL[s.joinPolicy].split(" — ")[0].toLowerCase() : "(unchanged)"}</span>.
                     </p>
                     {s.note ? <p className="whitespace-pre-line text-sm text-ink-2">“{s.note}”</p> : null}

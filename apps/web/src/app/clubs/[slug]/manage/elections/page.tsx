@@ -1,31 +1,33 @@
 import Link from "next/link";
-import { TZDate } from "@date-fns/tz";
 import { ArrowRight, Vote } from "lucide-react";
 import { db } from "@/lib/db";
-import { ROLE_LABEL } from "@/lib/authz";
 import { getConfig } from "@/lib/config";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { ELECTABLE_ROLES, eligibleVoterIds, electionsAllowed, syncClubElections } from "@/lib/domain/elections";
+import { syncClubElections } from "@/lib/domain/elections";
 import { clubElections } from "@/lib/roles/election-queries";
-import { toCampusLocal } from "@/lib/roles/datetime";
-import { SUCCESSION_LABEL } from "@/lib/roles/labels";
-import { budgetTermFor, getTerms } from "@/lib/terms";
-import { campusDate, DAY_MS, TZ } from "@/lib/time";
-import { ElectionStatusBadge, fmtWhen } from "@/components/elections/ElectionBits";
+import { selectionSetup } from "@/lib/roles/selection-setup";
+import { SUCCESSION_METHODS } from "@/lib/roles/pipeline";
+import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
+import { ElectionStatusBadge, fmtWhen, MethodBadge } from "@/components/elections/ElectionBits";
 import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { cn } from "@/components/ui/cn";
 import { Callout, EmptyState, PageHeader, Section } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
 import { PolicyNotices } from "@/components/policies/PolicyNotices";
-import { CreateElectionDialog, type ElectableSeat } from "./_components/CreateElectionDialog";
+import { CreateElectionDialog } from "./_components/CreateElectionDialog";
 
 export const metadata = { title: "Elections" };
 
-/** A campus-time default: `days` from now at `hour`:00. */
-function campusDefault(days: number, hour: number, from = Date.now()) {
-  const d = new TZDate(from + days * DAY_MS, TZ);
-  return campusDate(d.getFullYear(), d.getMonth() + 1, d.getDate(), hour, 0);
+type Row = Awaited<ReturnType<typeof clubElections>>[number];
+
+/** One line on where a running selection stands, in its mode's terms. */
+function progress(e: Row, extra: { saidYes: number; proposedName: string | null }) {
+  if (e.method === "ADVISOR_PRESIDENT") return extra.proposedName ? `${extra.proposedName} is proposed, waiting to be confirmed` : `Waiting for a proposal · decide by ${fmtWhen(e.votingClosesAt)}`;
+  if (e.method === "NEXT_IN_LINE") return e.status === "VOTING" ? `${extra.saidYes} said yes so far · answers due ${fmtWhen(e.votingClosesAt)}` : "Answers are in — ready to move someone up";
+  if (e.status === "NOMINATING") return `Voting opens ${fmtWhen(e.votingOpensAt)}`;
+  if (e.status === "VOTING") return `Voting closes ${fmtWhen(e.votingClosesAt)}`;
+  return e.method === "SELF_SELECT" ? "Voting closed — see whether it was unanimous" : "Voting closed — ready to apply";
 }
 
 export default async function ManageElectionsPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -40,73 +42,65 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
     );
   }
 
-  if (!electionsAllowed(club.successionMethod)) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="Elections" description={`Succession in ${club.name}: ${SUCCESSION_LABEL[club.successionMethod]}.`} />
-        <EmptyState
-          icon={<Vote />}
-          title="Your bylaws use seniority succession"
-          description="The President names their successor in the org chart — no election needed. To elect leaders instead, switch your constitution's succession bylaw to a member vote or a leadership vote."
-          action={
-            <div className="flex flex-wrap justify-center gap-2">
-              <ButtonLink href={`/clubs/${club.slug}/manage/org-chart`}>Go to the org chart</ButtonLink>
-              <ButtonLink href={`/clubs/${club.slug}/manage/constitution`} variant="outline">
-                Constitution & bylaws
-              </ButtonLink>
-            </div>
-          }
-        />
-      </div>
-    );
-  }
-
   await syncClubElections(club.id);
-  const [elections, positions, voters, terms, cfg] = await Promise.all([
-    clubElections(club.id),
-    db.position.findMany({ where: { clubId: club.id, archivedAt: null, role: { in: ELECTABLE_ROLES } }, orderBy: [{ sortOrder: "asc" }] }),
-    eligibleVoterIds(club.id, club.successionMethod),
-    getTerms(),
-    getConfig(),
-  ]);
+  const [elections, setup, cfg] = await Promise.all([clubElections(club.id), selectionSetup(club.id), getConfig()]);
   const running = elections.filter((e) => e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED");
   const past = elections.filter((e) => e.status === "APPLIED" || e.status === "CANCELLED");
-  const busy = new Set(running.map((e) => e.positionId));
-  const order: Record<string, number> = { PRESIDENT: 0, VP: 1, OFFICER: 2, AMBASSADOR: 3 };
-  const seats: ElectableSeat[] = positions
-    .sort((a, b) => order[a.role] - order[b.role] || a.sortOrder - b.sortOrder)
-    .map((p) => ({ id: p.id, name: p.name, roleLabel: ROLE_LABEL[p.role], busy: busy.has(p.id) }));
-  const opens = campusDefault(3, 9);
-  const closes = campusDefault(2, 17, opens.getTime());
-  const term = budgetTermFor(terms, opens);
+  const [yesRows, proposedRows] = await Promise.all([
+    db.electionCandidate.groupBy({ by: ["electionId"], where: { electionId: { in: running.map((e) => e.id) }, acceptedAt: { not: null } }, _count: { _all: true } }),
+    db.electionCandidate.findMany({ where: { id: { in: running.map((e) => e.proposedCandidateId).filter((x): x is string => Boolean(x)) } }, select: { id: true, user: { select: { name: true } } } }),
+  ]);
+  const saidYes = new Map(yesRows.map((r) => [r.electionId, r._count._all]));
+  const proposedName = new Map(proposedRows.map((r) => [r.id, r.user.name]));
+  const primary = club.successionMethod;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Elections"
-        description={`${SUCCESSION_LABEL[club.successionMethod]}. ${voters.length} ${voters.length === 1 ? "person" : "people"} can vote right now.`}
+        description={`Fill ${club.name}'s leadership seats from its org chart. Your constitution's primary method is ${SUCCESSION_NAME[primary]}; you can use any of the four for a particular seat.`}
         actions={
-          seats.length ? (
-            <CreateElectionDialog slug={club.slug} clubId={club.id} seats={seats} defaultOpens={toCampusLocal(opens)} defaultCloses={toCampusLocal(closes)} termLabel={term?.name ?? null} />
+          setup.seats.length ? (
+            <CreateElectionDialog slug={club.slug} clubId={club.id} seats={setup.seats} primary={primary} defaults={setup.defaults} termLabel={setup.termLabel} />
           ) : null
         }
       />
 
-      {seats.length === 0 ? (
-        <Callout tone="warning" title="No seats to elect">
-          Set up your org chart first — elections fill its seats. <Link href={`/clubs/${club.slug}/manage/org-chart`} className="underline">Open the org chart</Link>
+      {setup.seats.length === 0 ? (
+        <Callout tone="warning" title="No seats to fill">
+          Set up your org chart first — every way of choosing leaders fills its seats. <Link href={`/clubs/${club.slug}/manage/org-chart`} className="underline">Open the org chart</Link>
         </Callout>
       ) : null}
 
-      <Callout tone="info">
-        {club.successionMethod === "MEMBER_VOTE"
-          ? `Active members (checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events) vote. If no one has checked in yet, every member can vote.`
-          : "Current club leaders vote, and no one can vote for themselves. Candidates must be current leaders too."}{" "}
-        Ballots are secret: you&apos;ll see counts, never who voted for whom.
-      </Callout>
+      <section aria-labelledby="modes-heading" className="space-y-2">
+        <h2 id="modes-heading" className="text-sm font-semibold text-ink">
+          Four ways to fill a seat
+        </h2>
+        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {SUCCESSION_METHODS.map((m) => (
+            <li key={m} className={cn("rounded-xl border p-3 text-sm", m === primary ? "border-brand bg-brand-50/60" : "border-line bg-surface")}>
+              <p className="flex flex-wrap items-center gap-1.5 font-medium text-ink">
+                {SUCCESSION_NAME[m]}
+                {m === primary ? <Badge tone="brand">Primary</Badge> : null}
+              </p>
+              <p className="mt-0.5 text-ink-3">
+                {SUCCESSION_STEPS[m]}
+                {m === "MEMBER_VOTE" ? ` Active means checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events.` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-ink-3">
+          Whichever you use, the people on the org chart below the seat become candidates automatically, and whoever moves up leaves their old seat open for the next one. The primary method comes from{" "}
+          <Link href={`/clubs/${club.slug}/manage/constitution`} className="underline">
+            your constitution and bylaws
+          </Link>
+          .
+        </p>
+      </section>
 
       {elections.length === 0 ? (
-        <EmptyState icon={<Vote />} title="No elections yet" description="Start one for any seat. Members who can run get a heads-up, and voters are notified when voting opens." />
+        <EmptyState icon={<Vote />} title="Nothing in progress" description="Fill a seat here, or from an open seat in the org chart. The people it involves hear about it right away." />
       ) : null}
 
       {running.length ? (
@@ -123,23 +117,20 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
                     <p className="font-semibold text-ink">{e.title}</p>
                     <p className="text-sm text-ink-3">{e.position.name}</p>
                   </div>
-                  <ElectionStatusBadge status={e.status} />
+                  <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
                 </div>
-                <p className="text-sm text-ink-2">
-                  {e.status === "NOMINATING"
-                    ? `Voting opens ${fmtWhen(e.votingOpensAt)}`
-                    : e.status === "VOTING"
-                      ? `Voting closes ${fmtWhen(e.votingClosesAt)}`
-                      : "Voting closed — ready to apply"}
-                </p>
-                <div className="mt-auto flex items-center gap-2 text-xs text-ink-3">
+                <p className="text-sm text-ink-2">{progress(e, { saidYes: saidYes.get(e.id) ?? 0, proposedName: e.proposedCandidateId ? (proposedName.get(e.proposedCandidateId) ?? null) : null })}</p>
+                <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-ink-3">
+                  <MethodBadge method={e.method} />
                   <span>
-                    {e._count.candidates} candidate{e._count.candidates === 1 ? "" : "s"}
+                    {e._count.candidates} {e.method === "NEXT_IN_LINE" ? "in line" : `candidate${e._count.candidates === 1 ? "" : "s"}`}
                   </span>
-                  {e.status !== "NOMINATING" ? (
-                    <span>
-                      · {e._count.votes} ballot{e._count.votes === 1 ? "" : "s"}
-                    </span>
+                  {e.method === "MEMBER_VOTE" || e.method === "SELF_SELECT" ? (
+                    e.status !== "NOMINATING" ? (
+                      <span>
+                        · {e._count.votes} ballot{e._count.votes === 1 ? "" : "s"}
+                      </span>
+                    ) : null
                   ) : null}
                   {e.status === "NOMINATING" && e._count.candidates === 0 ? <Badge tone="warning">No candidates yet</Badge> : null}
                   <ArrowRight className="ml-auto h-4 w-4 text-brand transition-transform group-hover:translate-x-0.5" aria-hidden />
@@ -151,7 +142,7 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
       ) : null}
 
       {past.length ? (
-        <Section title="Past elections">
+        <Section title="Past">
           <Card>
             <ul className="divide-y divide-line">
               {past.map((e) => (
@@ -160,10 +151,10 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-ink">{e.title}</span>
                       <span className="block text-xs text-ink-3">
-                        {e.position.name} · {e.status === "APPLIED" && e.appliedAt ? `applied ${fmtWhen(e.appliedAt)}` : `closed ${fmtWhen(e.votingClosesAt)}`}
+                        {e.position.name} · {SUCCESSION_NAME[e.method]} · {e.status === "APPLIED" && e.appliedAt ? `filled ${fmtWhen(e.appliedAt)}` : `called off`}
                       </span>
                     </span>
-                    <ElectionStatusBadge status={e.status} />
+                    <ElectionStatusBadge status={e.status} method={e.method} />
                   </Link>
                 </li>
               ))}

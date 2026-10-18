@@ -229,7 +229,7 @@ const CustomInput = z.object({
   clubId: z.string().trim().min(1),
   kind: z.enum(["CONSTITUTION", "BYLAWS"], { error: "Choose constitution or bylaws." }),
   title: z.string().trim().max(120, "Keep the title under 120 characters.").nullish(),
-  successionMethod: z.enum(["SENIORITY", "MEMBER_VOTE", "LEADERSHIP_VOTE"], { error: "Choose how your document picks the next leaders." }),
+  successionMethod: z.enum(["ADVISOR_PRESIDENT", "NEXT_IN_LINE", "SELF_SELECT", "MEMBER_VOTE"], { error: "Choose your document's primary way of picking the next leaders." }),
   joinPolicy: z.enum(["OPEN", "APPROVAL"], { error: "Choose how students join under your document." }),
   note: z.string().trim().max(2000, "Keep the note under 2,000 characters.").nullish(),
 });

@@ -178,7 +178,9 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
     if (!cands.length) return null;
     const tenure = (u: string) => Math.max(1, (at.getTime() - club.byUser.get(u)!.joinedAt!.getTime()) / DAY);
     const isOfficer = (u: string) => live.some((a) => a.userId === u);
-    if (seatName === "President" && (def.succession ?? "SENIORITY") === "SENIORITY") {
+    // Clubs where the advisor and President pick (or the next in line moves up) favor long-serving officers; voting clubs, engaged members.
+    const voted = def.succession === "MEMBER_VOTE" || def.succession === "SELF_SELECT";
+    if (seatName === "President" && !voted) {
       return rng.weighted(cands, (u) => Math.pow(tenure(u), 2) * (isOfficer(u) ? 4 : 1) * club.byUser.get(u)!.eng.base);
     }
     return rng.weighted(cands, (u) => club.byUser.get(u)!.eng.base * Math.sqrt(tenure(u)) * (promotion && isOfficer(u) ? 3 : 1));
@@ -333,10 +335,10 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
       for (let guard = 0; liveIn(seatName).length < want && guard < 4; guard++) {
         const at = recent();
         if (place(seatName, at, 14)) continue;
-        // Small clubs: anyone still on the roster without a seat.
+        // Small clubs: anyone still on the roster without a seat (even someone who joined this week; their seat starts a day after they joined).
         const free = club.members.filter((m) => {
           const p = ctx.person(m.userId);
-          return m.status === "ACTIVE" && m.joinedAt && m.joinedAt < addDays(NOW, -3) && p.kind === "STUDENT" && !p.persona && !excluded.has(m.userId) && !live.some((a) => a.userId === m.userId);
+          return m.status === "ACTIVE" && m.joinedAt && m.joinedAt < addDays(NOW, -1) && p.kind === "STUDENT" && !p.persona && !excluded.has(m.userId) && !live.some((a) => a.userId === m.userId);
         });
         if (!free.length) break;
         const m = rng.weighted(free, (x) => x.eng.base);
@@ -663,7 +665,7 @@ function decisions(ctx: Ctx) {
       push(club.id, "SUBMITTED", club.founderId, sub);
       push(
         club.id, "CHANGES_REQUESTED", alex, addDays(NOW, -6.3),
-        "Thanks for submitting Aviation Club! Two things before we can approve it: (1) Sponsored clubs need a sponsoring department. You typed in \"Aviation Technology\", which isn't on our list yet — we've asked to add it, and once it's there please select it on your profile. (2) Your bylaws don't say how the next president is chosen. Add a succession section in the Constitution Builder (seniority is the default), then resubmit.",
+        "Thanks for submitting Aviation Club! Two things before we can approve it: (1) Sponsored clubs need a sponsoring department. You typed in \"Aviation Technology\", which isn't on our list yet — we've asked to add it, and once it's there please select it on your profile. (2) Your bylaws don't say how the next president is chosen. Name your primary way of choosing leaders in the Constitution Builder's succession section (Advisor & President is the recommended default), then resubmit.",
       );
       ctx.refs.aviationChangesAt = addDays(NOW, -6.3).toISOString();
       continue;

@@ -129,7 +129,7 @@ export default async function ClubConstitutionPage({ params }: { params: Promise
           <KeyValue
             items={[
               { label: "How students join", value: JOIN_LABEL[club.joinPolicy] },
-              { label: "How leaders are chosen", value: SUCCESSION_LABEL[club.successionMethod] },
+              { label: "Primary way leaders are chosen", value: SUCCESSION_LABEL[club.successionMethod] },
             ]}
           />
         </CardBody>

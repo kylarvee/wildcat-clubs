@@ -689,8 +689,48 @@ const clubListMap = cache(async (key: string, atMs: number): Promise<Map<string,
   return out;
 });
 
-/** Batch metrics for the clubs list and admin tables (one pass, no N+1). Omit ids for every approved club. */
+const SHARED_LIST_MS = 60_000;
+/** Above this many clubs, one shared build of every club's numbers is cheaper than a fresh pass. */
+const SHARED_LIST_MIN_IDS = 20;
+
+// The clubs list (and its search ranking), the network and the admin tables
+// all read nearly every approved club's numbers, so one build serves every
+// visitor for a minute, the same way networkData does.
+let sharedList: { expires: number; data: Promise<Map<string, ClubListMetrics>> } | null = null;
+
+function everyClubListMetrics(): Promise<Map<string, ClubListMetrics>> {
+  const now = Date.now();
+  if (!sharedList || sharedList.expires <= now) {
+    const data = clubListMap("*", now);
+    sharedList = { expires: now + SHARED_LIST_MS, data };
+    data.catch(() => {
+      if (sharedList?.data === data) sharedList = null;
+    });
+  }
+  return sharedList.data;
+}
+
+/**
+ * Batch metrics for the clubs list and admin tables (one pass, no N+1). Omit
+ * ids for every approved club. Large requests read the shared build (at most a
+ * minute old); small ones use it only when it's already warm. Clubs it doesn't
+ * cover (retired ones) are computed fresh.
+ */
 export async function clubListMetrics(clubIds?: string[]): Promise<Map<string, ClubListMetrics>> {
+  const warm = sharedList && sharedList.expires > Date.now();
+  if (!clubIds || clubIds.length > SHARED_LIST_MIN_IDS || warm) {
+    const all = await everyClubListMetrics();
+    if (!clubIds) return all;
+    const out = new Map<string, ClubListMetrics>();
+    const missing: string[] = [];
+    for (const id of clubIds) {
+      const m = all.get(id);
+      if (m) out.set(id, m);
+      else missing.push(id);
+    }
+    if (missing.length) for (const [id, m] of await clubListMap(idsKey(missing), requestNow().getTime())) out.set(id, m);
+    return out;
+  }
   return clubListMap(idsKey(clubIds), requestNow().getTime());
 }
 

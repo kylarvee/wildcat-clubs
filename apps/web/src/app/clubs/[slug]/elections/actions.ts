@@ -6,6 +6,8 @@ import * as elections from "@/lib/domain/elections";
 
 function refresh(slug: string) {
   revalidatePath(`/clubs/${slug}`, "layout");
+  revalidatePath("/tasks");
+  revalidatePath("/dashboard");
 }
 
 export async function runForSeat(slug: string, electionId: string, statement: string) {
@@ -30,6 +32,13 @@ export async function withdraw(slug: string, candidateId: string) {
 
 export async function vote(slug: string, electionId: string, candidateId: string) {
   const r = await act((actor) => elections.castVote(actor, electionId, candidateId));
+  refresh(slug);
+  return r;
+}
+
+/** Next in line: yes, I'll move up — or no, take me off the list. */
+export async function answerMoveUp(slug: string, candidateId: string, yes: boolean) {
+  const r = await act((actor) => elections.answerMoveUp(actor, candidateId, yes));
   refresh(slug);
   return r;
 }

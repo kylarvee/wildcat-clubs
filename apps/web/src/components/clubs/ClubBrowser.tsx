@@ -10,6 +10,7 @@ import {
   CLUB_SORTS,
   clubListHref,
   hasActiveFilters,
+  isRankedSort,
   SORT_LABEL,
   STATUS_FILTER_LABEL,
   STATUS_FILTERS,
@@ -17,12 +18,20 @@ import {
   type ClubSort,
   type StatusFilter,
 } from "@/components/clubs/list-params";
+import type { SearchMode } from "@/lib/search/types";
 
 /**
  * The clubs list toolbar. Everything it changes lives in the URL, so a view
  * can be bookmarked or shared; the server re-renders the results. While the
  * new results load, the current ones stay put at reduced opacity.
+ * The search box searches inside every club page (lib/search): events,
+ * announcements, documents, reviews — not just names.
  */
+
+const SEARCH_NOTE: Partial<Record<SearchMode, string>> = {
+  close: "No exact matches, so these are close spellings.",
+  some: "No club matched every word, so these match some of them.",
+};
 
 type College = { id: string; name: string; shortName: string; slug: string };
 
@@ -50,6 +59,7 @@ export function ClubBrowser({
   archivedCount,
   shown,
   total,
+  searchMode = null,
   children,
 }: {
   params: ClubListParams;
@@ -58,6 +68,8 @@ export function ClubBrowser({
   archivedCount: number;
   shown: number;
   total: number;
+  /** How the search matched ("close" spellings, only "some" words), for a short note. */
+  searchMode?: SearchMode | null;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -128,7 +140,7 @@ export function ClubBrowser({
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name, major, college…"
+              placeholder="Search clubs, events, interests…"
               autoComplete="off"
               className="h-10 w-full rounded-lg border border-line-2 bg-surface pl-9 pr-9 text-sm text-ink placeholder:text-ink-3 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-100 [&::-webkit-search-cancel-button]:hidden"
             />
@@ -203,22 +215,25 @@ export function ClubBrowser({
           <div className="col-span-2 flex min-w-0 items-end gap-2 lg:col-span-1">
             <div className="min-w-0 flex-1">
               <FilterSelect label="Sort by" value={params.sort} onChange={(v) => go({ sort: v as ClubSort })}>
-                {CLUB_SORTS.map((s) => (
+                {/* Best match only means something while searching. */}
+                {CLUB_SORTS.filter((s) => s !== "relevance" || params.q).map((s) => (
                   <option key={s} value={s}>
                     {SORT_LABEL[s]}
                   </option>
                 ))}
               </FilterSelect>
             </div>
-            <button
-              type="button"
-              onClick={() => go({ dir: params.dir === "asc" ? "desc" : "asc" })}
-              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-line-2 bg-surface px-3 text-sm font-medium text-ink-2 shadow-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-brand"
-              aria-label={`Sorted ${params.dir === "asc" ? "ascending" : "descending"}. Switch to ${params.dir === "asc" ? "descending" : "ascending"}.`}
-            >
-              {params.dir === "asc" ? <ArrowUpNarrowWide className="h-4 w-4" aria-hidden="true" /> : <ArrowDownWideNarrow className="h-4 w-4" aria-hidden="true" />}
-              <span aria-hidden="true">{dirLabel(params.sort, params.dir)}</span>
-            </button>
+            {isRankedSort(params.sort) ? null : (
+              <button
+                type="button"
+                onClick={() => go({ dir: params.dir === "asc" ? "desc" : "asc" })}
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-line-2 bg-surface px-3 text-sm font-medium text-ink-2 shadow-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-brand"
+                aria-label={`Sorted ${params.dir === "asc" ? "ascending" : "descending"}. Switch to ${params.dir === "asc" ? "descending" : "ascending"}.`}
+              >
+                {params.dir === "asc" ? <ArrowUpNarrowWide className="h-4 w-4" aria-hidden="true" /> : <ArrowDownWideNarrow className="h-4 w-4" aria-hidden="true" />}
+                <span aria-hidden="true">{dirLabel(params.sort, params.dir)}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -252,6 +267,7 @@ export function ClubBrowser({
             Clear all
           </button>
         ) : null}
+        {params.q && searchMode && SEARCH_NOTE[searchMode] && shown > 0 ? <p className="basis-full text-xs text-ink-3 sm:order-last">{SEARCH_NOTE[searchMode]}</p> : null}
         {archivedCount > 0 || params.archived ? (
           <button
             type="button"

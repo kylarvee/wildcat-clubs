@@ -2,9 +2,9 @@ import Link from "next/link";
 import { Vote } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { loadVisibleClub } from "@/lib/clubs/context";
-import { canSeeElections, electionsAllowed, syncClubElections } from "@/lib/domain/elections";
+import { canSeeElections, syncClubElections } from "@/lib/domain/elections";
 import { clubElections } from "@/lib/roles/election-queries";
-import { SUCCESSION_LABEL } from "@/lib/roles/labels";
+import { SUCCESSION_HOW, SUCCESSION_NAME } from "@/lib/roles/labels";
 import { ElectionStatusBadge, fmtWhen } from "@/components/elections/ElectionBits";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,7 +12,19 @@ import { Container, EmptyState, PageHeader, Section } from "@/components/ui/layo
 
 export const metadata = { title: "Elections" };
 
-/** A club's elections, for its members: what's open now and what's been decided. */
+type Row = Awaited<ReturnType<typeof clubElections>>[number];
+
+function when(e: Row) {
+  if (e.status === "APPLIED") return e.appliedAt ? `filled ${fmtWhen(e.appliedAt)}` : "filled";
+  if (e.status === "CANCELLED") return "called off";
+  if (e.method === "ADVISOR_PRESIDENT") return `decide by ${fmtWhen(e.votingClosesAt)}`;
+  if (e.method === "NEXT_IN_LINE") return e.status === "VOTING" ? `answers due ${fmtWhen(e.votingClosesAt)}` : `answers closed ${fmtWhen(e.votingClosesAt)}`;
+  if (e.status === "NOMINATING") return `voting opens ${fmtWhen(e.votingOpensAt)}`;
+  if (e.status === "VOTING") return `closes ${fmtWhen(e.votingClosesAt)}`;
+  return `closed ${fmtWhen(e.votingClosesAt)}`;
+}
+
+/** A club's leadership selections, for its members: what's open now and what's been decided. */
 export default async function ClubElectionsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   await requireUser(`/clubs/${slug}/elections`);
@@ -35,36 +47,28 @@ export default async function ClubElectionsPage({ params }: { params: Promise<{ 
 
   await syncClubElections(club.id);
   const all = await clubElections(club.id);
-  const open = all.filter((e) => e.status === "NOMINATING" || e.status === "VOTING");
-  const past = all.filter((e) => e.status !== "NOMINATING" && e.status !== "VOTING");
+  const open = all.filter((e) => e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED");
+  const past = all.filter((e) => e.status === "APPLIED" || e.status === "CANCELLED");
 
   return (
     <Container size="md">
       <PageHeader
         breadcrumbs={crumbs}
         title="Elections"
-        description={`How ${club.name} chooses its leaders: ${SUCCESSION_LABEL[club.successionMethod].toLowerCase()}.`}
+        description={`How ${club.name} fills its leadership seats. Its primary method is ${SUCCESSION_NAME[club.successionMethod]}: ${SUCCESSION_HOW[club.successionMethod]}. Its President and advisor may use another method for a particular seat.`}
         actions={access?.capabilities.has("elections") ? <ButtonLink href={`/clubs/${club.slug}/manage/elections`} variant="outline">Manage elections</ButtonLink> : null}
       />
       {all.length === 0 ? (
-        <EmptyState
-          icon={<Vote />}
-          title="No elections yet"
-          description={
-            electionsAllowed(club.successionMethod)
-              ? "When leaders open an election, you'll get a notification and it will show up here."
-              : "This club uses seniority succession: the President names their successor in the org chart."
-          }
-        />
+        <EmptyState icon={<Vote />} title="Nothing yet" description="When leaders start filling a seat, it shows up here, and you'll get a notification if you can run or vote." />
       ) : (
         <div className="space-y-8">
           {open.length ? (
-            <Section title="Open now">
+            <Section title="In progress">
               <ElectionList slug={club.slug} items={open} />
             </Section>
           ) : null}
           {past.length ? (
-            <Section title="Past elections">
+            <Section title="Past">
               <ElectionList slug={club.slug} items={past} />
             </Section>
           ) : null}
@@ -74,7 +78,7 @@ export default async function ClubElectionsPage({ params }: { params: Promise<{ 
   );
 }
 
-function ElectionList({ slug, items }: { slug: string; items: Awaited<ReturnType<typeof clubElections>> }) {
+function ElectionList({ slug, items }: { slug: string; items: Row[] }) {
   return (
     <Card>
       <ul className="divide-y divide-line">
@@ -84,11 +88,10 @@ function ElectionList({ slug, items }: { slug: string; items: Awaited<ReturnType
               <span className="min-w-0 flex-1">
                 <span className="block font-medium text-ink">{e.title}</span>
                 <span className="block text-sm text-ink-3">
-                  {e.position.name} · {e._count.candidates} candidate{e._count.candidates === 1 ? "" : "s"} ·{" "}
-                  {e.status === "NOMINATING" ? `voting opens ${fmtWhen(e.votingOpensAt)}` : e.status === "VOTING" ? `closes ${fmtWhen(e.votingClosesAt)}` : `closed ${fmtWhen(e.votingClosesAt)}`}
+                  {e.position.name} · {SUCCESSION_NAME[e.method]} · {e._count.candidates} {e.method === "NEXT_IN_LINE" ? "in line" : `candidate${e._count.candidates === 1 ? "" : "s"}`} · {when(e)}
                 </span>
               </span>
-              <ElectionStatusBadge status={e.status} />
+              <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
             </Link>
           </li>
         ))}

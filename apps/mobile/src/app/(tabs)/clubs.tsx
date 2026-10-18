@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { Api } from '@/api/endpoints';
-import type { MClubListItem } from '@/api/types';
+import type { MClubListItem, MTextRun } from '@/api/types';
 import { useSession } from '@/auth/session';
 import { Badge } from '@/components/Badge';
 import { ClubLogo } from '@/components/ClubLogo';
@@ -14,7 +14,7 @@ import { plural } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 import { radius, space, TAP, useColors } from '@/theme';
 
-/** Browse and search every approved club (works signed out). */
+/** Browse and search every approved club (works signed out). Search looks inside each club's events, announcements and documents. */
 export default function ClubsScreen() {
   const c = useColors();
   const { user } = useSession();
@@ -37,7 +37,7 @@ export default function ClubsScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search clubs, majors, colleges"
+            placeholder="Search clubs, events, interests"
             placeholderTextColor={c.ink3}
             returnKeyType="search"
             autoCorrect={false}
@@ -70,6 +70,11 @@ export default function ClubsScreen() {
               <Text variant="small" tone="ink3" accessibilityLiveRegion="polite">
                 {loading ? 'Searching…' : q ? `${plural(data.items.length, 'club')} ${data.items.length === 1 ? 'matches' : 'match'} “${q}”` : `${plural(data.total, 'club')} at Weber State`}
               </Text>
+              {!loading && q && data.items.length && data.search && data.search.mode !== 'all' ? (
+                <Text variant="caption" tone="ink3">
+                  {data.search.mode === 'close' ? 'No exact matches, so these are close spellings.' : 'No club matched every word, so these match some of them.'}
+                </Text>
+              ) : null}
             </View>
           }
           ItemSeparatorComponent={() => <View style={[styles.sep, { backgroundColor: c.line }]} />}
@@ -95,11 +100,13 @@ function ClubRow({ club }: { club: MClubListItem }) {
     m.avgRating != null && m.reviewCount > 0 ? `★ ${m.avgRating.toFixed(1)}` : null,
     club.placement,
   ].filter(Boolean);
+  const text = (runs: MTextRun[] | null | undefined) => (runs ?? []).map((r) => r.text).join('');
+  const foundIn = club.foundIn ? `Found in ${club.foundIn.label}${club.foundIn.title.length ? `, ${text(club.foundIn.title)}` : ''}${club.foundIn.snippet ? `: ${text(club.foundIn.snippet)}` : ''}` : null;
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/club/[slug]', params: { slug: club.slug } })}
       accessibilityRole="button"
-      accessibilityLabel={[club.name, status, club.shortDescription, facts.join(', ')].filter(Boolean).join('. ')}
+      accessibilityLabel={[club.name, status, club.shortDescription, foundIn, ...(club.reasons ?? []), facts.join(', ')].filter(Boolean).join('. ')}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.surfaceAlt }]}>
       <ClubLogo name={club.name} logoUrl={club.logoUrl} color={club.logoColor} size={48} />
       <View style={styles.body}>
@@ -114,6 +121,30 @@ function ClubRow({ club }: { club: MClubListItem }) {
             {club.shortDescription}
           </Text>
         ) : null}
+        {club.foundIn ? (
+          <Text variant="caption" tone="ink2" numberOfLines={2}>
+            <Text variant="caption" tone="ink3">
+              Found in {club.foundIn.label}
+            </Text>
+            {club.foundIn.title.length ? (
+              <>
+                {' · '}
+                <Runs runs={club.foundIn.title} />
+              </>
+            ) : null}
+            {club.foundIn.snippet ? (
+              <>
+                {': '}
+                <Runs runs={club.foundIn.snippet} />
+              </>
+            ) : null}
+          </Text>
+        ) : null}
+        {club.reasons?.length ? (
+          <Text variant="caption" tone="brand" numberOfLines={1}>
+            {club.reasons.join(' · ')}
+          </Text>
+        ) : null}
         <Text variant="caption" tone="ink3" numberOfLines={1}>
           {facts.join(' · ')}
         </Text>
@@ -123,7 +154,25 @@ function ClubRow({ club }: { club: MClubListItem }) {
   );
 }
 
+/** Matched words in bold, the rest as plain text. */
+function Runs({ runs }: { runs: MTextRun[] }) {
+  return (
+    <>
+      {runs.map((r, i) =>
+        r.hit ? (
+          <Text key={i} variant="caption" tone="ink" style={styles.hit}>
+            {r.text}
+          </Text>
+        ) : (
+          r.text
+        ),
+      )}
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
+  hit: { fontWeight: '700' },
   flex: { flex: 1 },
   searchWrap: { paddingHorizontal: space.lg, paddingVertical: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingHorizontal: space.md, minHeight: TAP - 4 },

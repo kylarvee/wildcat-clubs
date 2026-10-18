@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, SuccessionMethod } from "@prisma/client";
 import type { Assignment, ClubM, Ctx } from "../ctx";
 import { makeFlyerSvg, makePdf, type PdfBlock } from "../lib/assets";
 import { MINUTES_ITEMS } from "../data/text";
@@ -35,11 +35,13 @@ function constitutionBlocks(club: ClubM): { constitution: PdfBlock[]; bylaws: Pd
   const d = club.def;
   const typeLabel = { SPONSORED: "Sponsored", AFFILIATE: "Affiliate", REGISTERED: "Registered", COLLEGE_AMBASSADORS: "College Ambassadors" }[club.type];
   const seats = [...club.seats.values()].filter((s) => s.role !== "AMBASSADOR" || club.type === "COLLEGE_AMBASSADORS").map((s) => s.name);
-  const succession = {
-    SENIORITY: "When the President steps down or graduates, the most senior active officer who is willing to serve becomes President (seniority). The outgoing President records the hand-off in the Org Chart.",
-    MEMBER_VOTE: "The President and Vice President are elected each spring by a vote of active members using Wildcat Clubs elections. Ballots are secret; the result is applied through the Org Chart.",
-    LEADERSHIP_VOTE: "The President is elected each spring by the club's current officers, who may not vote for themselves. Ballots are secret; the result is applied through the Org Chart.",
-  }[d.succession ?? "SENIORITY"];
+  const primary = {
+    ADVISOR_PRESIDENT: "The club's primary method is Advisor & President: when a seat needs filling, the President or the advisor proposes one candidate and the other confirms.",
+    NEXT_IN_LINE: "The club's primary method is Next in line: when a seat opens, the people in the seats just below it are asked whether they will move up, and the first in line who says yes takes the seat.",
+    SELF_SELECT: "The club's primary method is Self-select: the current leaders choose by secret ballot in Wildcat Clubs, never voting for themselves, and the choice counts only if it is unanimous.",
+    MEMBER_VOTE: "The club's primary method is Member vote: active members elect leaders each spring by secret ballot in Wildcat Clubs.",
+  }[d.succession ?? "ADVISOR_PRESIDENT"];
+  const succession = `${primary} The President and the advisor may use one of the other methods Wildcat Clubs offers (Advisor & President, Next in line, Self-select or Member vote) for a particular seat, at their discretion. The people on the Org Chart below a seat are its first candidates, and results are applied through the Org Chart.`;
   return {
     constitution: [
       { heading: "Article I - Name", text: `The name of this organization is ${d.name}, a ${typeLabel} club at Weber State University.` },
@@ -63,7 +65,7 @@ const toHtml = (blocks: PdfBlock[]) =>
   blocks.map((b) => `${b.heading ? `<h3>${b.heading.replace(" - ", " — ")}</h3>` : ""}${b.text ? `<p>${b.text}</p>` : ""}${b.bullets ? `<ul>${b.bullets.map((x) => `<li>${x}</li>`).join("")}</ul>` : ""}`).join("");
 
 /** The constitution builder's own default draft, so seeded drafts open exactly as new ones do. */
-function builderDraftData(succession: "SENIORITY" | "MEMBER_VOTE" | "LEADERSHIP_VOTE"): Prisma.InputJsonValue {
+function builderDraftData(succession: SuccessionMethod): Prisma.InputJsonValue {
   return defaultDraftData({ successionMethod: succession }) as unknown as Prisma.InputJsonValue;
 }
 
@@ -269,17 +271,17 @@ export function buildFiles(ctx: Ctx) {
   // ─── Constitution drafts (owned by founders) ──────────────────────────────
   const drafts = new Map<string, string>();
   const frank = ctx.p("frank").id;
-  const draft = (ownerId: string, title: string, succession: "SENIORITY" | "MEMBER_VOTE" | "LEADERSHIP_VOTE", createdAt: Date, updatedAt: Date) => {
+  const draft = (ownerId: string, title: string, succession: SuccessionMethod, createdAt: Date, updatedAt: Date) => {
     const id = ctx.id();
     ctx.rows.drafts.push({ id, ownerId, title, data: builderDraftData(succession), successionMethod: succession, createdAt, updatedAt });
     return id;
   };
   const bg = ctx.club("boardgames");
-  drafts.set("boardgames", draft(frank, `${bg.name} — constitution & bylaws`, "SENIORITY", addDays(bg.createdAt, 2), addDays(NOW, -12.3)));
-  draft(frank, `${ctx.club("beekeeping").name} — draft`, "SENIORITY", addDays(NOW, -8.1), addDays(NOW, -1.4));
+  drafts.set("boardgames", draft(frank, `${bg.name} — constitution & bylaws`, "ADVISOR_PRESIDENT", addDays(bg.createdAt, 2), addDays(NOW, -12.3)));
+  draft(frank, `${ctx.club("beekeeping").name} — draft`, "ADVISOR_PRESIDENT", addDays(NOW, -8.1), addDays(NOW, -1.4));
   for (const key of ["datasci", "firstgen", "pickleball", "aviation"]) {
     const club = ctx.club(key);
-    drafts.set(key, draft(club.founderId, `${club.name} — constitution & bylaws`, club.def.succession ?? "SENIORITY", addDays(club.createdAt, 1), addDays(club.createdAt, rng.float(2, 5))));
+    drafts.set(key, draft(club.founderId, `${club.name} — constitution & bylaws`, club.def.succession ?? "ADVISOR_PRESIDENT", addDays(club.createdAt, 1), addDays(club.createdAt, rng.float(2, 5))));
   }
 
   // ─── Club files ────────────────────────────────────────────────────────────

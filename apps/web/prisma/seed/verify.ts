@@ -5,6 +5,7 @@
 import { PrismaClient, type ClubRole } from "@prisma/client";
 import { PERSONAS } from "@/lib/auth/personas";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
+import { unanimousChoice } from "@/lib/roles/pipeline";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
 
 const db = new PrismaClient();
@@ -90,6 +91,12 @@ async function clubChecks() {
   check(descr.length === 0, "Real clubs' About is their own purpose statement", descr.map((c) => c.name).join(", "));
   check(clubs.every((c) => c.websiteUrl === null && Array.isArray(c.socialLinks) && (c.socialLinks as unknown[]).length === 0), "No website or social links were invented");
   check(clubs.filter((c) => c.type === "AFFILIATE").every((c) => c.category === "FSL" || c.scope === "SPORTS"), "Affiliate clubs are FSL or club sports only");
+  const methods = clubs.reduce<Record<string, number>>((m, c) => ({ ...m, [c.successionMethod]: (m[c.successionMethod] ?? 0) + 1 }), {});
+  check(
+    (methods.ADVISOR_PRESIDENT ?? 0) > clubs.length * 0.8 && ["NEXT_IN_LINE", "SELF_SELECT", "MEMBER_VOTE"].every((m) => (methods[m] ?? 0) >= 3 && (methods[m] ?? 0) <= 8),
+    "Most clubs' primary method is Advisor & President; a handful each use the other three",
+    Object.entries(methods).map(([k, v]) => `${k} ${v}`).join(", "),
+  );
 
   // Today's leadership.
   const current = await db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null }, _count: true });
@@ -185,6 +192,51 @@ async function detailChecks(samId: string, vanessaId: string, confirmedIds: stri
   check(c.length === confirmedIds.length && c.every((d) => complete(d) && d.confirmedAt && d.confirmedAt >= ayStart), "Maya, Priya and Oscar are complete and confirmed");
 }
 
+/** The club search index (lib/search): complete, and only what anyone may see. */
+async function searchChecks() {
+  const [{ missing, stray, docs }] = await db.$queryRaw<{ missing: number; stray: number; docs: number }[]>`
+    SELECT (SELECT count(*)::int FROM "Club" c LEFT JOIN "ClubSearchDoc" d ON d."clubId" = c.id WHERE c.status = 'APPROVED' AND d."clubId" IS NULL) AS missing,
+           (SELECT count(*)::int FROM "ClubSearchDoc" d JOIN "Club" c ON c.id = d."clubId" WHERE c.status <> 'APPROVED') AS stray,
+           (SELECT count(*)::int FROM "ClubSearchDoc") AS docs`;
+  check(missing === 0 && stray === 0, "Every approved club has a search document, and only approved clubs do", `${docs} documents`);
+  const [{ bad, flag }] = await db.$queryRaw<{ bad: number; flag: number }[]>`
+    SELECT count(*) FILTER (WHERE e.id IS NULL OR e.status <> 'SCHEDULED' OR (e.visibility = 'MEMBERS' AND e."clubId" IS NOT NULL))::int AS bad,
+           count(*) FILTER (WHERE e.id IS NOT NULL AND (p->>'campusOnly')::boolean <> (e.visibility <> 'PUBLIC'))::int AS flag
+      FROM "ClubSearchDoc" d CROSS JOIN LATERAL jsonb_array_elements(d.passages) p
+      LEFT JOIN "Event" e ON '/events/' || e.id = p->>'href' WHERE p->>'kind' = 'event'`;
+  check(bad === 0 && flag === 0, "Search snippets hold only scheduled public or campus events, campus ones flagged", `${bad} not visible, ${flag} flagged wrong`);
+  const [{ ann }] = await db.$queryRaw<{ ann: number }[]>`
+    SELECT count(*)::int AS ann FROM "ClubSearchDoc" d CROSS JOIN LATERAL jsonb_array_elements(d.passages) p
+     WHERE p->>'kind' = 'announcement' AND NOT EXISTS (SELECT 1 FROM "Announcement" a WHERE a."clubId" = d."clubId" AND a.audience = 'PUBLIC' AND a.title = p->>'title')`;
+  check(ann === 0, "Search snippets hold only PUBLIC announcements", `${ann} others`);
+  const [{ n, empty }] = await db.$queryRaw<{ n: number; empty: number }[]>`SELECT count(*)::int AS n, count(*) FILTER (WHERE results = 0)::int AS empty FROM "SearchQuery"`;
+  check(n >= 50 && empty > 0, "Sample searches for the admin card, some that found nothing", `${n} searches, ${empty} with no results`);
+}
+
+/** College ambassador programs (domain/ambassadors): one WSUSA-appointed advisor each, placements only, one open request. */
+async function ambassadorChecks() {
+  const programs = await db.club.findMany({
+    where: { type: "COLLEGE_AMBASSADORS", status: "APPROVED" },
+    select: { name: true, roleAssignments: { where: { role: "ADVISOR", endedAt: null }, select: { id: true } } },
+  });
+  check(programs.length === 2 && programs.every((p) => p.roleAssignments.length === 1), "Each ambassador program has exactly one advisor", programs.map((p) => `${p.name}: ${p.roleAssignments.length}`).join(", "));
+  const unplaced = await db.roleAssignment.count({ where: { role: "AMBASSADOR", endedAt: null, viaClubId: null, club: { type: { not: "COLLEGE_AMBASSADORS" } } } });
+  check(unplaced === 0, "Regular clubs' ambassadors were all placed by their college's program", `${unplaced} not placed`);
+  const open = await db.task.findMany({ where: { sourceType: "ambassadorRequest", status: "OPEN" }, select: { sourceId: true, clubId: true } });
+  check(open.length === 1, "One club is waiting on its request for an ambassador", `${open.length} open`);
+  const [robotics, swe] = await Promise.all([club("robotics"), club("swe")]);
+  check(open[0]?.sourceId === robotics.id, "Priya's club is the one that asked (PERSONAS)");
+  check((await db.roleAssignment.count({ where: { clubId: swe.id, role: "AMBASSADOR", endedAt: null } })) === 0, "SWE has no ambassador, so Vanessa can ask for one (PERSONAS)");
+  if (open[0]?.sourceId && open[0].clubId) {
+    const [asking, program, placed] = await Promise.all([
+      db.club.findUnique({ where: { id: open[0].sourceId }, select: { collegeId: true } }),
+      db.club.findUnique({ where: { id: open[0].clubId }, select: { collegeId: true, type: true } }),
+      db.roleAssignment.count({ where: { clubId: open[0].sourceId, role: "AMBASSADOR", endedAt: null } }),
+    ]);
+    check(program?.type === "COLLEGE_AMBASSADORS" && asking?.collegeId === program.collegeId && placed === 0, "The request sits with its own college's program, from a club with no ambassador");
+  }
+}
+
 async function main() {
   console.log("Personas");
   const sam = await user("sam");
@@ -228,6 +280,19 @@ async function main() {
   const os = tre ? await requirementState(oscar.id, tre.startedAt, fic.approvedAt) : [];
   check(os.length === 2 && os.every((r) => !r.met && !r.overdue), "Oscar has met neither requirement and is inside grace", os.map((r) => `${r.name} due ${r.dueAt.toISOString().slice(0, 10)}`).join("; "));
   check((await db.task.count({ where: { assigneeId: oscar.id, kind: "REQUIREMENT", status: "OPEN" } })) === 2, "Oscar has 2 open REQUIREMENT tasks");
+  // Next in line: FIC's VP stepped down and the officers were asked to move up.
+  const nil = await db.election.findFirst({ where: { clubId: fic.id, method: "NEXT_IN_LINE", status: "VOTING", position: { role: "VP" } }, include: { candidates: true, position: true } });
+  const nilVacant = nil ? (await db.roleAssignment.count({ where: { positionId: nil.positionId, endedAt: null } })) === 0 : false;
+  check(Boolean(nil) && nil!.position.role === "VP" && nil!.votingClosesAt > NOW && nilVacant, `${fic.name} is filling its open Vice President seat from the next in line (answers due after now)`);
+  const nilYes = nil?.candidates.filter((c) => c.acceptedAt) ?? [];
+  const nilWaiting = nil?.candidates.filter((c) => !c.acceptedAt) ?? [];
+  check(nilYes.length === 1 && nilWaiting.length === 1 && nilWaiting[0].userId === oscar.id && Boolean(nil?.candidates.every((c) => c.fromPipeline)), "…one officer said yes and Oscar hasn't answered (both from the org chart)");
+  const inLine = [...(nil?.candidates ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  check(inLine.length === 2 && inLine[0].userId === oscar.id && Boolean(inLine[1].acceptedAt), "…and Oscar is ahead of them in line, so his answer decides it");
+  check(
+    (await db.task.count({ where: { assigneeId: oscar.id, kind: "APPROVAL", status: "OPEN", sourceType: "electionAnswer", sourceId: nilWaiting[0]?.id ?? "" } })) === 1,
+    "…with Oscar's open \"Move up to Vice President?\" task",
+  );
   check((await db.fundingRequest.count({ where: { clubId: fic.id, status: "DRAFT" } })) >= 1 && (await db.fundingRequest.count({ where: { clubId: fic.id, status: "SUBMITTED", submittedById: oscar.id } })) === 1, "FIC has a DRAFT and Oscar's SUBMITTED funding request");
 
   const vanessa = await user("vanessa");
@@ -235,7 +300,23 @@ async function main() {
   check((await db.roleAssignment.count({ where: { userId: vanessa.id, clubId: swe.id, role: "VP", endedAt: null } })) === 1, `Vanessa is VP of ${swe.name}`);
   check((await db.eventCohost.count({ where: { clubId: swe.id, status: "PENDING" } })) >= 1, "SWE has a pending incoming co-host request");
   check((await db.task.count({ where: { clubId: swe.id, sourceType: "cohost", status: "OPEN", capability: "events" } })) >= 1, "…with an APPROVAL task for SWE's events holders");
-  check((await db.election.count({ where: { clubId: swe.id, status: "CLOSED", method: "LEADERSHIP_VOTE" } })) === 1, "SWE has a CLOSED leadership-vote election awaiting apply");
+  const sweElection = await db.election.findFirst({ where: { clubId: swe.id, status: "CLOSED", method: "SELF_SELECT" }, include: { position: true, candidates: { select: { id: true, userId: true } } } });
+  check(Boolean(sweElection) && sweElection!.position.role === "PRESIDENT", "SWE has a CLOSED self-select President election awaiting apply (a VP can't apply it)");
+  if (sweElection) {
+    const [tally, voters, leaderRows, frozen] = await Promise.all([
+      db.vote.groupBy({ by: ["candidateId"], where: { electionId: sweElection.id }, _count: { _all: true } }),
+      db.vote.findMany({ where: { electionId: sweElection.id }, select: { voterId: true } }),
+      db.roleAssignment.findMany({ where: { clubId: swe.id, endedAt: null, role: { in: ["PRESIDENT", "VP", "OFFICER", "AMBASSADOR"] }, user: { status: "ACTIVE", kind: "STUDENT" } }, select: { userId: true } }),
+      db.activityLog.findFirst({ where: { action: "election.closed", entityId: sweElection.id }, select: { data: true } }),
+    ]);
+    const counts = new Map(tally.map((t) => [t.candidateId, t._count._all]));
+    const choice = unanimousChoice({
+      eligibleVoterIds: [...new Set(leaderRows.map((r) => r.userId))],
+      voterIds: voters.map((v) => v.voterId),
+      tally: sweElection.candidates.map((c) => ({ candidateId: c.id, userId: c.userId, votes: counts.get(c.id) ?? 0 })),
+    });
+    check(Boolean(choice) && (frozen?.data as { unanimous?: string } | null)?.unanimous === choice, "…and it was unanimous (every other leader chose the same candidate), frozen at close");
+  }
   check(
     (await db.task.count({ where: { assigneeId: vanessa.id, required: true, status: "OPEN", title: "Fill out: Club Member Agreements" } })) === 1,
     "Vanessa owes WSUSA's Club Member Agreements form (a required task)",
@@ -297,6 +378,13 @@ async function main() {
     const c = await club(key);
     check((await db.roleAssignment.count({ where: { userId: elena.id, clubId: c.id, role: "ADVISOR", endedAt: null } })) === 1, `Dr. Alvarez advises ${c.name}`);
   }
+  // Advisor & President: the Wrecker Bots' VP stepped down; Priya proposed a successor for Dr. Alvarez to confirm.
+  const proposal = await db.election.findFirst({ where: { clubId: robotics.id, method: "ADVISOR_PRESIDENT", status: "NOMINATING", position: { role: "VP" } }, include: { position: true, candidates: true } });
+  const proposedRow = proposal?.candidates.find((c) => c.id === proposal.proposedCandidateId);
+  const vpOpen = proposal ? (await db.roleAssignment.count({ where: { positionId: proposal.positionId, endedAt: null } })) === 0 : false;
+  check(Boolean(proposal) && proposal!.position.role === "VP" && vpOpen && proposal!.proposedById === priya.id && Boolean(proposedRow?.fromPipeline) && !proposal!.confirmedAt, `${robotics.name}'s open VP seat: Priya proposed ${proposedRow ? "an officer from the org chart" : "nobody"}, not yet confirmed`);
+  check((await db.task.count({ where: { assigneeId: elena.id, kind: "APPROVAL", status: "OPEN", sourceType: "electionProposal", sourceId: proposal?.id ?? "" } })) === 1, "…and Dr. Alvarez has the APPROVAL task to confirm it");
+  check(robotics.successionMethod === "ADVISOR_PRESIDENT" && fic.successionMethod === "NEXT_IN_LINE" && swe.successionMethod === "SELF_SELECT" && psych.successionMethod === "MEMBER_VOTE", "The story clubs' primary methods: Wrecker Bots Advisor & President, FIC Next in line, SWE Self-select, Psi Chi Member vote");
   const alex = await user("alex");
   const sydney = await user("sydney");
   check(alex.platformRole === "ADMIN" && sydney.platformRole === "SYSADMIN", "Alex is ADMIN, Sydney is SYSADMIN");
@@ -363,6 +451,9 @@ async function main() {
   const slugs = ["review-integrity", "anonymous-reporting", "club-registration", "officer-eligibility-and-training", "event-safety", "funding-and-purchasing", "hazing-prohibition", "non-discrimination", "files-and-messaging-acceptable-use"];
   check((await db.policy.count({ where: { slug: { in: slugs } } })) === slugs.length, "All nine policy slugs exist");
   check((await db.policy.count({ where: { documentFileId: { not: null }, bodyHtml: null } })) === 1 && (await db.policy.count({ where: { status: "DRAFT" } })) === 1, "One PDF-only policy and one draft");
+
+  await searchChecks();
+  await ambassadorChecks();
 
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();

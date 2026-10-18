@@ -22,7 +22,7 @@ export function StartAmbassadorProgram({ collegeId, collegeName }: { collegeId: 
         </Button>
       }
       title={`Start an ambassador program for ${collegeName}?`}
-      description="This creates the college's ambassador org, already approved, with President, VP and ambassador seats (Marketing, Inter-club coordination, Events, Club representatives). Students request to join; you or its advisor then name a President in its org chart."
+      description="This creates the college's ambassador org, already approved, with President, VP and ambassador seats (Marketing, Inter-club coordination, Events, Club representatives). Next, choose its advisor here: the college's point person, who runs its elections and leadership pipeline. Students request to join, and the advisor (or you) names its first President in its org chart."
       confirmLabel="Start program"
       onConfirm={() =>
         start(async () => {

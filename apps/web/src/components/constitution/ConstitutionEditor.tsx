@@ -594,8 +594,8 @@ function AdoptDialog({
               <li>Replaces each club&apos;s current constitution and bylaws. Earlier versions stay in its history.</li>
               <li>Withdraws any custom document still waiting for WSUSA.</li>
               <li>
-                Sets joining to <span className="font-medium text-ink-2">{JOIN_LABEL[join].split(" — ")[0].toLowerCase()}</span> and succession to{" "}
-                <span className="font-medium text-ink-2">{SUCCESSION_LABEL[succession].split(" — ")[0].toLowerCase()}</span>.
+                Sets joining to <span className="font-medium text-ink-2">{JOIN_LABEL[join].split(" — ")[0].toLowerCase()}</span> and the primary way leaders are chosen to{" "}
+                <span className="font-medium text-ink-2">{SUCCESSION_LABEL[succession].split(" — ")[0]}</span>.
               </li>
             </ul>
             {error ? <Callout tone="danger">{error}</Callout> : null}

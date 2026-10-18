@@ -61,31 +61,44 @@ function relationship(s: { member: boolean; pending: boolean; subscribed: boolea
   return null;
 }
 
-const STOP_WORDS = new Set(["club", "clubs", "about", "the", "and", "for", "with", "a", "an", "of", "in", "on", "at", "to", "society", "group"]);
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 // ─── search_clubs ───────────────────────────────────────────────────────────
+
+/** How the clubs search matched, in words the model can pass on. */
+const MATCHED = { all: "every word", close: "close spellings of the words (no exact match)", some: "only some of the words (no club matched all of them)" } as const;
+
+/** "Event “Girls in STEM Robot Day”: …build robots…" from a club's search match. */
+function foundInText(m: NonNullable<ClubListItem["match"]>) {
+  const text = (runs: { text: string }[] | null) => (runs ?? []).map((r) => r.text).join("");
+  const title = text(m.title);
+  const snippet = text(m.snippet);
+  return `${m.label}${title ? ` “${title}”` : ""}${snippet ? `: ${snippet}` : ""}`;
+}
 
 const searchClubs = readTool({
   name: "search_clubs",
   running: "Searching clubs",
   description:
-    "Search Weber State's clubs (the public clubs list). Returns each club's name, link, type, college, focus, short description, whether joining is open or needs approval, activity status, members, rating, retention and the person's relationship to it. Use it for \"find clubs about X\", comparisons and browsing.",
+    "Search Weber State's clubs with the same search as the clubs list: it looks inside each club's page — about, events, public announcements, constitution, reviews and files — not just names, and copes with typos and acronyms (\"SWE\"). Returns each club's name, link, type, college, focus, short description, where the words were found, why it suits this person, whether joining is open, activity status, members, rating, retention and the person's relationship to it. Without a query it lists clubs in Recommended order (active, popular clubs and ones matching the person's majors, clubs and check-ins first). Use it for \"find clubs about X\", recommendations, comparisons and browsing.",
   schema: z.object({
-    query: z.string().max(100).optional().describe("Keywords matched against names, descriptions, majors, colleges and departments, e.g. \"AI\", \"chess\", \"nursing\". Leave out to browse."),
+    query: z.string().max(100).optional().describe("Words to look for in club pages, e.g. \"AI\", \"chess\", \"welding\", \"nursing\". Leave out to browse or recommend."),
     type: z.enum(["SPONSORED", "AFFILIATE", "REGISTERED", "COLLEGE_AMBASSADORS"]).optional(),
     category: z.enum(["ACADEMIC", "CULTURAL", "FSL", "HONOR_SOCIETY", "SERVICE_ADVOCACY", "STUDENT_LIFE", "RELIGIOUS"]).optional().describe("WSUSA's club category: academic, cultural, fraternity & sorority life, honor society, service & advocacy, student life & special interest, or religious"),
     status: z.enum(["active", "pilot", "inactive"]).optional().describe("active = counts as active (includes pilot clubs); pilot = new clubs in their pilot period; inactive = not active right now"),
     college: z.string().max(120).optional().describe("Only clubs in this college (name or short name)"),
-    sort: z.enum(["name", "rating", "members", "retention", "activity"]).optional().describe("Default: name"),
+    sort: z
+      .enum(["relevance", "recommended", "name", "rating", "members", "retention", "activity"])
+      .optional()
+      .describe("Default: relevance (best match) with a query, recommended without one"),
     limit: z.number().int().min(1).max(20).optional().describe("How many to return (default 8)"),
     archived: z.boolean().optional().describe("Search retired clubs instead of current ones"),
   }),
   async run({ actor }, input) {
     const college = input.college ? await resolveCollege(input.college) : null;
-    const sort = input.sort ?? "name";
+    const q = (input.query ?? "").trim();
+    // The clubs list's own defaults: Best match while searching, Recommended otherwise.
+    const sort = input.sort === "relevance" && !q ? "recommended" : (input.sort ?? (q ? "relevance" : "recommended"));
     const params: ClubListParams = {
-      q: "",
+      q,
       type: input.type ?? null,
       category: input.category ?? null,
       college: college?.slug ?? null,
@@ -97,32 +110,9 @@ const searchClubs = readTool({
       dir: SORT_DEFAULT_DIR[sort],
       view: "grid",
     };
-    const q = (input.query ?? "").trim();
-    let result = await listClubs({ ...params, q }, actor);
-    let items = result.items;
-    let matched = "every word";
-    if (q && items.length === 0) {
-      // The clubs list needs every word to match; fall back to any word, best matches first.
-      const words = q.split(/\s+/).filter((w) => w.length >= 2 && !STOP_WORDS.has(w.toLowerCase()));
-      if (words.length) {
-        result = await listClubs(params, actor);
-        const scored = result.items
-          .map((c) => {
-            const hay = [c.name, c.shortDescription, c.focus, c.college?.name, c.college?.shortName, c.departmentName, c.placement].filter(Boolean).join(" ");
-            return { c, score: words.filter((w) => new RegExp(`\\b${esc(w)}`, "i").test(hay)).length };
-          })
-          .filter((x) => x.score > 0);
-        scored.sort((a, b) => b.score - a.score);
-        items = scored.map((x) => x.c);
-        matched = "some of the words";
-      }
-    }
-    if (q && !input.sort) {
-      // Name matches read as the best answers.
-      const inName = (c: ClubListItem) => (c.name.toLowerCase().includes(q.toLowerCase()) ? 0 : 1);
-      items = [...items].sort((a, b) => inName(a) - inName(b));
-    }
     const limit = input.limit ?? 8;
+    const result = await listClubs(params, actor, { snippets: limit });
+    const items = result.items;
     const clubs = items.slice(0, limit).map((c) => ({
       name: c.name,
       link: `/clubs/${c.slug}`,
@@ -131,6 +121,8 @@ const searchClubs = readTool({
       focus: c.focus,
       department: c.departmentName,
       about: c.shortDescription,
+      ...(c.match ? { found_in: foundInText(c.match) } : {}),
+      ...(c.reasons.length ? { why_suggested: c.reasons } : {}),
       joining: c.joinPolicy === "OPEN" ? "open — registering makes you a member right away" : "leaders approve new members",
       status: clubStatusText(c),
       active_members: c.metrics.activeMembers,
@@ -143,9 +135,9 @@ const searchClubs = readTool({
       data: {
         found: items.length,
         showing: clubs.length,
-        ...(q ? { matched } : {}),
+        ...(q ? { matched: MATCHED[result.search?.mode ?? "all"] } : {}),
         clubs,
-        see_all_link: clubListHref({ ...params, q: matched === "every word" ? q : "" }),
+        see_all_link: clubListHref(params),
       },
       label: q ? `Searched clubs for ${quote(q, 40)}` : "Browsed the clubs list",
     };
@@ -158,7 +150,7 @@ const getClub = readTool({
   name: "get_club",
   running: "Looking up the club",
   description:
-    "Everything about one club: profile, type, college, how joining works, succession method, stats (activity status with reasons, members, retention, rating), leaders and advisors, upcoming events this person can see, and the person's own relationship (member, role, calendar, review eligibility).",
+    "Everything about one club: profile, type, college, how joining works, its primary way of choosing leaders (succession), stats (activity status with reasons, members, retention, rating), leaders and advisors, upcoming events this person can see, and the person's own relationship (member, role, calendar, review eligibility).",
   schema: z.object({ club: clubRef }),
   async run({ actor }, input) {
     const ref = await resolveClub(actor, input.club);
@@ -214,7 +206,7 @@ const getClub = readTool({
         about: club.shortDescription,
         description: richToText(club.descriptionHtml, 1500) || null,
         joining: JOIN_POLICY_LABEL[club.joinPolicy],
-        succession: SUCCESSION_LABEL[club.successionMethod],
+        succession: `${SUCCESSION_LABEL[club.successionMethod]} (the primary method; the President and advisor may use another for a particular seat)`,
         ...(access?.isLeader ? { club_email: club.contactEmail } : {}),
         started: fmtDate(club.createdAt, "MMM yyyy"),
         approved: club.approvedAt ? fmtDate(club.approvedAt, "MMM d, yyyy") : null,
@@ -645,7 +637,7 @@ const eventDetails = readTool({
       data: {
         title: event.title,
         type: KIND_LABEL[event.kind],
-        status: event.status === "DRAFT" ? "idea (not scheduled yet)" : event.status === "CANCELLED" ? "cancelled" : "scheduled",
+        status: event.status === "DRAFT" ? "draft (not on the calendar yet)" : event.status === "CANCELLED" ? "cancelled" : "scheduled",
         host: event.club?.name ?? "Weber State (university event)",
         cohosts: event.cohosts.map((c) => c.club.name),
         schedule: event.startsAt

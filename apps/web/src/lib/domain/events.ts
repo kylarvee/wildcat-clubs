@@ -20,6 +20,7 @@ import { removeEventFromGoogle, syncEventToGoogle, type GoogleSyncResult } from 
 import { isHttpUrl, joinEventLinks, splitEventLinks } from "@/lib/events/links";
 import { campusParts, toDateInput } from "@/lib/events/wallclock";
 import { campusDate } from "@/lib/time";
+import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
 
 /**
  * Events — the Events Builder's write path (club events and university
@@ -674,6 +675,8 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
   const saved = existing ? savedTimes(existing, terms) : null;
   const timesChanged = !saved || !sameTimes(saved, desired);
   const status: Event["status"] = existing && existing.status === "CANCELLED" ? "CANCELLED" : "SCHEDULED";
+  // Co-hosts before this save: one dropped from the list must lose the event from its search page too.
+  const cohostsBefore = existing ? (await db.eventCohost.findMany({ where: { eventId: existing.id, status: "APPROVED" }, select: { clubId: true } })).map((c) => c.clubId) : [];
 
   const { event, cohostChanges } = await withCodeRetry(() =>
     db.$transaction(
@@ -733,6 +736,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
     ),
   );
 
+  reindexEventClubsSoon(event.id, cohostsBefore);
   if (club && cohostChanges.length) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
   if (club && existing && existing.status !== "DRAFT" && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
   const google = await mirror(event.id, actor, f.createMeetLink);
@@ -892,6 +896,7 @@ export async function cancelEvent(actor: Actor | null, eventId: string, reason?:
       tx,
     );
   });
+  reindexEventClubsSoon(eventId);
   if (club) await tellCohostsAboutChange(event, club, a, "cancelled");
   await mirror(eventId, a);
   return { id: event.id };
@@ -919,6 +924,7 @@ export async function restoreEvent(actor: Actor | null, eventId: string) {
     if (club) await reopenCohostTasks(tx, event, club, a.id);
     await logActivity({ actorId: a.id, action: "event.restored", entityType: "event", entityId: eventId, clubId: event.clubId }, tx);
   });
+  reindexEventClubsSoon(eventId);
   await mirror(eventId, a);
   return { id: event.id };
 }
@@ -955,6 +961,7 @@ export async function restoreOccurrence(actor: Actor | null, occurrenceId: strin
     }
     await logActivity({ actorId: a.id, action: "event.occurrence_restored", entityType: "occurrence", entityId: occ.id, clubId: occ.event.clubId, data: { eventId: occ.eventId } }, tx);
   });
+  if (occ.event.status === "CANCELLED") reindexEventClubsSoon(occ.eventId);
   await mirror(occ.eventId, a);
   return { id: occ.id };
 }
@@ -985,12 +992,13 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
   if (requirement) throw conflict(`This training is the officer requirement “${requirement.name}”. Change that requirement first, or cancel the event instead.`);
   const [lock] = (await costLineLocks(costLines.map((b) => b.id))).values();
   if (lock) throw conflict(`This event's costs are part of the funding request “${lock.title}”, so it can't be deleted. Cancel it instead — its costs stay.`);
-  const cohosts = await db.eventCohost.findMany({ where: { eventId }, select: { id: true } });
+  const cohosts = await db.eventCohost.findMany({ where: { eventId }, select: { id: true, clubId: true, status: true } });
   await db.$transaction(async (tx) => {
     for (const c of cohosts) await resolveTasks("cohost", c.id, a.id, tx, "CANCELLED");
     await tx.event.delete({ where: { id: eventId } });
     await logActivity({ actorId: a.id, action: event.status === "DRAFT" ? "event.idea_deleted" : "event.deleted", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title } }, tx);
   });
+  if (event.status !== "DRAFT") reindexClubSoon(event.clubId, ...cohosts.filter((c) => c.status === "APPROVED").map((c) => c.clubId));
   await removeEventFromGoogle({ googleEventId: event.googleEventId, clubId: event.clubId });
   return { id: eventId };
 }
@@ -1021,6 +1029,8 @@ export async function decideCohost(actor: Actor | null, cohostId: string, approv
     data: { eventId: c.eventId, title: c.event.title },
     isPublic: approve,
   });
+  // Co-hosted events show up in the co-host's search page.
+  reindexClubSoon(c.clubId);
   if (c.event.clubId) {
     await notifyClubCapability(c.event.clubId, "events", {
       kind: approve ? "event.cohost_approved" : "event.cohost_declined",

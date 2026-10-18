@@ -12,12 +12,17 @@ import { shortLocationText } from "@/lib/events/labels";
 import { describeRepeat } from "@/lib/events/summary";
 import { fmtTime } from "@/lib/time";
 import type { ClubListParams } from "@/components/clubs/list-params";
+import { matchSnippets, searchIndex, type SearchMatch, type SearchMode } from "@/lib/search/engine";
+import { personalSignals } from "@/lib/search/personal";
+import { normalizeQuery } from "@/lib/search/query-text";
+import { rankContext, reasonsFor, scoreClub, type RankInput, type RankMode } from "@/lib/search/rank";
 
 /**
  * Read-only queries for the public site: landing page, clubs list, club page.
  * Nothing here writes (writes go through lib/domain). Every derived number —
  * members, retention, rating, activity — comes from lib/metrics so the list,
- * the club page and dashboards agree.
+ * the club page and dashboards agree. Search and the Best match / Recommended
+ * order come from lib/search.
  */
 
 // ─── Club rows for cards and the list ─────────────────────────────────────────
@@ -36,9 +41,11 @@ const clubCardSelect = {
   joinPolicy: true,
   createdAt: true,
   focusOther: true,
+  focusMajorId: true,
+  departmentId: true,
   college: { select: { id: true, name: true, shortName: true, slug: true } },
-  department: { select: { name: true } },
-  focusMajor: { select: { name: true } },
+  department: { select: { name: true, collegeId: true } },
+  focusMajor: { select: { name: true, departmentId: true, collegeId: true } },
 } satisfies Prisma.ClubSelect;
 
 type ClubCardRow = Prisma.ClubGetPayload<{ select: typeof clubCardSelect }>;
@@ -67,6 +74,10 @@ export type ClubListItem = {
   metrics: ClubMetricsView;
   /** False until the metrics layer has numbers for this club (badges stay hidden rather than guess). */
   hasMetrics: boolean;
+  /** With a search: where the words were found when the card doesn't show it ("Found in Event · …"). */
+  match: SearchMatch | null;
+  /** Up to two short reasons it's listed ("Matches your major (Nursing)", "Popular this term"). */
+  reasons: string[];
 };
 
 const EMPTY_METRICS: ClubMetricsView = {
@@ -102,6 +113,8 @@ function toItem(c: ClubCardRow, m: ClubListMetrics | undefined): ClubListItem {
     placement: c.scope === "COLLEGE" && c.college ? c.college.name : CLUB_SCOPE_LABEL[c.scope],
     metrics,
     hasMetrics: Boolean(m),
+    match: null,
+    reasons: [],
   };
 }
 
@@ -110,6 +123,12 @@ function fold(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+/**
+ * The old every-word match on the card's own fields. Only a fallback now: for
+ * clubs the search index hasn't covered yet (a brand-new approval in the
+ * seconds before its document is built) and for the archive (retired clubs
+ * aren't indexed).
+ */
 function matchesSearch(item: ClubListItem, q: string) {
   if (!q) return true;
   const hay = fold(
@@ -127,6 +146,9 @@ type Comparable = string | number | null;
 
 function sortKey(item: ClubListItem, sort: ClubListParams["sort"]): Comparable {
   switch (sort) {
+    case "relevance":
+    case "recommended":
+      return null; // ranked by score in listClubs
     case "name":
       return item.name;
     case "rating":
@@ -212,6 +234,15 @@ export async function shouldPromptForApp(userId: string): Promise<boolean> {
 
 // ─── Clubs list ───────────────────────────────────────────────────────────────
 
+export type ClubSearchSummary = {
+  /** The query as logged (lowercase, single-spaced). */
+  query: string;
+  /** "all": every word matched · "close": matched after fixing spelling · "some": only some of the words matched. */
+  mode: SearchMode;
+  /** Clubs that match what was asked (every word, a close name or a close spelling), before filters. */
+  matches: number;
+};
+
 export type ClubListResult = {
   items: ClubListItem[];
   /** Clubs in this listing before search and filters. */
@@ -219,18 +250,81 @@ export type ClubListResult = {
   archivedCount: number;
   colleges: { id: string; name: string; shortName: string; slug: string }[];
   states: Map<string, ViewerClubState>;
+  /** Set when there's a query. */
+  search: ClubSearchSummary | null;
 };
 
-/** The clubs list: approved clubs (or retired ones in the archive), filtered and sorted per the URL. */
-export async function listClubs(params: ClubListParams, viewer: Actor | null): Promise<ClubListResult> {
-  const [clubs, colleges, archivedCount, states] = await Promise.all([
+/** Relevance for a fallback word match (club not indexed yet, or the archive): like a match in the short description. */
+const FALLBACK_RELEVANCE = 0.3;
+/** "Found in" snippets are worked out for this many clubs from the top (the page shows 48 at a time). */
+export const SNIPPETS_FOR = 48;
+
+/** What a club's card already shows, so a "Found in" snippet only appears when the card doesn't explain the match. */
+const cardText = (c: Pick<ClubListItem, "name" | "shortDescription" | "placement" | "focus" | "type">) => [c.name, c.shortDescription, c.placement, c.focus, CLUB_TYPE_LABEL[c.type]].filter(Boolean).join(" · ");
+
+/**
+ * THE clubs list — the web /clubs page, GET /api/m/clubs and the assistant's
+ * search_clubs all call this. Approved clubs (or retired ones in the archive),
+ * searched with lib/search, filtered, and ordered per the URL: "Best match"
+ * with a query, "Recommended" (popularity + the viewer's own signals)
+ * without one, or any of the plain sorts. `snippets` = how many clubs from
+ * the top get a "Found in" snippet.
+ */
+export async function listClubs(params: ClubListParams, viewer: Actor | null, opts: { snippets?: number } = {}): Promise<ClubListResult> {
+  const q = params.q.trim();
+  const signedIn = Boolean(viewer);
+  const useIndex = Boolean(q) && !params.archived;
+  const [clubs, colleges, archivedCount, states, outcome, indexed] = await Promise.all([
     db.club.findMany({ where: { status: params.archived ? "RETIRED" : "APPROVED" }, select: clubCardSelect }),
     db.college.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, shortName: true, slug: true } }),
     db.club.count({ where: { status: "RETIRED" } }),
     viewer ? viewerClubStates(viewer.id) : Promise.resolve(new Map<string, ViewerClubState>()),
+    useIndex ? searchIndex(q, signedIn) : Promise.resolve(null),
+    useIndex ? db.clubSearchDoc.findMany({ select: { clubId: true } }).then((rows) => new Set(rows.map((r) => r.clubId))) : Promise.resolve(new Set<string>()),
   ]);
-  const metrics = clubs.length ? await clubListMetrics(clubs.map((c) => c.id)) : new Map<string, ClubListMetrics>();
+  const ids = clubs.map((c) => c.id);
+  const snippetCount = opts.snippets ?? SNIPPETS_FOR;
+  const cards = new Map(clubs.map((c) => [c.id, cardText(toItem(c, undefined))]));
+  // Snippets for the best text matches start now, alongside the metrics (the slow part); the final order rarely differs.
+  const likelyTop = outcome
+    ? clubs
+        .filter((c) => outcome.hits.has(c.id) && (!params.type || c.type === params.type) && (!params.category || c.category === params.category) && (!params.scope || c.scope === params.scope) && (!params.college || c.college?.slug === params.college))
+        .sort((a, b) => outcome.hits.get(b.id)! - outcome.hits.get(a.id)!)
+        .slice(0, snippetCount)
+    : [];
+  const [metrics, personal, earlySnippets] = await Promise.all([
+    ids.length ? clubListMetrics(ids) : Promise.resolve(new Map<string, ClubListMetrics>()),
+    viewer && !params.archived
+      ? personalSignals(
+          viewer.id,
+          clubs.map((c) => ({
+            id: c.id,
+            focusMajorId: c.focusMajorId,
+            focusMajorDepartmentId: c.focusMajor?.departmentId ?? null,
+            departmentId: c.departmentId,
+            collegeId: c.college?.id ?? c.department?.collegeId ?? c.focusMajor?.collegeId ?? null,
+          })),
+          states,
+        )
+      : Promise.resolve(null),
+    outcome && likelyTop.length ? matchSnippets(outcome, likelyTop.map((c) => ({ id: c.id, card: cards.get(c.id)! })), signedIn) : Promise.resolve(new Map<string, SearchMatch>()),
+  ]);
   const all = clubs.map((c) => toItem(c, metrics.get(c.id)));
+
+  // With a query: the index decides for indexed clubs; the old word match covers the rest.
+  let relevance: Map<string, number> | null = null;
+  let fallbackMatches = 0;
+  if (q) {
+    relevance = new Map();
+    for (const c of all) {
+      const hit = outcome?.hits.get(c.id);
+      if (hit != null) relevance.set(c.id, hit);
+      else if ((!outcome || !indexed.has(c.id)) && matchesSearch(c, q)) {
+        relevance.set(c.id, FALLBACK_RELEVANCE);
+        fallbackMatches++;
+      }
+    }
+  }
 
   const filtered = all.filter((c) => {
     if (params.type && c.type !== params.type) return false;
@@ -244,10 +338,40 @@ export async function listClubs(params: ClubListParams, viewer: Actor | null): P
       const s = states.get(c.id);
       if (!s || !(s.member || s.pending || s.leader)) return false;
     }
-    return matchesSearch(c, params.q);
+    return !relevance || relevance.has(c.id);
   });
 
-  return { items: sortClubs(filtered, params.sort, params.dir), total: all.length, archivedCount, colleges, states };
+  // Score every listed club (reasons show whatever the sort), then order.
+  const mode: RankMode = params.sort === "relevance" && q ? "relevance" : "recommended";
+  const ctx = rankContext(all.map((c) => c.metrics));
+  const scores = new Map<string, number>();
+  for (const c of filtered) {
+    const input: RankInput = { id: c.id, name: c.name, metrics: c.metrics, relevance: relevance?.get(c.id) ?? null, personal: personal?.get(c.id) ?? null };
+    scores.set(c.id, scoreClub(input, mode, ctx));
+    c.reasons = reasonsFor(input, ctx);
+  }
+  const items =
+    params.sort === "relevance" || params.sort === "recommended"
+      ? [...filtered].sort((a, b) => scores.get(b.id)! - scores.get(a.id)! || a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+      : sortClubs(filtered, params.sort, params.dir);
+
+  // "Found in" for the clubs shown first, where the card doesn't already explain the match.
+  if (outcome) {
+    const top = items.slice(0, snippetCount).filter((c) => outcome.hits.has(c.id));
+    const asked = new Set(likelyTop.map((c) => c.id));
+    const missing = top.filter((c) => !asked.has(c.id));
+    const late = missing.length ? await matchSnippets(outcome, missing.map((c) => ({ id: c.id, card: cards.get(c.id)! })), signedIn) : null;
+    for (const c of top) c.match = earlySnippets.get(c.id) ?? late?.get(c.id) ?? null;
+  }
+
+  return {
+    items,
+    total: all.length,
+    archivedCount,
+    colleges,
+    states,
+    search: q ? { query: outcome?.query.normalized ?? normalizeQuery(q), mode: outcome?.mode ?? "all", matches: (outcome?.matches ?? 0) + fallbackMatches } : null,
+  };
 }
 
 /** Clubs to feature on the landing page: the most active first, topped up with the rest. */

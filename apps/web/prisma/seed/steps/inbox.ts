@@ -108,6 +108,26 @@ function approvalTasks(ctx: Ctx) {
       if (c.status !== "PENDING") ctx.activity({ at: c.decidedAt ?? c.createdAt, actorId: c.decidedById, action: c.status === "APPROVED" ? "cohost.approved" : "cohost.declined", entityType: "eventCohost", entityId: c.id, clubId: partner.id, data: { eventId: ev.id, hostClubId: host.id }, isPublic: c.status === "APPROVED" });
     }
   }
+  // An EAST club without a College Ambassador asked EAST Ambassadors for one (domain/ambassadors).
+  // Priya's club when it has none (her story), otherwise the largest EAST club without one.
+  const eastAmb = ctx.clubs.find((c) => c.type === "COLLEGE_AMBASSADORS" && c.collegeKey === "east" && c.status === "APPROVED");
+  const activeAt = (a: { startedAt: Date; endedAt: Date | null }) => a.startedAt <= NOW && (!a.endedAt || a.endedAt > NOW);
+  const canAsk = (c: (typeof ctx.clubs)[number]) =>
+    c.collegeKey === "east" && c.type !== "COLLEGE_AMBASSADORS" && c.status === "APPROVED" && c.assignments.some((a) => a.role === "PRESIDENT" && activeAt(a)) && !c.assignments.some((a) => a.role === "AMBASSADOR" && activeAt(a));
+  const asking = canAsk(ctx.club("robotics"))
+    ? ctx.club("robotics")
+    : ctx.clubs.filter(canAsk).sort((a, b) => b.members.filter((m) => m.status === "ACTIVE").length - a.members.filter((m) => m.status === "ACTIVE").length || a.name.localeCompare(b.name))[0];
+  if (eastAmb && asking) {
+    const askedAt = addDays(NOW, -2.4);
+    const note = "We'd love help reaching more EAST students this spring.";
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: `${asking.name} asked for a College Ambassador`, description: note,
+      assigneeType: "CLUB", clubId: eastAmb.id, capability: "roster", href: `/clubs/${eastAmb.slug}/manage/ambassadors?requested=1`, status: "OPEN",
+      sourceType: "ambassadorRequest", sourceId: asking.id, createdById: ctx.leaderAt(asking, askedAt), createdAt: askedAt,
+    });
+    ctx.activity({ at: askedAt, actorId: ctx.leaderAt(asking, askedAt), action: "ambassador.requested", entityType: "club", entityId: asking.id, clubId: asking.id, data: { programId: eastAmb.id, note } });
+    ctx.refs.ambassadorRequestClub = asking.name;
+  }
   // Advisor invite to Prof. Nathan Reed.
   const bee = ctx.club("beekeeping");
   ctx.rows.tasks.push({
