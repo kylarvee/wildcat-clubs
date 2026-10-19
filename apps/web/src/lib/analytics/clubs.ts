@@ -1,7 +1,7 @@
 import "server-only";
 import type { ClubRole, FundingSource, FundingStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { clubActivityMany, clubAttendanceByOccurrence, clubListMetrics, type OccurrenceAttendance } from "@/lib/metrics";
+import { clubActivityMany, clubAverageAttendance, clubListMetrics, type OccurrenceAttendance } from "@/lib/metrics";
 import { lastBuckets } from "@/lib/metrics/pure";
 import { academicYearAt, currentOrLastTerm, getTerms } from "@/lib/terms";
 import { orgChartData } from "@/lib/roles/queries";
@@ -31,12 +31,6 @@ export async function termWindow(now: Date) {
   return { name: term.name, from: term.startsOn, to: term.endsOn < now ? term.endsOn : now, endsOn: term.endsOn, startsOn: term.startsOn };
 }
 
-/** Runs `fn` over `items` a few at a time, so dozens of per-club queries don't queue up on the pool at once. */
-async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += size) out.push(...(await Promise.all(items.slice(i, i + size).map(fn))));
-  return out;
-}
 
 /** One row per club (every status), for the analytics table and its CSV. */
 export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubAnalyticsRow[]; termName: string | null }> {
@@ -48,19 +42,17 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
     termWindow(now),
   ]);
   const ids = clubs.map((c) => c.id);
-  // Founding clubs have no events; only clubs that could have run one this term need the per-event query.
+  // Founding clubs have no events; only clubs that could have run one this term go in the attendance query.
   const withEvents = clubs.filter((c) => c.status === "APPROVED" || c.status === "RETIRED").map((c) => c.id);
-  const [activity, list, links, rates, leaders] = await Promise.all([
+  const [activity, list, links, rateBy, leaders] = await Promise.all([
     clubActivityMany(ids),
     clubListMetrics(ids),
     connectionCounts(),
-    term
-      ? inBatches(withEvents, 8, async (id) => [id, averageRate(await clubAttendanceByOccurrence(id, { from: term.from, to: term.to }))] as const)
-      : Promise.resolve([] as (readonly [string, number | null])[]),
+    // The tracker's "Avg. attendance" for every club at once (lib/metrics; the same figure as averageRate above).
+    term ? clubAverageAttendance(withEvents, { from: term.from, to: term.to }) : Promise.resolve(new Map<string, number | null>()),
     // Current Presidents and advisors, for the No President and No advisor filters.
     db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null, role: { in: ["PRESIDENT", "ADVISOR"] } }, _count: { _all: true } }),
   ]);
-  const rateBy = new Map(rates);
   const heldBy = new Map(leaders.map((g) => [`${g.clubId}:${g.role}`, g._count._all]));
   const held = (clubId: string, role: ClubRole) => heldBy.get(`${clubId}:${role}`) ?? 0;
 
@@ -82,6 +74,7 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
       registered: m?.registeredMembers ?? a?.registeredMembers ?? 0,
       active: m?.activeMembers ?? a?.activeMembers ?? 0,
       retention: m?.retentionRate ?? null,
+      retentionSummary: m?.retention ?? null,
       avgAttendance: rateBy.get(c.id) ?? null,
       heldEvents: a?.heldEventsCurrentTerm ?? 0,
       rating: m?.avgRating ?? null,
@@ -150,6 +143,7 @@ export type FundingSummary = {
   approvedCents: number;
   pendingCents: number;
   counts: { submitted: number; pending: number; approved: number; denied: number };
+  /** requestedCents by the source the club expected; approvedCents by the source WSUSA funded it from (fundedSource ?? fundingSource). */
   bySource: { source: FundingSource; requestedCents: number; approvedCents: number }[];
   recent: { id: string; title: string; status: FundingStatus; requestedCents: number; approvedCents: number | null; termName: string; submittedAt: Date | null }[];
 };
@@ -165,10 +159,15 @@ export async function fundingSummary(clubId: string, now = new Date()): Promise<
   const requests = await db.fundingRequest.findMany({
     where: { clubId, status: { in: DECIDED_OR_WAITING }, term: { academicYear: ay.label } },
     orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
-    select: { id: true, title: true, status: true, fundingSource: true, amountRequestedCents: true, amountApprovedCents: true, submittedAt: true, term: { select: { name: true } } },
+    select: { id: true, title: true, status: true, fundingSource: true, fundedSource: true, amountRequestedCents: true, amountApprovedCents: true, submittedAt: true, term: { select: { name: true } } },
   });
   const out = { ...empty, bySource: [] as FundingSummary["bySource"] };
   const sources = new Map<FundingSource, { requestedCents: number; approvedCents: number }>();
+  const source = (key: FundingSource) => {
+    let s = sources.get(key);
+    if (!s) sources.set(key, (s = { requestedCents: 0, approvedCents: 0 }));
+    return s;
+  };
   for (const r of requests) {
     const approved = r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED" ? (r.amountApprovedCents ?? 0) : 0;
     out.requestedCents += r.amountRequestedCents;
@@ -179,10 +178,10 @@ export async function fundingSummary(clubId: string, now = new Date()): Promise<
       out.counts.pending++;
     } else if (r.status === "DENIED") out.counts.denied++;
     else out.counts.approved++;
-    const s = sources.get(r.fundingSource) ?? { requestedCents: 0, approvedCents: 0 };
-    s.requestedCents += r.amountRequestedCents;
-    s.approvedCents += approved;
-    sources.set(r.fundingSource, s);
+    // Asked for: by the source the club expects. Granted: by the source WSUSA funded it from
+    // (lib/funding/math requestTotals, the admin funding page and the budget breakdown agree).
+    source(r.fundingSource).requestedCents += r.amountRequestedCents;
+    if (approved) source(r.fundedSource ?? r.fundingSource).approvedCents += approved;
   }
   out.bySource = [...sources.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.requestedCents - a.requestedCents);
   out.recent = requests.slice(0, 5).map((r) => ({

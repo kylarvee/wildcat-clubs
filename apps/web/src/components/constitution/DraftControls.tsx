@@ -8,16 +8,22 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/misc";
 import { createDraftAction, deleteDraftAction } from "@/app/constitution/actions";
 
-/** Starts a draft (optionally for a club, or copied from the draft behind its current documents) and opens it. */
+/**
+ * Starts a draft (optionally for a club; with `fromCurrent`, from the answers
+ * behind its documents in effect; with `fromDraftId`, copied from a draft)
+ * and opens it.
+ */
 export function NewDraftButton({
   clubId,
   fromDraftId,
+  fromCurrent,
   children,
   variant = "primary",
   size = "md",
 }: {
   clubId?: string | null;
   fromDraftId?: string | null;
+  fromCurrent?: boolean;
   children: React.ReactNode;
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
@@ -31,7 +37,7 @@ export function NewDraftButton({
       disabled={pending}
       onClick={() =>
         start(async () => {
-          const r = await createDraftAction({ clubId: clubId ?? null, fromDraftId: fromDraftId ?? null });
+          const r = await createDraftAction({ clubId: clubId ?? null, fromDraftId: fromDraftId ?? null, fromCurrent: fromCurrent ?? null });
           if (!r.ok) return void toast.error(r.error);
           router.push(`/constitution/${r.data.id}${clubId ? `?club=${clubId}` : ""}`);
         })

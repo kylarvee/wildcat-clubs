@@ -230,9 +230,17 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                       ) : null}
                     </div>
                     <p className="text-sm text-ink-2">
-                      Uploaded by {d.createdBy.name} on {fmtLongDate(d.createdAt)}. On approval: primary way leaders are chosen,{" "}
-                      <span className="font-medium">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod].split(" — ")[0] : "(unchanged)"}</span>; joining is{" "}
-                      <span className="font-medium">{s.joinPolicy ? JOIN_POLICY_SHORT[s.joinPolicy].toLowerCase() : "(unchanged)"}</span>.
+                      Uploaded by {d.createdBy.name} on {fmtLongDate(d.createdAt)}. On approval:{" "}
+                      {s.governs === "successionMethod" ? (
+                        <>
+                          primary way leaders are chosen, <span className="font-medium">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod].split(" — ")[0] : "(unchanged)"}</span>. Joining stays as it is.
+                        </>
+                      ) : (
+                        <>
+                          joining is <span className="font-medium">{s.joinPolicy ? JOIN_POLICY_SHORT[s.joinPolicy].toLowerCase() : "(unchanged)"}</span>. The way leaders are chosen stays as it is.
+                        </>
+                      )}{" "}
+                      Members and WSUSA are told if it changes.
                     </p>
                     {s.note ? <p className="whitespace-pre-line text-sm text-ink-2">“{s.note}”</p> : null}
                     <DocumentDecision docId={d.id} label={`Custom ${label}`} />

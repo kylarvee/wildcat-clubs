@@ -132,6 +132,184 @@ export function isKeyHolder(userId: string, keys: KeyHolders) {
   return keys.presidentIds.includes(userId) || keys.advisorIds.includes(userId);
 }
 
+// ─── The club's bylaw rules (member votes) ───────────────────────────────────
+
+/** How a tied member vote is settled: the choices in the bylaws' Voting Procedures (lib/constitution/templates). */
+export const TIE_BREAKS = ["RUNOFF", "ADVISOR", "PRESIDENT"] as const;
+export type TieBreak = (typeof TIE_BREAKS)[number];
+
+export function isTieBreak(v: unknown): v is TieBreak {
+  return typeof v === "string" && (TIE_BREAKS as readonly string[]).includes(v);
+}
+
+/**
+ * The club's bylaw rules a selection froze when it started (Election.rules),
+ * so a later amendment never changes a vote already under way. null means
+ * the bylaws don't set it (or the club has no builder bylaws in effect), and
+ * the platform's default applies: active members vote, any turnout counts,
+ * whoever applies the result settles a tie, and voting may open any time.
+ */
+export type SelectionRules = {
+  /** Member vote: club events attended this term (counted when voting opens) to vote. */
+  minEvents: number | null;
+  /** Member vote: the share of eligible voters (1–100) who must vote for the result to count. */
+  quorumPercent: number | null;
+  /** Member vote: how a tie is settled. */
+  tieBreak: TieBreak | null;
+  /** Member vote: days between announcing it and the earliest voting may open. */
+  noticeDays: number | null;
+  /** A runoff: the tied member vote it settles. */
+  runoffOf: string | null;
+};
+
+export const NO_SELECTION_RULES: SelectionRules = { minEvents: null, quorumPercent: null, tieBreak: null, noticeDays: null, runoffOf: null };
+
+const whole = (v: unknown, min: number, max: number): number | null => (typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : null);
+
+/** Tolerant reader for Election.rules (selections started before rules were recorded hold {}). Never throws. */
+export function readSelectionRules(json: unknown): SelectionRules {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return NO_SELECTION_RULES;
+  const r = json as Record<string, unknown>;
+  return {
+    minEvents: whole(r.minEvents, 1, 100),
+    quorumPercent: whole(r.quorumPercent, 1, 100),
+    tieBreak: isTieBreak(r.tieBreak) ? r.tieBreak : null,
+    noticeDays: whole(r.noticeDays, 1, 365),
+    runoffOf: typeof r.runoffOf === "string" && r.runoffOf ? r.runoffOf : null,
+  };
+}
+
+/** What Election.rules stores: the four bylaw rules (null when unset), plus the tied vote a runoff settles. */
+export function selectionRulesJson(r: SelectionRules): Record<string, string | number | null> {
+  return { minEvents: r.minEvents, quorumPercent: r.quorumPercent, tieBreak: r.tieBreak, noticeDays: r.noticeDays, ...(r.runoffOf ? { runoffOf: r.runoffOf } : {}) };
+}
+
+/** Member vote with an attendance rule: a member votes when they'd attended at least `minEvents` club events this term by the time voting opened. */
+export function meetsAttendance(attended: number, minEvents: number): boolean {
+  return attended >= minEvents;
+}
+
+export type VoterRollRow = { userId: string; attended: number; eligible: boolean };
+
+/**
+ * Who votes in a selection, and why (`basis`), as lib/domain/elections
+ * voterRoll gathers it:
+ *   leaders     SELF_SELECT: the club's current student leaders.
+ *   attendance  MEMBER_VOTE under the bylaws' attendance requirement:
+ *               registered members who'd been to at least `minEvents` of
+ *               the club's events this term when voting opened (before it
+ *               opens, so far). Every member gets a row with their count.
+ *   active      MEMBER_VOTE with no attendance requirement: active members
+ *               per lib/metrics, or every registered member when the club
+ *               has no attendance yet.
+ *   none        NEXT_IN_LINE, ADVISOR_PRESIDENT: there are no ballots.
+ */
+export type VoterRoll = {
+  basis: "attendance" | "active" | "leaders" | "none";
+  minEvents: number | null;
+  /** The term attendance is counted in (attendance basis). */
+  termName: string | null;
+  /** Attendance is counted up to here: when voting opened, or now before that. */
+  countedUntil: Date;
+  /** Voting has opened, so an attendance roll won't change any more. */
+  final: boolean;
+  eligibleIds: string[];
+  /** Attendance basis only: every registered member with their count, most first. */
+  rows: VoterRollRow[];
+};
+
+/** An attendance roll's rows: every registered member with their count of club events, most first, eligible when it meets the rule. */
+export function attendanceRows(memberIds: string[], attendedBy: (userId: string) => number, minEvents: number): VoterRollRow[] {
+  return memberIds
+    .map((userId) => {
+      const attended = attendedBy(userId);
+      return { userId, attended, eligible: meetsAttendance(attended, minEvents) };
+    })
+    .sort((a, b) => b.attended - a.attended);
+}
+
+export type VoterStatus = { eligible: boolean; reason?: string; /** Attendance basis: their count and what the bylaws ask. */ attended?: number; minEvents?: number };
+
+/** One person's place on a roll, with the reason in plain words when they can't vote. */
+export function voterStatusIn(roll: VoterRoll, userId: string): VoterStatus {
+  const row = roll.rows.find((r) => r.userId === userId);
+  const counts = row && roll.minEvents ? { attended: row.attended, minEvents: roll.minEvents } : {};
+  if (roll.eligibleIds.includes(userId)) return { eligible: true, ...counts };
+  if (roll.basis === "leaders") return { eligible: false, reason: "The club's current student leaders choose this seat, so only they vote." };
+  if (roll.basis === "none") return { eligible: false, reason: "This selection has no ballots." };
+  if (roll.basis === "attendance" && roll.minEvents) {
+    if (!row) return { eligible: false, reason: "Only members of the club can vote." };
+    const events = (n: number) => `${n} club event${n === 1 ? "" : "s"}`;
+    return {
+      eligible: false,
+      ...counts,
+      reason: roll.final
+        ? `You'd been to ${row.attended ? events(row.attended) : "no club events"} this semester when voting opened. The club's bylaws ask for ${events(roll.minEvents)} to vote.`
+        : `So far this semester you've been to ${row.attended ? events(row.attended) : "no club events"}. The club's bylaws ask for ${events(roll.minEvents)} by the time voting opens.`,
+    };
+  }
+  return { eligible: false, reason: "Only active members of the club can vote." };
+}
+
+export type Quorum = { percent: number; needed: number; met: boolean };
+
+/**
+ * Member vote quorum: a result counts only when at least `quorumPercent` of
+ * the eligible voters voted. `needed` is that many ballots, rounded up, and
+ * never fewer than one (a vote nobody could cast never counts). Null when the
+ * bylaws set no quorum.
+ */
+export function quorumOf(p: { quorumPercent: number | null; eligibleVoters: number; votes: number }): Quorum | null {
+  if (!p.quorumPercent) return null;
+  const needed = Math.max(1, Math.ceil((p.quorumPercent * p.eligibleVoters) / 100));
+  return { percent: p.quorumPercent, needed, met: p.votes >= needed };
+}
+
+/** Member vote notice: voting may open `noticeDays` after the vote was announced (it's announced when it's started). Null when there's no notice rule. */
+export function earliestVotingOpen(announcedAt: Date, noticeDays: number | null): Date | null {
+  return noticeDays ? new Date(announcedAt.getTime() + noticeDays * 86_400_000) : null;
+}
+
+/** How far before the exact earliest moment a new member vote may still open: the form rounds the earliest up to the quarter hour, so a time picked at it passes a few minutes later. */
+export const NOTICE_GRACE_MS = 15 * 60_000;
+
+/** The earliest a member vote announced at `announcedAt` may open, rounded up to the quarter hour: what the form suggests and shows. */
+export function noticeEarliest(announcedAt: Date, noticeDays: number | null): Date | null {
+  const raw = earliestVotingOpen(announcedAt, noticeDays);
+  return raw ? new Date(Math.ceil(raw.getTime() / NOTICE_GRACE_MS) * NOTICE_GRACE_MS) : null;
+}
+
+/** Who settles a tied member vote: a runoff, or a choice between the tied candidates by these people (WSUSA administrators always may). */
+export type TieResolution =
+  | { kind: "runoff" }
+  | {
+      kind: "choose";
+      /** organizer: whoever can apply the result (no bylaw rule); wsusa: nobody in the club can, so an administrator does. */
+      by: "advisor" | "president" | "organizer" | "wsusa";
+      /** Who may choose (empty for organizer and wsusa). */
+      userIds: string[];
+    };
+
+/**
+ * How a tied member vote is settled under the bylaws:
+ *   RUNOFF     a runoff between the tied candidates; a runoff that ties again goes to the advisor.
+ *   ADVISOR    the club's advisors choose; with no advisor, its President.
+ *   PRESIDENT  the club's President chooses; one who is among the tied candidates doesn't, and the advisors do.
+ *   none       whoever applies the result chooses, and that's recorded.
+ * When nobody in the club can, a WSUSA administrator does.
+ */
+export function tieResolution(p: { tieBreak: TieBreak | null; isRunoff: boolean; presidentIds: string[]; advisorIds: string[]; tiedUserIds: string[] }): TieResolution {
+  if (!p.tieBreak) return { kind: "choose", by: "organizer", userIds: [] };
+  if (p.tieBreak === "RUNOFF" && !p.isRunoff) return { kind: "runoff" };
+  const presidents = p.presidentIds.filter((id) => !p.tiedUserIds.includes(id));
+  const order: ("advisor" | "president")[] = p.tieBreak === "PRESIDENT" ? ["president", "advisor"] : ["advisor", "president"];
+  for (const by of order) {
+    const userIds = by === "advisor" ? p.advisorIds : presidents;
+    if (userIds.length) return { kind: "choose", by, userIds };
+  }
+  return { kind: "choose", by: "wsusa", userIds: [] };
+}
+
 /**
  * ADVISOR_PRESIDENT: who may confirm a proposal (besides admins, who always
  * may). The other side confirms: an advisor confirms the President's

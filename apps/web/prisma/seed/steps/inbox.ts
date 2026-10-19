@@ -8,14 +8,54 @@ import type { Ev } from "../ctx";
 import { placeOf, roomNotice } from "@/lib/events/notices";
 import { reviewUnlockedNotice, startingSoonNotice } from "@/lib/jobs/reminder-rules";
 import { fmtMoney } from "@/lib/time";
+import { digestOn, resolveDelivery, type NotificationPrefs } from "@/components/notifications/catalog";
+import type { UserRows } from "./people";
 
 /**
  * Everything that's waiting on someone: approval tasks (join requests,
  * co-hosts, advisor invites, club and document reviews, department requests),
- * personal and club to-dos, complaints, each persona's notifications, the
- * mocked email outbox, the activity stream, and WSUSA's staffing story (a
+ * personal and club to-dos, complaints, each persona's notifications and
+ * notification choices, the email outbox (mocked sends, and a big send still
+ * waiting to go out), the activity stream, and WSUSA's staffing story (a
  * club that just lost its President, and join requests nobody can approve).
  */
+
+// ─── Notification choices and the outbox ─────────────────────────────────────
+
+/**
+ * Settings → Notifications choices (User.notificationPrefs, read by the
+ * registry in components/notifications/catalog). Everyone else keeps the
+ * defaults; Maya does too, so a tester can flip one and watch it.
+ */
+const PERSONA_PREFS: Record<string, NotificationPrefs> = {
+  // Co-host requests and cancellations reach her bell and phone; she handles them in the Events Builder.
+  priya: { events: { email: false } },
+  // Two clubs' announcements: she reads them on the bell.
+  elena: { announcements: { email: false } },
+  // A system administrator who'd rather hear about each submission than read the morning digest.
+  sydney: { adminDigest: { email: false } },
+};
+
+function notificationPrefs(ctx: Ctx, users: UserRows): Map<string, NotificationPrefs> {
+  const out = new Map<string, NotificationPrefs>();
+  for (const [key, prefs] of Object.entries(PERSONA_PREFS)) {
+    const id = ctx.p(key).id;
+    users.get(id)!.notificationPrefs = prefs as Prisma.InputJsonObject;
+    out.set(id, prefs);
+  }
+  return out;
+}
+
+const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
+
+/** One outbox row as lib/integrations records it: sent rows have sentAt; QUEUED rows wait for the "Send queued messages" job. */
+function outboxRow(
+  ctx: Ctx,
+  m: { to: string; subject: string; body: string; href: string | null; kind: string | null; at: Date; channel?: "EMAIL" | "PUSH"; status?: "MOCKED" | "QUEUED" | "FAILED"; error?: string },
+) {
+  const status = m.status ?? "MOCKED";
+  ctx.rows.outbox.push({ id: ctx.id(), channel: m.channel ?? "EMAIL", to: m.to, subject: m.subject, body: m.body, href: m.href, status, error: m.error ?? null, kind: m.kind, createdAt: m.at, sentAt: status === "QUEUED" ? null : m.at });
+}
 
 function caseCode(ctx: Ctx) {
   return `WC-${ctx.rng.string("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 4)}-${ctx.rng.int(10, 99)}`;
@@ -313,25 +353,77 @@ function personaNotifications(ctx: Ctx) {
   // Sydney: nothing in the app notifies about system settings or job runs (System → Scheduled jobs shows those).
 }
 
-function outbox(ctx: Ctx) {
+/**
+ * What the platform emailed and pushed: each row the kind of notice the app
+ * sends that way (components/notifications/catalog), so the outbox agrees
+ * with the registry. WSUSA's routine notices (submissions) go into the
+ * admins' daily digest instead, except for Sydney, who turned it off; the
+ * first "Send queued messages" run after seeding sends today's digest.
+ */
+function outbox(ctx: Ctx, prefs: Map<string, NotificationPrefs>) {
   const { NOW } = ctx;
-  const mail = (to: string, subject: string, body: string, href: string | null, hoursAgo: number, channel: "EMAIL" | "PUSH" = "EMAIL") =>
-    ctx.rows.outbox.push({ id: ctx.id(), channel, to, subject, body, href, status: "MOCKED", createdAt: addHours(NOW, -hoursAgo) });
+  const mail = (to: string, kind: string | null, subject: string, body: string, href: string | null, hoursAgo: number) => outboxRow(ctx, { to, kind, subject, body, href, at: addHours(NOW, -hoursAgo) });
   const e = (k: string) => ctx.p(k).email;
   const nm = (k: string) => ctx.club(k).name;
-  mail(e("nathan"), "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Frank Okafor invited you to be the faculty advisor for Wildcat Beekeeping Society on Wildcat Clubs. Sign in with your Weber State account to accept or decline.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 24 * 3.2);
-  mail(e("frank"), `${nm("boardgames")} is in WSUSA review`, `Thanks for submitting ${nm("boardgames")}. WSUSA Clubs & Organizations reviews new clubs in about ten business days.`, `/clubs/${ctx.club("boardgames").slug}/manage`, 24 * 5.1);
-  mail(ctx.person(ctx.club("aviation").founderId).email, "Changes requested: Aviation Club", "WSUSA reviewed Aviation Club and asked for a couple of changes before approval. Open the club workspace to see the note.", `/clubs/${ctx.club("aviation").slug}/manage`, 24 * 6.3);
-  for (const a of ctx.admins) mail(a.email, `Possible review bombing: ${nm("discgolf")}`, "3 reviews of 2★ or lower in the last 48 hours.", `/admin/reviews?club=${ctx.club("discgolf").id}`, 9);
-  for (const a of ctx.admins) mail(a.email, `Funding request: ${nm("fic")} — Fall speaker series`, "A new funding request is waiting for review.", "/admin/funding", 24 * 5.2);
-  mail(e("oscar"), "Your new role has WSUSA requirements", "Finish Club Officer Policy Test, Club Officer Training to keep your permissions on.", "/tasks", 24 * 20.3);
-  mail(e("maya"), "Voting is open: President — Spring 2027", `Cast your secret ballot for ${nm("psych")}. One vote each.`, `/clubs/${ctx.club("psych").slug}/elections/${ctx.refs.psychElectionId}`, 50);
-  mail(e("vanessa"), `Co-host request from ${nm("cyber")}`, `${nm("cyber")} asked SWE to co-host “Women in Cybersecurity Panel”.`, `/clubs/${ctx.club("swe").slug}/manage/events`, 30);
-  mail(e("priya"), "Funding approved: Combat robotics competition travel", "WSUSA approved your request.", `/clubs/${ctx.club("robotics").slug}/manage/budget`, 24 * 9.3);
+  // The invitation itself (lib/domain/advisors emailAddress): it can reach someone without an account, so it has no kind.
+  mail(e("nathan"), null, "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Frank Okafor invited you to be the faculty advisor for Wildcat Beekeeping Society on Wildcat Clubs. Sign in with your Weber State account to accept or decline.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 24 * 3.2);
+  mail(ctx.person(ctx.club("aviation").founderId).email, "club.changes_requested", "Changes requested: Aviation Club", "WSUSA reviewed Aviation Club and asked for a couple of changes before approval. Open the club workspace to see the note.", `/clubs/${ctx.club("aviation").slug}/manage`, 24 * 6.3);
+  // Urgent for WSUSA: emailed right away, never held for the digest.
+  for (const a of ctx.admins) mail(a.email, "review.bombing", `Possible review bombing: ${nm("discgolf")}`, "3 reviews of 2★ or lower in the last 48 hours.", `/admin/reviews?club=${ctx.club("discgolf").id}`, 9);
+  // A digest kind: only an admin who turned the digest off got it one by one.
+  for (const a of ctx.admins.filter((x) => !digestOn(prefs.get(x.id) ?? {}))) mail(a.email, "funding.submitted", `Funding request: ${nm("fic")} — Fall speaker series`, "A new funding request is waiting for review.", "/admin/funding", 24 * 5.2);
+  mail(e("oscar"), "requirement.assigned", "Your new role has WSUSA requirements", "Finish Club Officer Policy Test, Club Officer Training to keep your permissions on.", "/tasks", 24 * 20.3);
+  mail(e("maya"), "election.voting_opened", "Voting is open: President — Spring 2027", `Cast your secret ballot for ${nm("psych")}. One vote each.`, `/clubs/${ctx.club("psych").slug}/elections/${ctx.refs.psychElectionId}`, 50);
+  mail(e("vanessa"), "event.cohost_request", `Co-host request from ${nm("cyber")}`, `${nm("cyber")} asked SWE to co-host “Women in Cybersecurity Panel”.`, `/clubs/${ctx.club("swe").slug}/manage/events`, 30);
+  mail(e("priya"), "funding.approved", "Funding approved: Combat robotics competition travel", "WSUSA approved your request.", `/clubs/${ctx.club("robotics").slug}/manage/budget`, 24 * 9.3);
   for (const m of ctx.club("robotics").members.filter((x) => x.status === "ACTIVE" && x.joinedAt && x.joinedAt > addDays(NOW, -30)).slice(0, 4)) {
-    mail(ctx.person(m.userId).email, `You're in! Welcome to ${nm("robotics")}`, "Your join request was approved.", `/clubs/${ctx.club("robotics").slug}`, (NOW.getTime() - m.joinedAt!.getTime()) / 3_600_000);
+    mail(ctx.person(m.userId).email, "membership.approved", `You're in! Welcome to ${nm("robotics")}`, "Your join request was approved.", `/clubs/${ctx.club("robotics").slug}`, (NOW.getTime() - m.joinedAt!.getTime()) / 3_600_000);
   }
-  ctx.rows.outbox.push({ id: ctx.id(), channel: "PUSH", to: ctx.p("priya").id, subject: `New join requests for ${nm("robotics")}`, body: "5 people are waiting for approval.", href: `/clubs/${ctx.club("robotics").slug}/manage/members`, status: "FAILED", error: "Expo push token expired (DeviceNotRegistered).", createdAt: addHours(NOW, -10) });
+  outboxRow(ctx, {
+    channel: "PUSH", to: ctx.p("priya").id, kind: "membership.requested", subject: `New join requests for ${nm("robotics")}`, body: "5 people are waiting for approval.",
+    href: `/clubs/${ctx.club("robotics").slug}/manage/members`, status: "FAILED", error: "Expo push token expired (DeviceNotRegistered).", at: addHours(NOW, -10),
+  });
+  queuedAnnouncement(ctx, prefs);
+}
+
+/**
+ * A big send still going out: Priya posted to the RC Wrecker Bots Club a few
+ * minutes before the seed ran. Its audience (members and leaders, about 90)
+ * is over lib/domain/notify's QUEUE_OVER, so every bell has it already and
+ * the emails wait as QUEUED for the "Send queued messages" job, which sends
+ * up to about 200 a run. Who's emailed follows the registry and each person's
+ * choices (resolveDelivery): Dr. Alvarez turned Announcements email off, so
+ * she has the bell and no email.
+ */
+export const QUEUED_ANNOUNCEMENT_TITLE = "Competition team tryouts are this Saturday";
+
+function queuedAnnouncement(ctx: Ctx, prefs: Map<string, NotificationPrefs>) {
+  const club = ctx.club("robotics");
+  const priya = ctx.p("priya");
+  const at = addMin(ctx.NOW, -4);
+  const title = QUEUED_ANNOUNCEMENT_TITLE;
+  const text = "Bring your laptop and any parts you're working on. Tryouts run 10 AM to 2 PM in the Makerspace; no experience needed.";
+  const id = ctx.id();
+  ctx.rows.announcements.push({ id, clubId: club.id, authorId: priya.id, title, bodyHtml: `<p>${text}</p>`, audience: "MEMBERS", pinned: false, createdAt: at, updatedAt: at });
+  ctx.activity({ at, actorId: priya.id, action: "announcement.created", entityType: "announcement", entityId: id, clubId: club.id, data: { title, audience: "MEMBERS" } });
+
+  // lib/domain/announcements: active members plus current leaders and advisors, minus the author.
+  const active = (userId: string) => ctx.person(userId).status === "ACTIVE";
+  const audience = [
+    ...new Set([
+      ...club.members.filter((m) => m.status === "ACTIVE" && active(m.userId)).map((m) => m.userId),
+      ...club.assignments.filter((a) => a.role !== "MEMBER" && a.startedAt <= ctx.NOW && (!a.endedAt || a.endedAt > ctx.NOW) && active(a.userId)).map((a) => a.userId),
+    ]),
+  ].filter((userId) => userId !== priya.id);
+  const notice = { title: `New announcement in ${club.name}`, body: `${title} — ${text}`, href: `/clubs/${club.slug}#announcements` };
+  const admins = new Set(ctx.admins.map((a) => a.id));
+  for (const userId of audience) {
+    ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "announcement.new", ...notice, createdAt: at, readAt: null });
+    const d = resolveDelivery("announcement.new", { emailOn: true, admin: admins.has(userId), prefs: prefs.get(userId) ?? {} });
+    // Recorded the way lib/integrations/email queueEmails composes it: the link under the body.
+    if (d.email === "now") outboxRow(ctx, { to: ctx.person(userId).email, kind: "announcement.new", subject: notice.title, body: `${notice.body}\n\n${APP_URL}${notice.href}`, href: `${APP_URL}${notice.href}`, at, status: "QUEUED" });
+  }
+  ctx.refs.queuedAnnouncement = title;
 }
 
 function activity(ctx: Ctx) {
@@ -421,10 +513,18 @@ function staffingStory(ctx: Ctx) {
       status: "OPEN", sourceType: STAFFING_SOURCE, sourceId: staffingSourceId(club.id, "president"), createdById: advisorId, createdAt: flaggedAt,
     });
     ctx.activity({ at: flaggedAt, actorId: null, action: "staffing.gap_flagged", entityType: "club", entityId: club.id, clubId: club.id, data: { gap: "president" } });
-    // The remaining leaders and advisors hear about it in-app (not the advisor who ended the role).
+    // The remaining leaders and advisors hear about it (not the advisor who ended the role), and so does WSUSA,
+    // with its task's wording. staffing.gap always sends, so everyone told was emailed too (lib/domain/staffing).
     const notice = gapNotice(story);
     const told = [...new Set(pick.now.filter((a) => a !== president && a.role !== "MEMBER" && a.userId !== advisorId).map((a) => a.userId))];
-    for (const userId of told) ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "staffing.gap", title: notice.title, body: notice.body, href: notice.href, createdAt: flaggedAt, readAt: null });
+    for (const userId of told) {
+      ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "staffing.gap", title: notice.title, body: notice.body, href: notice.href, createdAt: flaggedAt, readAt: null });
+      outboxRow(ctx, { to: ctx.person(userId).email, kind: "staffing.gap", subject: notice.title, body: notice.body, href: notice.href, at: flaggedAt });
+    }
+    for (const a of ctx.admins) {
+      ctx.rows.notifications.push({ id: ctx.id(), userId: a.id, kind: "staffing.gap", title: task.title, body: task.description, href: task.href, createdAt: flaggedAt, readAt: null });
+      outboxRow(ctx, { to: a.email, kind: "staffing.gap", subject: task.title, body: task.description, href: task.href, at: flaggedAt });
+    }
     ctx.refs.staffingClub = club.name;
   }
 
@@ -455,12 +555,13 @@ function staffingStory(ctx: Ctx) {
   }
 }
 
-export function buildInbox(ctx: Ctx) {
+export function buildInbox(ctx: Ctx, users: UserRows) {
+  const prefs = notificationPrefs(ctx, users);
   complaints(ctx);
   approvalTasks(ctx);
   todoTasks(ctx);
   personaNotifications(ctx);
-  outbox(ctx);
+  outbox(ctx, prefs);
   activity(ctx);
   staffingStory(ctx);
 }

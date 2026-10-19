@@ -246,8 +246,6 @@ export async function setTaskDone(actor: Actor | null, taskId: string, done: boo
       title: `${actor.name} finished “${task.title}”`,
       body: task.club ? `A task you assigned in ${task.club.name}.` : undefined,
       href: "/tasks?view=assigned",
-      email: false,
-      push: false,
     });
   }
   return updated;

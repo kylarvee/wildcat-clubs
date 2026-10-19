@@ -7,6 +7,8 @@ import { markMissedAssignments, prefillPendingSuggestions, runTestCycles, submit
 import { pruneSearchLog, reindexStale, SEARCH_LOG_DAYS } from "@/lib/search/index-build";
 import { sendReminders } from "@/lib/jobs/reminders";
 import { runClubStaffing } from "@/lib/jobs/staffing";
+import { runFundingFollowUps } from "@/lib/jobs/funding";
+import { runNotificationJobs } from "@/lib/jobs/notifications";
 
 /**
  * CONTRACT (owner: tests & policy builder). Scheduled jobs, run by
@@ -101,6 +103,10 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
+    // Requests in WSUSA review past the office's review time and invoices past due: one in-app reminder to the admins each (lib/jobs/funding).
+    await job("Funding follow-ups", () => runFundingFollowUps(now)),
+  );
+  reports.push(
     // Catches what the write paths' reindexClubSoon didn't (constitutions, seats, files, renames):
     // clubs whose content is newer than their search document, plus any document a day old.
     await job("Club search", async () => {
@@ -115,6 +121,11 @@ async function runSequence(now: Date): Promise<JobReport[]> {
   reports.push(
     // Join requests nobody can approve (one WSUSA task per club), and a re-check of clubs missing a leader (lib/jobs/staffing).
     await job("Club staffing", () => runClubStaffing(now)),
+  );
+  reports.push(
+    // Last, so whatever the jobs above queued goes out in the same run: big sends' emails and pushes,
+    // about 200 a run, oldest first, and WSUSA's daily digest (lib/jobs/notifications).
+    await job("Send queued messages", () => runNotificationJobs(now)),
   );
   return reports;
 }

@@ -9,6 +9,7 @@ import { CLUB_STATUS_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, JOI
 import { RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
 import { FoundIn } from "@/components/search/FoundIn";
 import { Reasons } from "@/components/search/Reasons";
+import { ACTIVITY_SCORE_DAYS, ACTIVITY_SCORE_HINT, noRetentionText } from "@/lib/metrics/pure";
 
 /** "Pilot period" / "Inactive" standing, or "Retired". Shows nothing for active clubs, or until the metrics layer has numbers. */
 export function ClubStatusBadge({ club }: { club: Pick<ClubListItem, "status" | "metrics" | "hasMetrics"> }) {
@@ -100,19 +101,20 @@ export function ClubCard({ club, state, signedIn, showActions = true }: { club: 
         </div>
         <div className="min-w-0">
           <dt className="flex items-center gap-1 text-ink-3">
-            <Activity className="h-3.5 w-3.5" aria-hidden="true" /> Events
+            <Activity className="h-3.5 w-3.5" aria-hidden="true" /> Events held
           </dt>
-          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title="Events in the last 30 days and the next 30 days">
+          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title={ACTIVITY_SCORE_HINT}>
             {m.activityScore.toLocaleString("en-US")}
-            <span className="sr-only"> in the last and next 30 days</span>
+            <span className="sr-only"> in the last {ACTIVITY_SCORE_DAYS} days</span>
           </dd>
         </div>
         <div className="min-w-0">
           <dt className="flex items-center gap-1 text-ink-3">
             <Repeat className="h-3.5 w-3.5" aria-hidden="true" /> Retention
           </dt>
-          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title="Last month's attendees who came back">
+          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-ink" title={m.retention?.label ?? noRetentionText()}>
             {pct(m.retentionRate)}
+            {m.retention ? <span className="sr-only"> ({m.retention.label})</span> : null}
           </dd>
         </div>
       </dl>

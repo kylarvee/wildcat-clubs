@@ -776,7 +776,6 @@ export async function grantAccess(actor: Actor | null, fileId: string, input: { 
       title: `${actor!.name} shared “${item.name}” with you`,
       body: `You can ${v.canEdit ? "view and edit" : "view"} this ${item.isFolder ? "folder" : "file"}${where}. Find it under Shared with me in My files.`,
       href: "/files?view=shared",
-      push: false,
     });
   }
   await drive.mirrorSharing(space.clubId, fileId);

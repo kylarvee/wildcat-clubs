@@ -9,6 +9,7 @@
  * the viewer's own majors, clubs, calendars and check-ins (lib/search/personal).
  * Reasons mention counts, never other people's names.
  */
+import { heldLatelyText } from "@/lib/metrics/pure";
 
 export const WEIGHTS = {
   /** A text match outweighs everything else: relevance 1.0 is worth 20 points. */
@@ -17,9 +18,9 @@ export const WEIGHTS = {
     /** Active members, log-scaled: 60 active members is full marks. */
     members: 1.2,
     membersFull: 60,
-    /** Events in the last and next 30 days (activityScore), log-scaled: 12 is full marks. */
+    /** Events held in the last 30 days (activityScore: started, with a check-in), log-scaled: 6 is full marks. */
     activity: 0.8,
-    activityFull: 12,
+    activityFull: 6,
     /** Bayesian average rating (1–5 → 0–1), shrunk toward the campus mean. */
     rating: 0.6,
     /** How many "average" reviews every club starts with: few reviews barely move a club. */
@@ -61,8 +62,8 @@ export const WEIGHTS = {
     minPeerLift: 1.5,
     /** "Popular this term": at least this many active members and in the top 5% of clubs. */
     popularMin: 15,
-    /** "Busy calendar": at least this many events in the last and next 30 days and in the top tenth. */
-    busyMin: 8,
+    /** "Held N events in the last 30 days": at least this many held events (about weekly) and in the top tenth. */
+    busyMin: 4,
     /** "Highly rated": Bayesian rating at least this, from at least `ratedMinReviews` reviews. */
     ratedMin: 4.5,
     ratedMinReviews: 5,
@@ -187,7 +188,7 @@ export function reasonsFor(c: Pick<RankInput, "metrics" | "personal">, ctx: Rank
       : m.reviewCount >= R.ratedMinReviews && bayesianRating(m.avgRating, m.reviewCount, ctx.meanRating) >= R.ratedMin
         ? "Highly rated by students"
         : m.activityScore >= ctx.busyMin
-          ? "Busy calendar lately"
+          ? heldLatelyText(m.activityScore)
           : null;
   if (standing) out.push(standing);
   return out.slice(0, R.max);

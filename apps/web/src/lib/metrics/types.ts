@@ -26,14 +26,35 @@ export type RetentionPeriod = "month" | "quarter" | "academicYear" | "year";
 
 export type RetentionPoint = {
   label: string; // "Oct 2026", "Q3 2026", "2025-2026", "2026"
+  /** The period this one is compared with ("Sep 2026"); null for a series' first bucket. */
+  previousLabel: string | null;
   start: Date;
   end: Date; // last instant of the period (inclusive)
   attendees: number; // distinct people with ≥1 check-in in the period
   retained: number; // of the previous period's attendees, how many came back
   previousAttendees: number;
-  rate: number | null; // retained ÷ previousAttendees (null when the previous period had nobody)
+  rate: number | null; // retained ÷ previousAttendees (null unless both this period and the one before had attendees)
   /** True for the period that contains `at` (still running, so its numbers can still grow). */
   inProgress?: boolean;
+};
+
+/**
+ * RETENTION, the one figure screens quote (lib/metrics/pure latestRetention):
+ * the share of one complete period's attendees who came back the next
+ * complete period, for the most recent such pair that both had attendees.
+ */
+export type RetentionSummary = {
+  /** The two periods compared, oldest first ("Sep 2026", "Oct 2026"). */
+  from: string;
+  to: string;
+  /** retained ÷ previousAttendees. */
+  rate: number;
+  retained: number;
+  previousAttendees: number;
+  /** The pair, short: "Sep → Oct". */
+  months: string;
+  /** How every screen shows it: "Sep → Oct: 62% came back". */
+  label: string;
 };
 
 export type OccurrenceAttendance = {
@@ -81,9 +102,13 @@ export type ClubListMetrics = {
   clubId: string;
   registeredMembers: number;
   activeMembers: number;
-  retentionRate: number | null; // month retention: last complete month vs. the one before (falls back across empty months)
+  /** Month RETENTION (latestRetention over the last 12 months); null until two full months in a row have check-ins. */
+  retention: RetentionSummary | null;
+  /** retention's rate, for sorting and number-only readers. */
+  retentionRate: number | null;
   avgRating: number | null;
   reviewCount: number;
+  /** ACTIVITY SCORE: held events (started, ≥1 check-in) in the last 30 days, hosted or co-hosted. "Events held lately". */
   activityScore: number;
   isActive: boolean;
   inPilot: boolean;

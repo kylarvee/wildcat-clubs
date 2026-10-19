@@ -268,7 +268,7 @@ export async function revokeAdmin(actor: Actor | null, userId: string) {
   const user = await loadAdmin(userId);
   if (user.platformRole !== "ADMIN") throw conflict(user.platformRole === "SYSADMIN" ? `Remove ${user.name}'s system administrator role first.` : `${user.name} isn't an administrator.`);
   await setRole(actor, user, "USER", "system.admin_revoked");
-  await notify({ userIds: [user.id], kind: "system.admin_revoked", title: "Your Wildcat Clubs administrator access was removed", href: "/dashboard", email: false });
+  await notify({ userIds: [user.id], kind: "system.admin_revoked", title: "Your Wildcat Clubs administrator access was removed", href: "/dashboard" });
   return { name: user.name };
 }
 
@@ -291,7 +291,7 @@ export async function revokeSysadmin(actor: Actor | null, userId: string) {
   if (user.id === actor.id) throw forbidden("You can't remove your own system administrator role. Ask another system administrator.");
   if (user.platformRole !== "SYSADMIN") throw conflict(`${user.name} isn't a system administrator.`);
   await setRole(actor, user, "ADMIN", "system.sysadmin_revoked");
-  await notify({ userIds: [user.id], kind: "system.sysadmin_revoked", title: "Your system administrator role was removed", body: "You're still a WSUSA administrator.", href: "/admin", email: false });
+  await notify({ userIds: [user.id], kind: "system.sysadmin_revoked", title: "Your system administrator role was removed", body: "You're still a WSUSA administrator.", href: "/admin" });
   return { name: user.name };
 }
 

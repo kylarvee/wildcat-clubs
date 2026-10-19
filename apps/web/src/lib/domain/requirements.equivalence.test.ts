@@ -16,13 +16,21 @@ import { buildWorld, type World } from "@/test/requirements/world";
 const state = vi.hoisted(() => ({ db: null as unknown as import("@/test/requirements/fake-db").FakeDb }));
 vi.mock("@/lib/db", async () => ({ db: (await import("@/test/requirements/fake-db")).fakeClient(() => state.db) }));
 // notify() writes the bell notification (what later runs dedupe against); email and push are out of scope here.
-vi.mock("@/lib/domain/notify", async (original) => ({
-  ...(await original<object>()),
-  notify: async (input: { userIds: string[]; kind: string; title: string; body?: string; href?: string; exceptUserId?: string | null }) => {
+vi.mock("@/lib/domain/notify", async (original) => {
+  type Input = { userIds: string[]; kind: string; title: string; body?: string; href?: string; exceptUserId?: string | null };
+  const bell = async (input: Input) => {
     const ids = [...new Set(input.userIds)].filter((id) => id && id !== input.exceptUserId);
     await state.db.delegate("notification").createMany({ data: ids.map((userId) => ({ userId, kind: input.kind, title: input.title, body: input.body ?? null, href: input.href ?? null })) });
-  },
-}));
+  };
+  return {
+    ...(await original<object>()),
+    notify: bell,
+    // The new code sends a sweep's notices together; each still lands on the bell in order.
+    notifyEach: async (input: { kind: string; notices: Omit<Input, "kind">[] }) => {
+      for (const n of input.notices) await bell({ ...n, kind: input.kind });
+    },
+  };
+});
 
 import * as legacy from "@/test/requirements/legacy";
 import { requirementStatus } from "@/lib/authz/requirements";

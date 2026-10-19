@@ -15,6 +15,7 @@ const row = (p: Partial<ClubAnalyticsRow>): ClubAnalyticsRow => ({
   registered: 10,
   active: 5,
   retention: 0.5,
+  retentionSummary: { from: "Sep 2026", to: "Oct 2026", rate: 0.5, retained: 5, previousAttendees: 10, months: "Sep → Oct", label: "Sep → Oct: 50% came back" },
   avgAttendance: 0.6,
   heldEvents: 3,
   rating: 4,
@@ -30,7 +31,7 @@ const rows = [
   row({ name: "Astronomy Club", retention: 0.9, registered: 8 }),
   row({ name: "Béisbol Club", collegeId: null, collegeName: null, collegeShort: null, scope: "SPORTS", retention: null, type: "AFFILIATE", advisors: 0 }),
   row({ name: "Chess Club", stage: "inactive", retention: 0.2, registered: 30, presidents: 0, advisors: 0 }),
-  row({ name: "Drafty", status: "DRAFT", stage: "founding", retention: null, rating: null, presidents: 0, advisors: 0 }),
+  row({ name: "Drafty", status: "DRAFT", stage: "founding", retention: null, retentionSummary: null, rating: null, presidents: 0, advisors: 0 }),
   row({ name: "Pilot Club", stage: "pilot", retention: 1 }),
 ];
 
@@ -96,11 +97,13 @@ describe("csvRows", () => {
   it("writes percentages, blanks for missing data and full links", () => {
     const [header, first] = csvRows([rows[0], rows[3]], "Fall 2026", (p) => `https://clubs.example${p}`);
     expect(header).toContain("Average attendance rate (Fall 2026) (%)");
+    expect(header.slice(6, 8)).toEqual(["Retention (%)", "Retention months"]);
     expect(header.slice(-3)).toEqual(["Presidents", "Advisors", "Club page"]);
-    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, 60, 3, 4, 2, 3, 40, 1, 1, "https://clubs.example/clubs/club"]);
+    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, "Sep 2026 → Oct 2026", 60, 3, 4, 2, 3, 40, 1, 1, "https://clubs.example/clubs/club"]);
     const draft = csvRows([rows[3]], null)[1];
     expect(draft[3]).toBe("Draft");
     expect(draft[6]).toBe("");
-    expect(draft[9]).toBe("");
+    expect(draft[7]).toBe("");
+    expect(draft[10]).toBe("");
   });
 });

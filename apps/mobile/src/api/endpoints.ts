@@ -1,16 +1,21 @@
 import { api } from '@/api/client';
 import type {
+  MAnnouncementPage,
   MAttendance,
   MAuthOptions,
   MCalendar,
+  MCheckinCandidates,
   MCheckinPreview,
+  MCheckinQr,
   MCheckinRequest,
   MCheckinResult,
   MClubActionResponse,
   MClubDetail,
   MClubList,
+  MDecisionResponse,
   MEventDetail,
   MHome,
+  MManualCheckinResult,
   MMe,
   MNotifications,
   MPushTokenRequest,
@@ -19,7 +24,12 @@ import type {
   MReadResponse,
   MSession,
   MSignOutResponse,
+  MTaskDecision,
+  MTaskDoneResponse,
+  MTasks,
 } from '@/api/types';
+
+const DECISION_PATH: Record<MTaskDecision['kind'], string> = { JOIN: 'join-requests', COHOST: 'cohost-requests' };
 
 /** Every call the app makes, typed against the shared contract (api/types). */
 export const Api = {
@@ -33,6 +43,7 @@ export const Api = {
   removePush: (token: string) => api<MPushTokenResponse>('/push-token', { method: 'DELETE', body: { token } }),
 
   home: () => api<MHome>('/home'),
+  announcements: (cursor: string, limit = 10) => api<MAnnouncementPage>(`/announcements?cursor=${encodeURIComponent(cursor)}&limit=${limit}`),
   clubs: (q: string) => api<MClubList>(`/clubs${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   club: (slug: string) => api<MClubDetail>(`/clubs/${encodeURIComponent(slug)}`),
   clubAction: (slug: string, action: 'join' | 'leave' | 'subscribe' | 'unsubscribe') =>
@@ -52,4 +63,16 @@ export const Api = {
   notifications: () => api<MNotifications>('/notifications'),
   markRead: (body: MReadRequest) => api<MReadResponse>('/notifications/read', { method: 'POST', body }),
   attendance: () => api<MAttendance>('/attendance'),
+
+  tasks: () => api<MTasks>('/tasks'),
+  setTaskDone: (taskId: string, done: boolean) => api<MTaskDoneResponse>(`/tasks/${encodeURIComponent(taskId)}/done`, { method: 'POST', body: { done } }),
+  /** Approve or decline a join request or co-host invitation from Tasks. */
+  decide: (d: Pick<MTaskDecision, 'kind' | 'id'>, approve: boolean) =>
+    api<MDecisionResponse>(`/${DECISION_PATH[d.kind]}/${encodeURIComponent(d.id)}/${approve ? 'approve' : 'decline'}`, { method: 'POST' }),
+
+  // Leader check-in tools (Attendance permission in the host club).
+  checkinQr: (occurrenceId: string) => api<MCheckinQr>(`/checkin/${encodeURIComponent(occurrenceId)}/qr`),
+  checkinPeople: (occurrenceId: string, q: string, signal?: AbortSignal) =>
+    api<MCheckinCandidates>(`/checkin/${encodeURIComponent(occurrenceId)}/people?q=${encodeURIComponent(q)}`, { signal }),
+  addCheckin: (occurrenceId: string, userId: string) => api<MManualCheckinResult>(`/checkin/${encodeURIComponent(occurrenceId)}/people`, { method: 'POST', body: { userId } }),
 };

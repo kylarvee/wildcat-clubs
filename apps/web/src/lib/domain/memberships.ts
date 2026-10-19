@@ -48,7 +48,7 @@ export async function joinClub(actor: Actor | null, clubId: string, source: Memb
       source: { type: "membership", id: membership.id },
       createdById: actor.id,
     });
-    await notifyClubCapability(clubId, "roster", { kind: "membership.requested", title: `New join request for ${club.name}`, body: `${actor.name} asked to join.`, href: `/clubs/${club.slug}/manage/members`, exceptUserId: actor.id, email: false });
+    await notifyClubCapability(clubId, "roster", { kind: "membership.requested", title: `New join request for ${club.name}`, body: `${actor.name} asked to join.`, href: `/clubs/${club.slug}/manage/members`, exceptUserId: actor.id });
   } else {
     await subscribeInternal(actor.id, clubId);
     // New members owe whatever WSUSA requires of every club member.

@@ -255,6 +255,8 @@ function waitedFor(since: Date, now: Date, count: number) {
 
 const RISK_TONE = { inactive: "warning", pilot: "info", slipping: "neutral" } as const;
 
+const AT_RISK_SHOWN = 20;
+
 function AtRiskList({ clubs }: { clubs: AtRiskClub[] }) {
   if (!clubs.length)
     return (
@@ -264,9 +266,11 @@ function AtRiskList({ clubs }: { clubs: AtRiskClub[] }) {
         </p>
       </CardBody>
     );
+  // The rule's order puts the most urgent first; the rest are one click away in Club analytics.
+  const shown = clubs.slice(0, AT_RISK_SHOWN);
   return (
     <ul className="divide-y divide-line">
-      {clubs.map((c) => (
+      {shown.map((c) => (
         <li key={c.id} className="flex flex-wrap items-start gap-x-3 gap-y-1.5 px-5 py-3">
           <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden="true">
             {c.kind === "inactive" ? <AlertTriangle className="h-4 w-4 text-warning" /> : c.kind === "pilot" ? <Sprout className="h-4 w-4 text-info" /> : <TrendingDown className="h-4 w-4" />}
@@ -284,6 +288,14 @@ function AtRiskList({ clubs }: { clubs: AtRiskClub[] }) {
           <Badge tone={c.kind === "pilot" && c.endsThisTerm ? "warning" : RISK_TONE[c.kind]}>{c.endsThisTerm ? `${c.tag} · this term` : c.tag}</Badge>
         </li>
       ))}
+      {clubs.length > shown.length ? (
+        <li className="px-5 py-3 text-sm text-ink-2">
+          {clubs.length - shown.length} more clubs are at risk.{" "}
+          <Link href="/admin/analytics?status=inactive" className="font-medium text-brand-600 hover:underline">
+            See them in Club analytics
+          </Link>
+        </li>
+      ) : null}
     </ul>
   );
 }

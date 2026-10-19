@@ -9,7 +9,7 @@ import { logActivity } from "@/lib/lake/activity";
 import { INSTITUTION } from "@/lib/institution";
 import { richToText, sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { assertCan, assertClubCap, assertSignedIn, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
-import { notify } from "@/lib/domain/notify";
+import { notifyInBatches } from "@/lib/domain/notify";
 import { clubLeaderRoleWhere } from "@/lib/domain/messaging";
 import { reindexClubSoon } from "@/lib/search/fresh";
 import { ANNOUNCEMENT_TITLE_MAX, AUDIENCES } from "@/components/announcements/labels";
@@ -134,15 +134,15 @@ export async function audienceReach(actor: Actor | null, clubId: string | null):
   return { PUBLIC: everyone.length, MEMBERS: everyone.length, LEADERS: leaders.length };
 }
 
-/** Notification work runs after the response (in batches) so posting to the whole university stays quick. */
+/**
+ * Notification work runs after the response (in batches) so posting to the
+ * whole university stays quick. A big audience's emails and pushes are
+ * queued as one send (lib/domain/notify notifyInBatches); the bells land at once.
+ */
 function notifyLater(input: { userIds: string[]; title: string; body: string; href: string; exceptUserId: string }) {
   const ids = input.userIds.filter((id) => id !== input.exceptUserId);
   if (!ids.length) return;
-  const run = async () => {
-    for (let i = 0; i < ids.length; i += 100) {
-      await notify({ userIds: ids.slice(i, i + 100), kind: "announcement.new", title: input.title, body: input.body, href: input.href });
-    }
-  };
+  const run = () => notifyInBatches({ userIds: ids, kind: "announcement.new", title: input.title, body: input.body, href: input.href });
   const safe = () => run().catch((e) => console.error("[announcements] notifying failed", e));
   try {
     after(safe);

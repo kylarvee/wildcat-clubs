@@ -12,6 +12,7 @@ import { Card, Divider, SectionHeader } from '@/components/Card';
 import { CheckinSheet } from '@/components/CheckinSheet';
 import { ClubLogo } from '@/components/ClubLogo';
 import { EventRow } from '@/components/EventRow';
+import { LeaderCheckinCard } from '@/components/LeaderCheckinCard';
 import { Icon } from '@/components/Icon';
 import { ProgressBar } from '@/components/ProgressBar';
 import { ScrollScreen } from '@/components/Screen';
@@ -168,6 +169,11 @@ export default function ClubScreen() {
           ))
         : null}
 
+      {/* Leaders who can run check-in at a meeting that's on now (the server decides who). */}
+      {data.leaderCheckins.map((l) => (
+        <LeaderCheckinCard key={l.occurrence.id} item={l} />
+      ))}
+
       {!retired && !founding ? (
         <Actions data={data} busy={busy} onSignIn={signInToJoin} onJoin={() => void act('join')} onLeave={() => void leave()} onToggleSubscribe={(on) => void act(on ? 'subscribe' : 'unsubscribe')} />
       ) : null}
@@ -179,7 +185,7 @@ export default function ClubScreen() {
           <Stat label="Attending" value={String(data.metrics.activeMembers)} hint="members" />
           <Stat label="Registered" value={String(data.metrics.registeredMembers)} hint="members" />
           <Stat label="Rating" value={data.metrics.avgRating != null && data.metrics.reviewCount ? `★ ${data.metrics.avgRating.toFixed(1)}` : '—'} hint={data.metrics.reviewCount ? `${data.metrics.reviewCount} reviews` : 'No reviews yet'} />
-          <Stat label="Retention" value={pct(data.metrics.retentionRate)} hint="Month to month" />
+          <Stat label="Retention" value={pct(data.metrics.retentionRate)} hint={data.metrics.retentionText} />
         </View>
       ) : null}
 
@@ -283,7 +289,7 @@ function Actions({ data, busy, onSignIn, onJoin, onLeave, onToggleSubscribe }: {
             </Text>
             {v.isLeader ? (
               <Text variant="small" tone="ink2">
-                Leader tools are on the web.
+                More leader tools are on the web.
               </Text>
             ) : null}
           </View>

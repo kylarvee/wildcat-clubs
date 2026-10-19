@@ -6,7 +6,10 @@ import { addDays, DAY, human, minDate, monthDay, ymd } from "../lib/dates";
 import { createRng, type Rng } from "../lib/rng";
 import { addFile, addFolder, addPdf } from "./filehelp";
 import { mayGraduation } from "./reference";
-import { defaultDraftData } from "@/lib/constitution/templates";
+import { PSYCH_BYLAWS } from "./community";
+import { defaultDraftData, type DraftData } from "@/lib/constitution/templates";
+import { docToHtml, plain, renderDoc, type RenderedDoc } from "@/lib/constitution/render";
+import { settingsChangeNotice } from "@/lib/constitution/rules";
 
 /**
  * Club Files (a folder tree per club with minutes, flyers, featured resources,
@@ -31,7 +34,8 @@ const GENERIC_RESOURCE: [string, PdfBlock[]] = [
   ],
 ];
 
-function constitutionBlocks(club: ClubM): { constitution: PdfBlock[]; bylaws: PdfBlock[] } {
+/** `method`: the primary method the documents named (an earlier version may differ from today's). */
+function constitutionBlocks(club: ClubM, method: SuccessionMethod = club.def.succession ?? "ADVISOR_PRESIDENT"): { constitution: PdfBlock[]; bylaws: PdfBlock[] } {
   const d = club.def;
   const typeLabel = { SPONSORED: "Sponsored", AFFILIATE: "Affiliate", REGISTERED: "Registered", COLLEGE_AMBASSADORS: "College Ambassadors" }[club.type];
   const seats = [...club.seats.values()].filter((s) => s.role !== "AMBASSADOR" || club.type === "COLLEGE_AMBASSADORS").map((s) => s.name);
@@ -40,7 +44,7 @@ function constitutionBlocks(club: ClubM): { constitution: PdfBlock[]; bylaws: Pd
     NEXT_IN_LINE: "The club's primary method is Next in line: when a seat opens, the people in the seats just below it are asked whether they will move up, and the first in line who says yes takes the seat.",
     SELF_SELECT: "The club's primary method is Self-select: the current leaders choose by secret ballot in Wildcat Clubs, never voting for themselves, and the choice counts only if it is unanimous.",
     MEMBER_VOTE: "The club's primary method is Member vote: active members elect leaders each spring by secret ballot in Wildcat Clubs.",
-  }[d.succession ?? "ADVISOR_PRESIDENT"];
+  }[method];
   const succession = `${primary} The President and the advisor may use one of the other methods Wildcat Clubs offers (Advisor & President, Next in line, Self-select or Member vote) for a particular seat, at their discretion. The people on the Org Chart below a seat are its first candidates, and results are applied through the Org Chart.`;
   return {
     constitution: [
@@ -69,9 +73,89 @@ function builderDraftData(succession: SuccessionMethod): Prisma.InputJsonValue {
   return defaultDraftData({ successionMethod: succession }) as unknown as Prisma.InputJsonValue;
 }
 
-function clubDocuments(ctx: Ctx, club: ClubM, folderId: string, scope: { clubId: string; dir: string }, opts: { draftId?: string | null; v2?: boolean }) {
+/**
+ * The builder answers an adopted document keeps (ClubDocument.builderAnswers):
+ * the builder's defaults with the club's join policy and primary method, as
+ * adopting them set. Any leader with the Constitution permission can start a
+ * draft from them, and the engines read the bylaw rules from them.
+ */
+function answersFor(club: ClubM, succession: SuccessionMethod = club.def.succession ?? "ADVISOR_PRESIDENT"): DraftData {
+  return defaultDraftData({ successionMethod: succession, joinPolicy: club.def.joinPolicy ?? "OPEN" });
+}
+const answersJson = (d: DraftData) => d as unknown as Prisma.InputJsonValue;
+
+/** A club that adopted new documents with the builder recently: its earlier ones, which named `from` as the primary method, were superseded then. */
+type Readopt = { at: Date; by: string; from: SuccessionMethod; answers: DraftData };
+
+/** A rendered builder document as seed PDF blocks (one page: whatever doesn't fit is left off, as for every seed PDF). */
+function pdfBlocks(doc: RenderedDoc): PdfBlock[] {
+  return [
+    { text: plain(doc.preamble) },
+    ...doc.articles.flatMap((a) => a.blocks.map((b, i): PdfBlock => ({ ...(i === 0 ? { heading: `Article ${a.roman} - ${a.title}` } : {}), ...(b.type === "p" ? { text: plain(b.text) } : { bullets: b.items.map(plain) }) }))),
+  ];
+}
+
+/**
+ * The new versions a re-adoption put in effect, rendered by the builder
+ * itself from the answers they keep, and what adopting them did: the
+ * activity rows, the Constitution-permission holders' notice, and, since the
+ * primary method changed, the change notice for members and WSUSA
+ * (lib/domain/constitution announceSettingsChange).
+ */
+function readoptedDocuments(ctx: Ctx, club: ClubM, folderId: string, scope: { clubId: string; dir: string }, r: Readopt) {
+  const facts = { name: club.name, type: club.type, departmentName: club.def.department ?? null, collegeName: club.collegeKey ? (ctx.colleges.get(club.collegeKey)?.name ?? null) : null };
+  const versions = { constitution: 0, bylaws: 0 };
+  for (const [kind, docKind, label] of [["constitution", "CONSTITUTION", "Constitution"], ["bylaws", "BYLAWS", "Bylaws"]] as const) {
+    const version = Math.max(0, ...ctx.rows.documents.filter((d) => d.clubId === club.id && d.kind === docKind).map((d) => d.version ?? 0)) + 1;
+    const rendered = renderDoc(kind, r.answers, facts);
+    const file = addPdf(ctx, scope, `${club.slug}-${kind}-v${version}.pdf`, { title: rendered.title, subtitle: `Version ${version} · adopted ${monthDay(r.at)}, ${r.at.getUTCFullYear()}`, blocks: pdfBlocks(rendered), footer: `${club.name} · adopted through the Wildcat Clubs Constitution Builder` }, { parentId: folderId, createdById: r.by, createdAt: r.at });
+    ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind: docKind, title: label, version, source: "BUILDER", status: "ACTIVE", draftId: null, contentHtml: docToHtml(rendered), builderAnswers: answersJson(r.answers), fileId: file, createdById: r.by, createdAt: r.at, decidedAt: r.at });
+    versions[kind] = version;
+  }
+
+  const by = ctx.person(r.by);
+  const to = r.answers.fields.successionMethod as SuccessionMethod;
+  const joinPolicy = club.def.joinPolicy ?? "OPEN";
+  ctx.activity({ at: r.at, actorId: r.by, action: "constitution.adopted", entityType: "club", entityId: club.id, clubId: club.id, data: { draftId: null, constitutionVersion: versions.constitution, bylawsVersion: versions.bylaws, joinPolicy, successionMethod: to, previous: { joinPolicy, successionMethod: r.from } }, isPublic: true });
+  ctx.activity({ at: r.at, actorId: r.by, action: "constitution.settings_changed", entityType: "club", entityId: club.id, clubId: club.id, data: { via: "adopted", joinPolicy: null, successionMethod: { from: r.from, to } } });
+  const manage = `/clubs/${club.slug}/manage/constitution`;
+  for (const userId of ctx.capabilityHoldersAt(club, "constitution", r.at).filter((id) => id !== r.by)) {
+    ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "constitution.adopted", title: `${club.name} adopted a new constitution and bylaws`, body: `${by.name} adopted version ${versions.constitution} of the constitution and version ${versions.bylaws} of the bylaws.`, href: manage, createdAt: r.at, readAt: addDays(r.at, 0.4) });
+  }
+  // Every member then hears what changed, and so does WSUSA. Maya hasn't opened hers yet.
+  const notice = settingsChangeNotice(club.name, { joinPolicy: null, successionMethod: { from: r.from, to } }, { kind: "adopted", by: by.name });
+  const maya = ctx.p("maya").id;
+  const members = club.members.filter((m) => m.userId !== r.by && ctx.memberAt(club, m.userId, r.at)).map((m) => m.userId);
+  for (const userId of members) {
+    ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/clubs/${club.slug}`, createdAt: r.at, readAt: userId === maya ? null : addDays(r.at, 0.6) });
+  }
+  for (const admin of ctx.admins) {
+    ctx.rows.notifications.push({ id: ctx.id(), userId: admin.id, kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/admin/clubs/${club.id}`, createdAt: r.at, readAt: addDays(r.at, 1) });
+  }
+}
+
+/**
+ * Psi Chi (psych) adopted new bylaws about four weeks before the seed: it
+ * switched from Advisor & President to member votes, with an attendance
+ * requirement and a quorum. The President vote running now (lib/domain/
+ * elections, seeded in community.ts) froze those rules.
+ */
+function psychReadopt(ctx: Ctx, club: ClubM): Readopt {
+  const at = addDays(ctx.NOW, -PSYCH_BYLAWS.adoptedDaysAgo);
+  const answers = answersFor(club, "MEMBER_VOTE");
+  answers.modules.bylaws = [...answers.modules.bylaws, "voteAttendance"];
+  answers.fields.voteMinEvents = String(PSYCH_BYLAWS.minEvents);
+  answers.fields.quorumPercent = String(PSYCH_BYLAWS.quorumPercent);
+  return { at, by: ctx.leaderAt(club, at), from: "ADVISOR_PRESIDENT", answers };
+}
+
+function clubDocuments(ctx: Ctx, club: ClubM, folderId: string, scope: { clubId: string; dir: string }, opts: { draftId?: string | null; v2?: boolean; readopt?: Readopt }) {
   const { rng } = ctx;
-  const blocks = constitutionBlocks(club);
+  const earlier = opts.readopt?.from;
+  const blocks = constitutionBlocks(club, earlier);
+  const answers = answersJson(answersFor(club, earlier));
+  // Re-adopted since: what was in effect until then is superseded.
+  const kept = opts.readopt ? { status: "SUPERSEDED" as const, decidedAt: opts.readopt.at } : { status: "ACTIVE" as const, decidedAt: null };
   const firstAt = addDays(club.createdAt, rng.float(1, 4));
   const author = club.founderId;
   const footer = `${club.name} · adopted through the Wildcat Clubs Constitution Builder`;
@@ -82,16 +166,17 @@ function clubDocuments(ctx: Ctx, club: ClubM, folderId: string, scope: { clubId:
   for (const [label, kind, b] of docs) {
     if (opts.v2 && kind === "CONSTITUTION") {
       const oldFile = addPdf(ctx, scope, `${label} (${firstAt.getUTCFullYear()}).pdf`, { title: `${club.name} ${label}`, subtitle: `Version 1 · adopted ${monthDay(firstAt)}, ${firstAt.getUTCFullYear()}`, blocks: b.slice(0, -1), footer }, { parentId: folderId, createdById: author, createdAt: firstAt });
-      ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 1, source: "BUILDER", status: "SUPERSEDED", draftId: opts.draftId ?? null, contentHtml: toHtml(b.slice(0, -1)), fileId: oldFile, createdById: author, createdAt: firstAt, decidedAt: null });
+      ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 1, source: "BUILDER", status: "SUPERSEDED", draftId: opts.draftId ?? null, contentHtml: toHtml(b.slice(0, -1)), builderAnswers: answers, fileId: oldFile, createdById: author, createdAt: firstAt, decidedAt: null });
       const at = minDate(addDays(club.approvedAt ?? club.createdAt, rng.float(300, 500)), addDays(ctx.NOW, -20));
       const by = ctx.leaderAt(club, at);
       const file = addPdf(ctx, scope, `${label}.pdf`, { title: `${club.name} ${label}`, subtitle: `Version 2 · adopted ${monthDay(at)}, ${at.getUTCFullYear()}`, blocks: b, footer }, { parentId: folderId, createdById: by, createdAt: at });
-      ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 2, source: "BUILDER", status: "ACTIVE", draftId: null, contentHtml: toHtml(b), fileId: file, createdById: by, createdAt: at, decidedAt: null });
+      ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 2, source: "BUILDER", status: kept.status, draftId: null, contentHtml: toHtml(b), builderAnswers: answers, fileId: file, createdById: by, createdAt: at, decidedAt: kept.decidedAt });
       continue;
     }
     const file = addPdf(ctx, scope, `${label}.pdf`, { title: `${club.name} ${label}`, subtitle: `Adopted ${monthDay(firstAt)}, ${firstAt.getUTCFullYear()}`, blocks: b, footer }, { parentId: folderId, createdById: author, createdAt: firstAt });
-    ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 1, source: "BUILDER", status: "ACTIVE", draftId: opts.draftId ?? null, contentHtml: toHtml(b), fileId: file, createdById: author, createdAt: firstAt, decidedAt: null });
+    ctx.rows.documents.push({ id: ctx.id(), clubId: club.id, kind, title: `${club.name} ${label}`, version: 1, source: "BUILDER", status: kept.status, draftId: opts.draftId ?? null, contentHtml: toHtml(b), builderAnswers: answers, fileId: file, createdById: author, createdAt: firstAt, decidedAt: kept.decidedAt });
   }
+  if (opts.readopt) readoptedDocuments(ctx, club, folderId, scope, opts.readopt);
 }
 
 function minutesMd(ctx: Ctx, club: ClubM, at: Date, present: number) {
@@ -156,7 +241,11 @@ function clubFiles(ctx: Ctx, club: ClubM, drafts: Map<string, string>) {
     addPdf(ctx, scope, `${GENERIC_RESOURCE[0]}.pdf`, { title: GENERIC_RESOURCE[0], subtitle: club.name, blocks: GENERIC_RESOURCE[1], footer: `${club.name} · Wildcat Clubs` }, { parentId: resources, featured: true, createdById: by, createdAt: addDays(base, 4) });
   }
 
-  clubDocuments(ctx, club, constitution, scope, { draftId: drafts.get(club.def.key) ?? null, v2: club.createdAt < new Date("2024-01-01T00:00:00Z") && rng.chance(0.3) });
+  clubDocuments(ctx, club, constitution, scope, {
+    draftId: drafts.get(club.def.key) ?? null,
+    v2: club.createdAt < new Date("2024-01-01T00:00:00Z") && rng.chance(0.3),
+    readopt: club.def.key === "psych" ? psychReadopt(ctx, club) : undefined,
+  });
 
   // Leaders-only notes.
   const ay = ctx.academicYear(NOW).label;
@@ -317,9 +406,9 @@ export function buildFiles(ctx: Ctx) {
     "application/pdf", { parentId: tFolder, createdById: tPres, createdAt: addDays(NOW, -4.2) });
   const customDocId = ctx.id();
   ctx.rows.documents.push({
-    // Pending uploads stay unnumbered (version 0) until WSUSA approves them.
+    // Pending uploads stay unnumbered (version 0) until WSUSA approves them. Bylaws state only the succession method; joining isn't theirs to change.
     id: customDocId, clubId: theatre.id, kind: "BYLAWS", title: `${theatre.name} Bylaws (custom, 2026)`, version: 0, source: "CUSTOM_UPLOAD", status: "PENDING_APPROVAL",
-    statedSuccessionMethod: "MEMBER_VOTE", statedJoinPolicy: "OPEN", note: "Adds a Production Manager seat and member votes for officers.",
+    statedSuccessionMethod: "MEMBER_VOTE", statedJoinPolicy: null, note: "Adds a Production Manager seat and member votes for officers.",
     draftId: null, contentHtml: null, fileId: customFile, createdById: tPres, createdAt: addDays(NOW, -4.2), decidedAt: null,
   });
   ctx.refs.customDocId = customDocId;

@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Ban, Info, Trophy, Vote } from "lucide-react";
+import { Ban, CheckCircle2, Info, Trophy, Vote } from "lucide-react";
+import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { loadVisibleClub } from "@/lib/clubs/context";
-import { candidateEligibility, canSeeElections, electionResults, hasVoted, nextInLineOutcome, syncElection, voterEligibility } from "@/lib/domain/elections";
+import { candidateEligibility, canSeeElections, electionResults, hasVoted, nextInLineOutcome, runoffFor, syncElection, voteOutcome, voterEligibility, voterRoll, voterStatusIn } from "@/lib/domain/elections";
 import { candidateSource, electionCandidates, resultRows } from "@/lib/roles/election-queries";
-import { canSelfNominate, usesBallots } from "@/lib/roles/pipeline";
+import { canSelfNominate, earliestVotingOpen, readSelectionRules, usesBallots } from "@/lib/roles/pipeline";
 import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
 import { ElectionResultsView, ElectionStatusBadge, ElectionTimeline, fmtWhen } from "@/components/elections/ElectionBits";
+import { MemberVoteRules } from "@/components/elections/VoteRules";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -36,13 +38,24 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
 
   const candidates = await electionCandidates(e.id);
   const mine = candidates.find((c) => c.userId === viewer.id) ?? null;
-  const [runElig, voteElig, voted, results, outcome] = await Promise.all([
+  const memberVote = e.method === "MEMBER_VOTE";
+  const [runElig, voteElig, voted, results, outcome, roll] = await Promise.all([
     e.status === "NOMINATING" && !mine && canSelfNominate(e.method) ? candidateEligibility(viewer.id, e.clubId) : Promise.resolve(null),
-    e.status === "VOTING" && usesBallots(e.method) ? voterEligibility(viewer.id, e) : Promise.resolve(null),
+    e.status === "VOTING" && e.method === "SELF_SELECT" ? voterEligibility(viewer.id, e) : Promise.resolve(null),
     e.status === "VOTING" && usesBallots(e.method) ? hasVoted(e.id, viewer.id) : Promise.resolve(false),
     electionResults(e.id),
     e.method === "NEXT_IN_LINE" ? nextInLineOutcome(e.id) : Promise.resolve(null),
+    memberVote ? voterRoll(e) : Promise.resolve(null),
   ]);
+  // Member vote: the bylaw rules it froze, the viewer's place on the roll (and why), and how a closed result settles.
+  const rules = readSelectionRules(e.rules);
+  const myVote = roll ? voterStatusIn(roll, viewer.id) : voteElig;
+  const [vote, runoffParent, runoffChild] = await Promise.all([
+    results && e.status === "CLOSED" ? voteOutcome(e, results, candidates) : Promise.resolve(null),
+    rules.runoffOf ? db.election.findUnique({ where: { id: rules.runoffOf }, select: { id: true, title: true } }) : Promise.resolve(null),
+    memberVote && e.status === "CANCELLED" ? runoffFor(e.id) : Promise.resolve(null),
+  ]);
+  const tiedNames = vote?.kind === "tie" ? candidates.filter((c) => vote.candidateIds.includes(c.id)).map((c) => c.name) : [];
   const winner = e.winnerId ? candidates.find((c) => c.userId === e.winnerId) : null;
   const firstYes = outcome?.firstYesId ? candidates.find((c) => c.id === outcome.firstYesId) : null;
   const myPlace = mine ? candidates.indexOf(mine) : -1;
@@ -64,7 +77,7 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
         }
         actions={
           <>
-            <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
+            <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} wentToRunoff={Boolean(runoffChild)} />
             {access?.capabilities.has("elections") ? (
               <ButtonLink href={`/clubs/${club.slug}/manage/elections/${e.id}`} variant="outline" size="sm">
                 Manage
@@ -78,9 +91,50 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
         <ElectionTimeline status={e.status} method={e.method} createdAt={e.createdAt} votingOpensAt={e.votingOpensAt} votingClosesAt={e.votingClosesAt} appliedAt={e.appliedAt} proposedAt={e.proposedAt} />
 
         {e.status === "CANCELLED" ? (
-          <Callout tone="info" icon={<Ban />} title="This was called off">
-            Nobody took the seat from it. Club leaders may start again for {e.position.name}.
+          runoffChild ? (
+            <Callout tone="info" icon={<Ban />} title="This vote tied, so it went to a runoff">
+              The tied candidates are on a new ballot:{" "}
+              <Link href={`/clubs/${club.slug}/elections/${runoffChild.id}`} className="underline">
+                {runoffChild.title}
+              </Link>
+              .
+            </Callout>
+          ) : (
+            <Callout tone="info" icon={<Ban />} title="This was called off">
+              Nobody took the seat from it. Club leaders may start again for {e.position.name}.
+            </Callout>
+          )
+        ) : null}
+
+        {/* Member vote: whether you can vote, and why. */}
+        {memberVote && myVote && (e.status === "NOMINATING" || e.status === "VOTING") && !voted ? (
+          <Callout
+            tone={myVote.eligible ? "success" : "info"}
+            icon={myVote.eligible ? <CheckCircle2 /> : <Info />}
+            title={myVote.eligible ? (e.status === "VOTING" ? "You can vote" : roll?.basis === "attendance" ? "You'll be able to vote" : "You can vote when voting opens") : e.status === "VOTING" ? "You can't vote in this one" : "You can't vote yet"}
+          >
+            {myVote.eligible
+              ? myVote.minEvents
+                ? `You${e.status === "VOTING" ? "'d" : "'ve"} been to ${myVote.attended} club event${myVote.attended === 1 ? "" : "s"} this semester${e.status === "VOTING" ? " when voting opened" : " so far"}, and the club's bylaws ask for ${myVote.minEvents}.`
+                : "Active members of the club vote."
+              : myVote.reason}
           </Callout>
+        ) : null}
+
+        {memberVote && roll ? (
+          <MemberVoteRules
+            rules={rules}
+            basis={roll.basis}
+            eligible={results ? results.eligibleVoters : roll.eligibleIds.length}
+            members={roll.basis === "attendance" ? roll.rows.length : null}
+            termName={roll.termName}
+            final={roll.final}
+            votingOpensAt={e.votingOpensAt}
+            votes={e.status === "NOMINATING" ? null : e._count.votes}
+            closed={e.status !== "NOMINATING" && e.status !== "VOTING"}
+            opensFrom={earliestVotingOpen(e.createdAt, rules.noticeDays)}
+            runoffOf={runoffParent ? { href: `/clubs/${club.slug}/elections/${runoffParent.id}`, title: runoffParent.title } : null}
+          />
         ) : null}
 
         {e.status === "APPLIED" && winner && !usesBallots(e.method) ? (
@@ -172,10 +226,10 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
             <CardBody>
               {voted ? (
                 <VotedNotice />
-              ) : !voteElig?.eligible ? (
+              ) : !myVote?.eligible ? (
                 <p className="flex items-start gap-2 text-sm text-ink-2">
                   <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
-                  {voteElig?.reason}
+                  {myVote?.reason}
                 </p>
               ) : candidates.length === 0 ? (
                 <p className="text-sm text-ink-3">No one is on the ballot. The organizers will follow up.</p>
@@ -192,7 +246,7 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
           </Card>
         ) : null}
 
-        {results && (e.status === "CLOSED" || e.status === "APPLIED") ? (
+        {results && (e.status === "CLOSED" || e.status === "APPLIED" || e.status === "CANCELLED") ? (
           <Card>
             <CardHeader
               title="Results"
@@ -201,6 +255,14 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
                   <span className="inline-flex items-center gap-1.5">
                     <Trophy className="h-4 w-4 text-success" aria-hidden /> {winner.name} is now {e.position.name}.
                   </span>
+                ) : results.quorum && !results.quorum.met ? (
+                  `No quorum: ${results.totalVotes} of ${results.eligibleVoters} eligible voters voted, and the club's bylaws need ${results.quorum.needed}, so the result doesn't count. The club's leaders will hold the vote again or fill ${e.position.name} another way.`
+                ) : e.status === "CANCELLED" ? (
+                  runoffChild ? `It tied, so it went to a runoff: ${runoffChild.title}.` : "Voting closed before this was called off; nobody took the seat from it."
+                ) : vote?.kind === "tie" ? (
+                  vote.resolution.kind === "runoff"
+                    ? `It's a tie between ${tiedNames.join(" and ")}. The club's bylaws call for a runoff between them, which its leaders start next.`
+                    : `It's a tie between ${tiedNames.join(" and ")}. Under the club's bylaws, ${vote.resolution.kind === "choose" && vote.resolution.by === "president" ? "the President casts" : vote.resolution.kind === "choose" && vote.resolution.by === "advisor" ? "the advisor casts" : "a club leader casts"} the deciding vote.`
                 ) : e.method === "SELF_SELECT" ? (
                   results.unanimousCandidateId ? (
                     "The leaders chose unanimously. It goes on the org chart once a club leader applies it."
@@ -214,7 +276,7 @@ export default async function ElectionPage({ params }: { params: Promise<{ slug:
             />
             <CardBody>
               {results.rows.length ? (
-                <ElectionResultsView rows={resultRows(results, candidates, e.winnerId, e.method)} totalVotes={results.totalVotes} eligibleVoters={results.eligibleVoters} turnout={results.turnout} />
+                <ElectionResultsView rows={resultRows(results, candidates, e.winnerId, e.method)} totalVotes={results.totalVotes} eligibleVoters={results.eligibleVoters} turnout={results.turnout} quorum={results.quorum} />
               ) : (
                 <p className="text-sm text-ink-3">No one ran in this election.</p>
               )}

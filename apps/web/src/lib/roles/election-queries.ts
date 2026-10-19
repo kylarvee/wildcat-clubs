@@ -57,12 +57,14 @@ export function candidateSource(c: Pick<CandidateView, "userId" | "fromPipeline"
 
 /**
  * Results joined with candidate names for display. A self-select has a
- * winner only when it was unanimous (and never a "tie" to break).
+ * winner only when it was unanimous (and never a "tie" to break); a member
+ * vote that missed the bylaws' quorum has neither a winner nor a tie.
  */
 export function resultRows(results: ElectionResults, candidates: CandidateView[], winnerUserId: string | null, method: SuccessionMethod = "MEMBER_VOTE") {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const selfSelect = method === "SELF_SELECT";
-  const tied = !selfSelect && results.leaders.length > 1;
+  const noQuorum = Boolean(results.quorum && !results.quorum.met);
+  const tied = !selfSelect && !noQuorum && results.leaders.length > 1;
   return results.rows.map((r) => {
     const c = byId.get(r.candidateId);
     return {
@@ -72,7 +74,7 @@ export function resultRows(results: ElectionResults, candidates: CandidateView[]
       avatarColor: c?.avatarColor ?? "#77707f",
       votes: r.votes,
       share: r.share,
-      winner: winnerUserId ? r.userId === winnerUserId : selfSelect ? results.unanimousCandidateId === r.candidateId : !tied && results.leaders[0] === r.candidateId && r.votes > 0,
+      winner: winnerUserId ? r.userId === winnerUserId : selfSelect ? results.unanimousCandidateId === r.candidateId : !noQuorum && !tied && results.leaders[0] === r.candidateId && r.votes > 0,
       tied: !winnerUserId && tied && results.leaders.includes(r.candidateId),
     };
   });

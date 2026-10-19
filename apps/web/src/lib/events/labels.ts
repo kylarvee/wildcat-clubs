@@ -35,7 +35,8 @@ export const LOCATION_LABEL: Record<LocationType, string> = {
   TBD: "To be decided",
 };
 
-export const FUNDING_SOURCES: FundingSource[] = ["WSUSA", "DEPARTMENT", "COLLEGE", "UNIVERSITY"];
+/** The one order funding sources appear in, everywhere (ARCHITECTURE.md §6). */
+export const FUNDING_SOURCES: FundingSource[] = ["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"];
 
 export const FUNDING_LABEL: Record<FundingSource, string> = {
   UNIVERSITY: "University",

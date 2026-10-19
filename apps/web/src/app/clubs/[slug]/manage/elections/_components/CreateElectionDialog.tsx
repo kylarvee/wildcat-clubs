@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SuccessionMethod } from "@prisma/client";
-import { Loader2, Plus } from "lucide-react";
+import { format } from "date-fns";
+import { Gavel, Loader2, Plus } from "lucide-react";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
@@ -11,14 +12,34 @@ import { Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components
 import { Field, Input, Select } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { useRunAction } from "@/components/roles/useRunAction";
-import { SUCCESSION_METHODS, usesBallots } from "@/lib/roles/pipeline";
+import { SUCCESSION_METHODS, usesBallots, type TieBreak } from "@/lib/roles/pipeline";
 import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
+import { quorumRuleText, tieRuleText, voterRuleText } from "@/lib/constitution/rules";
 import { createElection, startOver } from "../actions";
 
 export type ElectableSeat = { id: string; name: string; roleLabel: string; busy: boolean; /** Names of the people next in line, in order. */ nextInLine: string[] };
 
-/** Campus-time datetime-local defaults for each kind of date. */
-export type SelectionDefaults = { opens: string; closes: string; respondBy: string; decideBy: string };
+/**
+ * Campus-time datetime-local defaults for each kind of date. A member vote
+ * has its own: it can't open before the bylaws' notice is up (`earliest`),
+ * and the form explains the bylaw rules it runs under (lib/roles/selection-setup).
+ */
+export type SelectionDefaults = {
+  opens: string;
+  closes: string;
+  respondBy: string;
+  decideBy: string;
+  runoffCloses?: string;
+  memberVote?: { opens: string; closes: string; earliest: string | null; noticeDays: number | null; votingDays: number | null; minEvents: number | null; quorumPercent: number | null; tieBreak: TieBreak | null };
+};
+
+/** "2026-10-27T10:45" (campus wall time) → "Tue, Oct 27 at 10:45 AM", whatever the browser's time zone. */
+function campusLabel(local: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local);
+  if (!m) return local;
+  // Built from the wall-clock parts and formatted back the same way, so the browser's own zone never shifts it.
+  return format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])), "EEE, MMM d 'at' h:mm a");
+}
 
 /**
  * Fill a seat: which seat, which of the four modes (the club's primary mode
@@ -70,12 +91,18 @@ export function CreateElectionDialog({
   const [method, setMethod] = useState<SuccessionMethod>(startMethod(initialMethod ?? primary));
   const [title, setTitle] = useState("");
   const [touched, setTouched] = useState(false);
-  const [opens, setOpens] = useState(defaults.opens);
-  const [closes, setCloses] = useState(defaults.closes);
+  const mv = defaults.memberVote;
+  const [opens, setOpens] = useState(method === "MEMBER_VOTE" && mv ? mv.opens : defaults.opens);
+  const [closes, setCloses] = useState(method === "MEMBER_VOTE" && mv ? mv.closes : defaults.closes);
   const [due, setDue] = useState(method === "NEXT_IN_LINE" ? defaults.respondBy : defaults.decideBy);
   const { pending, error, setError, run } = useRunAction();
   const suggested = seat ? `${seat.name}${termLabel ? ` — ${termLabel}` : " seat"}` : "";
   const ballots = usesBallots(method);
+  // Member votes: the bylaws' notice sets the earliest opening (campus-local strings compare in time order).
+  const earliest = method === "MEMBER_VOTE" ? (mv?.earliest ?? null) : null;
+  const tooSoon = Boolean(earliest && opens && opens < earliest);
+  const bylawRules = Boolean(mv && (mv.minEvents || mv.quorumPercent || mv.tieBreak || mv.noticeDays));
+  const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
   function reset(next: boolean) {
     setOpen(next);
@@ -89,10 +116,16 @@ export function CreateElectionDialog({
   function pickMethod(m: SuccessionMethod) {
     setMethod(m);
     if (!usesBallots(m)) setDue(m === "NEXT_IN_LINE" ? defaults.respondBy : defaults.decideBy);
+    // A member vote can't open before the bylaws' notice is up: move a too-early window to its own default.
+    if (m === "MEMBER_VOTE" && mv?.earliest && opens < mv.earliest) {
+      setOpens(mv.opens);
+      setCloses(mv.closes);
+    }
   }
 
   async function submit() {
     if (!seatId) return setError("Choose the seat to fill.");
+    if (tooSoon && earliest) return setError(`Your bylaws give members ${mv?.noticeDays} days' notice before a vote, so voting can open ${campusLabel(earliest)} at the earliest.`);
     const form = { title: (touched ? title : suggested).trim(), method, votingOpensAt: ballots ? opens : null, votingClosesAt: ballots ? closes : due };
     const r = await run(() => (restartElectionId ? startOver(slug, restartElectionId, form) : createElection(slug, { ...form, clubId, positionId: seatId })), {
       success:
@@ -212,12 +245,35 @@ export function CreateElectionDialog({
             )}
           </Field>
 
+          {method === "MEMBER_VOTE" && mv ? (
+            <div className="flex gap-2.5 rounded-xl border border-line bg-muted/40 p-3 text-sm text-ink-2">
+              <Gavel className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
+              <div className="space-y-0.5">
+                <p className="font-medium text-ink">{bylawRules ? "Your bylaws' voting rules apply" : "How this vote runs"}</p>
+                <p>Who votes: {lower(voterRuleText(mv.minEvents))}.</p>
+                <p>{quorumRuleText(mv.quorumPercent)}.</p>
+                <p>Ties: {lower(tieRuleText(mv.tieBreak))}.</p>
+              </div>
+            </div>
+          ) : null}
+
           {ballots ? (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Voting opens" required hint={method === "MEMBER_VOTE" ? "Members can run until then." : "Organizers can add candidates until then."}>
-                {(id) => <Input id={id} type="datetime-local" value={opens} onChange={(e) => setOpens(e.target.value)} required />}
+              <Field
+                label="Voting opens"
+                required
+                hint={
+                  earliest
+                    ? `Your bylaws give members ${mv?.noticeDays} days' notice: voting can open ${campusLabel(earliest)} or later. Members can run until then.`
+                    : method === "MEMBER_VOTE"
+                      ? "Members can run until then."
+                      : "Organizers can add candidates until then."
+                }
+                error={tooSoon && earliest ? `That's before your bylaws' notice is up: voting can open ${campusLabel(earliest)} or later.` : undefined}
+              >
+                {(id) => <Input id={id} type="datetime-local" value={opens} min={earliest ?? undefined} onChange={(e) => setOpens(e.target.value)} aria-invalid={tooSoon || undefined} required />}
               </Field>
-              <Field label="Voting closes" required>
+              <Field label="Voting closes" required hint={mv?.votingDays ? `Your bylaws keep a vote open ${mv.votingDays} day${mv.votingDays === 1 ? "" : "s"}.` : undefined}>
                 {(id) => <Input id={id} type="datetime-local" value={closes} min={opens} onChange={(e) => setCloses(e.target.value)} required />}
               </Field>
             </div>

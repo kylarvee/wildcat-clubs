@@ -7,7 +7,7 @@ import { parseCheckinInput } from '@/lib/checkin-link';
 /**
  * Notifications and announcements carry web paths ("/clubs/chess-club",
  * "/events/…?o=…"). The phone app has screens for the everyday ones; anything
- * else (budgets, tasks, tests, messages…) opens on the web in the in-app
+ * else (budgets, tests, messages…) opens on the web in the in-app
  * browser. That browser keeps its own web sign-in: the first signed-in page
  * asks you to sign in there once, and it remembers you after that.
  */
@@ -33,6 +33,8 @@ export function routeForHref(href: string): Href | null {
   if (path === '/calendar') return '/calendar';
   if (path === '/notifications') return '/inbox';
   if (path === '/me/attendance') return '/me';
+  // Your open tasks; "Done" and "Assigned by you" (?view=…) are only on the web.
+  if (path === '/tasks' && !url.searchParams.has('view')) return '/tasks';
   return null;
 }
 

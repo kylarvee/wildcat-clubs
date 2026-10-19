@@ -1,4 +1,5 @@
 import type { ClubScope, ClubStatus, ClubType } from "@prisma/client";
+import type { RetentionSummary } from "@/lib/metrics/types";
 import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, CLUB_TYPES, STANDING_HINT, STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
 import { GAP_LABEL } from "@/lib/staffing/rules";
 
@@ -28,8 +29,10 @@ export type ClubAnalyticsRow = {
   registered: number;
   /** Attending members: active by attendance (lib/metrics). */
   active: number;
-  /** Month retention: last complete month vs. the one before (lib/metrics clubListMetrics). */
+  /** Month RETENTION's rate (lib/metrics clubListMetrics: the latest two full months in a row with check-ins). */
   retention: number | null;
+  /** The same figure with its months and label ("Sep → Oct: 62% came back"); null until there's one. */
+  retentionSummary: RetentionSummary | null;
   /** Average member attendance rate over this term's held events (same as the Attendance Tracker). */
   avgAttendance: number | null;
   /** Held events this term (≥1 check-in), hosted or co-hosted. */
@@ -235,7 +238,8 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       "Status",
       "Registered members",
       "Attending members",
-      "Retention, last month (%)",
+      "Retention (%)",
+      "Retention months",
       `Average attendance rate${term} (%)`,
       `Events held${term}`,
       "Average rating",
@@ -254,6 +258,7 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       r.registered,
       r.active,
       pctCell(r.retention),
+      r.retentionSummary ? `${r.retentionSummary.from} → ${r.retentionSummary.to}` : "",
       pctCell(r.avgAttendance),
       r.heldEvents,
       r.rating === null ? "" : Math.round(r.rating * 10) / 10,

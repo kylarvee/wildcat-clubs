@@ -99,7 +99,20 @@ confirmed for this year.
 3. **Vote:** Psi Chi → *President — Spring 2027* (member vote, the club's
    primary method; three candidates — the two officers below the President
    came from the org chart, a third member ran; closes five days after
-   seeding). Maya is an active member and hasn't voted.
+   seeding). Maya hasn't voted. It runs under the bylaws Psi Chi adopted
+   about four weeks before the seed, frozen when the vote started:
+   - **Who can vote:** members who'd been to at least **2 club events this
+     semester** when voting opened. Maya has, so her page reads *You can
+     vote* with her count; a handful of the 58 members can't.
+   - **Quorum:** the result counts only if **25%** of eligible voters vote.
+     The *Voting rules* card shows 9 votes in, short of the 13 or so needed,
+     so Maya's vote brings it closer. Ties would go to a runoff, and voting
+     opened 10 days after the vote was announced (the bylaws ask for 7 days'
+     notice).
+   - **As Alex** (or a Psi Chi leader), the manage view (**Manage**) lists
+     who can and can't vote, each with their count of events. Closing voting
+     early there shows *No quorum*, with **Start again** and **Use another
+     way** (that ends this vote until you reseed).
 4. **Review** Pre-Med Club or Psi Chi. Her Hiking and Outdoors Club review can
    be edited or deleted.
 5. **Attendance tracker** (`/me/attendance`) and her record on each club page.
@@ -117,8 +130,17 @@ confirmed for this year.
    - *Starting soon: Care Kit Assembly…*, the Reminders job's notice about an
      hour before it started, and *You can review Pre-Med Club now* from when
      her third check-in there unlocked reviews.
-   - **Settings → Notifications:** *Remind me before events* is on, and the
-     push card says no phone is getting push yet and how to fix that.
+   - *Psi Chi Honors Club / Psi Cho (Psychology Club) now uses Member vote to
+     fill seats* (unread, about four weeks old): when new bylaws change how a
+     club fills seats or who can join, every member and WSUSA is told.
+   - **Settings → Notifications:** *What reaches you* has a row for each of
+     nine kinds of notification with an Email and a Push switch, all on (on
+     means the usual: email only for what needs her). *Your account* is always
+     on. *Remind me before events* is on, and the push card says no phone is
+     getting push yet and how to fix that.
+   - **Try it:** turn off Email for *Membership*. Then, as Dr. Alvarez, assign
+     Maya a club task in Pre-Med Club (Tasks → **Assign a club task**): it's on
+     Maya's bell, and the outbox (as Sydney) has no email to her for it.
    - **Try it:** as Maya, follow the RC Wrecker Bots Club's calendar. Then, as
      Priya, open one of its upcoming *Build Night*s in the Events Builder and
      change its room, or move the whole series to another day or time. Maya
@@ -137,10 +159,24 @@ about 10 days after seeding (30-day grace) and **Club Officer Training** about
 1. Open the club workspace: **Budget & funding** is unlocked; tools his seat
    doesn't grant are locked.
 2. **Budget:** event costs (from the Events Builder, some per-occurrence) and
-   general costs for this term and next.
-   - Submit the **DRAFT** *Spring 2027 Stock Pitch Competition* request.
+   general costs for this term and next, each in a category the cost pickers
+   offer.
+   - *Involvement Fair booth* was **partly approved** about a week ago: WSUSA
+     funded the T-shirts and giveaways but not the *Retractable club banner*.
+     The request shows what each line got, *Funded by WSUSA*, and the invoice
+     WSUSA's approval created. A line funded for less than it asked is free
+     again, so Oscar asked the Goddard School for the banner: *Club banner*
+     (expected source: College) is **SUBMITTED**, which locks that line again
+     while WSUSA reviews it.
    - *Fall speaker series* is **SUBMITTED** and waiting on WSUSA.
+   - Submit the **DRAFT** *Spring 2027 Stock Pitch Competition* request. The
+     club names the source it expects (*Expected source*); the confirm dialog
+     asks *Send $… to WSUSA for review?*, since WSUSA reviews every request
+     and may fund it from another source.
    - History: last spring's approved request with a processed invoice.
+   - **Try it:** once Alex partly approves *Fall speaker series* (see Alex),
+     open it: the unfunded line reads *Not funded*, and **Ask another source
+     for the rest** starts a new request with that line already picked.
 3. **Tasks:** *Pass: Club Officer Policy Test*, *Attend: Club Officer Training*
    and a club task from his president, *Reconcile September spending*. The
    test's week-ahead reminder (*Club Officer Policy Test is due in 7 days*, in
@@ -251,6 +287,27 @@ The club runs its own *Event Safety Quiz*.
     becomes *Re-registered 2026–27 · by Priya Patel on …*. Her and Dr.
     Alvarez's *Renew RC Wrecker Bots Club for 2026–27* tasks close, and the
     club page's details say *Re-registered 2026–27*.
+12. **A big send** (Settings → Notifications, and the outbox as Sydney): she
+    posted *Competition team tryouts are this Saturday* to the club a few
+    minutes before the seed ran. It's on every member's bell already, and
+    because it reached more than 50 people its emails are *Waiting to send*
+    until the next *Send queued messages* run. She turned *Events &
+    reminders* email off herself, so co-host requests reach her bell and
+    phone only.
+13. **Constitution** (the workspace's Constitution page): the documents in
+    effect were adopted by an earlier leader, and they keep the answers they
+    were made from, so **Start from the current version** opens the builder
+    on them. *What your documents set* lists what Wildcat Clubs applies: who
+    votes in member votes, the quorum, ties, the notice before a vote, and
+    when WSUSA follows up on an empty President seat (14 days) or a missing
+    advisor (30 days). In the builder, those answers say *Wildcat Clubs
+    applies this*, and GPA, dues, terms of office, removal and amendment
+    votes say *Wildcat Clubs doesn't enforce this; your club and WSUSA do*.
+    Adopt with **Self-select** as the primary method and every member's bell
+    reads *RC Wrecker Bots Club now uses Self-select to fill seats* (WSUSA's
+    too; reseed afterwards, since the club's story uses Advisor & President).
+    A custom upload asks only what the document governs: bylaws ask the
+    succession method, a constitution how students join.
 
 ## Amir Haddad — college ambassador
 
@@ -320,6 +377,9 @@ advisor's term ended). Full permissions in both.
    Science doesn't have an ambassador program yet (WSUSA starts them).
 6. **Tasks → *Renew RC Wrecker Bots Club for 2026–27*** (required): advisors
    get the renewal task too. She or Priya can renew from the club's Overview.
+7. **Settings → Notifications:** she turned *Announcements* email off, so
+   Priya's tryouts announcement is on her bell, with no email waiting for her
+   in the outbox.
 
 ## Prof. Nathan Reed — invited advisor
 
@@ -335,9 +395,24 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
 - **Department request:** "Aviation Technology" for Aviation Club (changes
   requested, with a note).
 - **Custom bylaws:** Associated Artists of the Theatre (AAT)'s uploaded bylaws
-  (pending approval).
-- **Funding:** three submitted requests (Wildcat Investors, SWE, NSNA) and two
-  open invoices (RC Wrecker Bots Club, Black Student Union (BSU)).
+  (pending approval). They state only the primary way leaders are chosen
+  (*Member vote*, a change); bylaws don't decide who can join, so approving
+  them leaves joining as it is. Approving tells AAT's members and WSUSA that
+  it now uses Member vote to fill seats.
+- **Funding:** five requests in WSUSA review (Wildcat Investors' *Fall speaker
+  series* and *Club banner*, SWE, NSNA, and the Hiking and Outdoors Club's
+  *Avalanche awareness course*, past WSUSA's review time of 10 business days)
+  and three open invoices (RC Wrecker Bots Club, Wildcat Investors, and Black
+  Student Union (BSU)'s, which is past due). The late request and the late
+  invoice are their own urgent rows in the WSUSA queue. Run the scheduled jobs
+  (System → Scheduled jobs → Run now, as Sydney) and each admin's bell gets
+  one reminder about each; running them again sends nothing new.
+  - **Try it:** open *Fall speaker series* → **Approve part**. Every line
+    starts at its full amount; untick one (it reads *Not funded · unlocks for
+    another source*), keep or change **Funded by** (it starts at the club's
+    expected source), add a note and approve. The invoice and its task appear
+    at once (there's no separate "Create invoice" step), the request moves to
+    *Approved · invoice open*, and Oscar can ask another source for that line.
 - **Review bombing:** Ogden Valley Disc Golf Club got four 1★ reviews within
   36 hours; members flagged them. One older Wildcat Paintball Club review is
   already hidden.
@@ -365,9 +440,10 @@ about a real club.
   President stepped down about three days ago (the advisor ended the role at
   their request), so nobody holds the seat. WSUSA has the task *Engineering
   Honor Society / Tau Beta Pi has no President*, and the club's other leaders
-  got the same notice in-app. Assign a President in its org chart (or **Fill
-  this seat**) and the task closes on its own. To watch one open, end the only
-  President's role in a small club's org chart. Clubs that were already
+  and every admin got the notice in-app and by email (a staffing gap always
+  sends, whatever anyone's settings say). Assign a President in its org chart
+  (or **Fill this seat**) and the task closes on its own. To watch one open,
+  end the only President's role in a small club's org chart. Clubs that were already
   leaderless get no task: Club analytics' **Leaders** filter (*No President*,
   *No advisor*) lists them, and the Overview counts both.
 - **Join requests nobody can approve:** Kappa Omega Eta approves each join
@@ -379,6 +455,14 @@ about a real club.
 - **One queue:** the dashboard's WSUSA queue, the Overview's *Waiting on
   WSUSA* and the counts in the admin side nav (Club approvals, Funding, Tests,
   Reports, Review moderation) all count the same open tasks, so they agree.
+- **Daily digest:** instead of an email for each club submission, funding
+  request, custom document or flagged review, admins get one email each
+  morning (the first *Send queued messages* run after 7 AM): what's waiting on
+  WSUSA, and the notices since the last digest. They still arrive on the bell
+  at once. New reports, possible review bombing and clubs that lose a leader
+  are emailed right away (the outbox has the Disc Golf review-bombing alert).
+  Settings → Notifications → **WSUSA digest** turns it off. Today's digest
+  hasn't gone out yet.
 - **Renewals** (Club approvals → Renewals): about 40 of the 289 clubs asked
   (roughly 60% of the active ones) have re-registered for 2026–27; the rest
   are *Overdue since Sep 30*. **Not renewed** lists clubs with a President or
@@ -399,9 +483,19 @@ trainings, university-wide announcements, analytics, directory and people.
 Everything Alex can do, plus **System settings**: activity windows, the review
 threshold (3) and review-bombing rule (3 ratings ≤ 2★ in 48 hours), club
 renewals (due 30 days after the academic year's first term starts), AI
-switches (off), integrations (mock mode), the **outbox** (mocked emails, plus
-one failed push), scheduled jobs (*Club renewals* keeps each club's renewal
-tasks in line with its Presidents and advisors), and granting admin.
+switches (off), integrations (mock mode), the **outbox** (mocked emails, one
+failed push, and the RC Wrecker Bots announcement's emails *Waiting to send*),
+scheduled jobs (*Club renewals* keeps each club's renewal tasks in line with
+its Presidents and advisors), and granting admin.
+
+**Queued messages and the digest:** a notification for more than 50 people
+puts its emails and pushes in the outbox as *Waiting to send* (the bells go
+out at once). System → Scheduled jobs → **Run now** includes *Send queued
+messages*: it sends about 200 a run, oldest first, so the first run sends the
+whole tryouts announcement, and it sends today's WSUSA digest to the admins
+who keep it on. Running it again sends nothing new. Sydney turned the digest
+off (Settings → Notifications), so she was emailed the *Fall speaker series*
+funding request one by one and gets no digest.
 
 **Reminders:** System → Scheduled jobs → **Run now** includes *Reminders*. It
 reminds people about events starting 45–75 minutes from the run (followers of
@@ -417,7 +511,13 @@ and pushes (none until a phone registers).
 ## Other things in the data
 
 - **Notifications.** Every seeded bell is a kind the app really sends
-  (`src/components/notifications/catalog.ts`; `verify.ts` fails on any other).
+  (`src/components/notifications/catalog.ts`, the notification registry;
+  `verify.ts` fails on any other). The registry also gives each kind its
+  Settings category and whether it emails and pushes by default, and the
+  outbox agrees with it: every row names its kind, and the queued emails go
+  to exactly the people the registry emails. Three personas changed a
+  setting: Priya (Events & reminders email off), Dr. Alvarez (Announcements
+  email off) and Sydney (WSUSA digest off).
   Nobody has registered a phone for push, and nothing has been reminded yet:
   the first *Reminders* run sends the week-ahead and day-ahead reminders for
   required tasks that are already due soon.
@@ -474,6 +574,13 @@ and pushes (none until a phone registers).
   SWE's unanimous self-select waiting to be applied, the Wrecker Bots'
   proposal waiting for its advisor, Wildcat Investors' next-in-line round and
   Applied AI Lab's two applied member votes.
+- **Bylaw rules:** every adopted builder document keeps the answers it was
+  made from (`ClubDocument.builderAnswers`). Most clubs have the builder's
+  defaults: a 25% quorum, 3-day voting window, ties to a runoff, 7 days'
+  notice, and WSUSA follow-up after 14 days without a President or 30
+  without an advisor. Psi Chi's newer bylaws add the 2-event attendance
+  requirement. Each running selection froze its club's rules
+  (`Election.rules`); Applied AI Lab's past votes predate them and have none.
 - **Role history contributions:** in most approved and retired clubs, one or
   two past leaders have a project tied to the seat they held, usually with a
   file (a club file they made that term, or a write-up in their own files).

@@ -1,8 +1,9 @@
 import type { FundingStatus, InvoiceStatus } from "@prisma/client";
 
 /**
- * A funding request's life as steps: drafted → submitted → decided → invoiced
- * → processed. Pure, so the club's and the admin's views read the same story.
+ * A funding request's life as steps: drafted → submitted → decided (an
+ * approval creates the invoice in the same step) → processed. Pure, so the
+ * club's and the admin's views read the same story.
  */
 
 export type TimelineState = "done" | "current" | "upcoming";
@@ -25,6 +26,8 @@ export type TimelineInput = {
   submittedBy?: string | null;
   decidedAt: Date | null;
   decidedBy?: string | null;
+  /** Approvals: the source that funded it ("Department · Nursing"). */
+  fundedBy?: string | null;
   invoice: { number: string; status: InvoiceStatus; createdAt: Date; processedAt: Date | null } | null;
 };
 
@@ -45,10 +48,10 @@ export function requestTimeline(r: TimelineInput): TimelineStep[] {
       steps.push({ key: "decision", label: "In WSUSA review", state: "current", tone: "neutral", at: null, detail: "WSUSA staff are reviewing it." });
       break;
     case "APPROVED":
-      steps.push({ key: "decision", label: "Approved", state: "done", tone: "success", at: r.decidedAt, by: r.decidedBy });
+      steps.push({ key: "decision", label: "Approved", state: "done", tone: "success", at: r.decidedAt, by: r.decidedBy, detail: r.fundedBy ? `Funded by ${r.fundedBy}.` : null });
       break;
     case "PARTIALLY_APPROVED":
-      steps.push({ key: "decision", label: "Partly approved", state: "done", tone: "warning", at: r.decidedAt, by: r.decidedBy });
+      steps.push({ key: "decision", label: "Partly approved", state: "done", tone: "warning", at: r.decidedAt, by: r.decidedBy, detail: r.fundedBy ? `Funded by ${r.fundedBy}.` : null });
       break;
     case "DENIED":
       steps.push({ key: "decision", label: "Not approved", state: "done", tone: "danger", at: r.decidedAt, by: r.decidedBy });
@@ -67,7 +70,8 @@ export function requestTimeline(r: TimelineInput): TimelineStep[] {
         : { key: "processed", label: "Processing in the finance system", state: "current", tone: "neutral", at: null, detail: "WSUSA is moving the money through the university finance system." },
     );
   } else {
-    steps.push({ key: "invoice", label: approved ? "Invoice being prepared" : "Invoice", state: approved ? "current" : "upcoming", tone: "neutral", at: null });
+    // Approving creates the invoice, so only an approval recorded before that has none.
+    steps.push({ key: "invoice", label: approved ? "No invoice yet" : "Invoice", state: approved ? "current" : "upcoming", tone: "neutral", at: null, detail: approved ? null : "Created when WSUSA approves it." });
     steps.push({ key: "processed", label: "Funding goes through", state: "upcoming", tone: "neutral", at: null });
   }
   return steps;

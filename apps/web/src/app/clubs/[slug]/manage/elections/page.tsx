@@ -6,7 +6,7 @@ import { loadClubWorkspace } from "@/lib/clubs/context";
 import { syncClubElections } from "@/lib/domain/elections";
 import { clubElections } from "@/lib/roles/election-queries";
 import { selectionSetup } from "@/lib/roles/selection-setup";
-import { SUCCESSION_METHODS } from "@/lib/roles/pipeline";
+import { readSelectionRules, SUCCESSION_METHODS } from "@/lib/roles/pipeline";
 import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
 import { ElectionStatusBadge, fmtWhen, MethodBadge } from "@/components/elections/ElectionBits";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,8 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
   const [elections, setup, cfg] = await Promise.all([clubElections(club.id), selectionSetup(club.id), getConfig()]);
   const running = elections.filter((e) => e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED");
   const past = elections.filter((e) => e.status === "APPLIED" || e.status === "CANCELLED");
+  // Tied member votes that went to a runoff (the runoff points back at them).
+  const wentToRunoff = new Set(elections.map((e) => readSelectionRules(e.rules).runoffOf).filter((x): x is string => Boolean(x)));
   const [yesRows, proposedRows] = await Promise.all([
     db.electionCandidate.groupBy({ by: ["electionId"], where: { electionId: { in: running.map((e) => e.id) }, acceptedAt: { not: null } }, _count: { _all: true } }),
     db.electionCandidate.findMany({ where: { id: { in: running.map((e) => e.proposedCandidateId).filter((x): x is string => Boolean(x)) } }, select: { id: true, user: { select: { name: true } } } }),
@@ -151,10 +153,10 @@ export default async function ManageElectionsPage({ params }: { params: Promise<
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-ink">{e.title}</span>
                       <span className="block text-xs text-ink-3">
-                        {e.position.name} · {SUCCESSION_NAME[e.method]} · {e.status === "APPLIED" && e.appliedAt ? `filled ${fmtWhen(e.appliedAt)}` : `called off`}
+                        {e.position.name} · {SUCCESSION_NAME[e.method]} · {e.status === "APPLIED" && e.appliedAt ? `filled ${fmtWhen(e.appliedAt)}` : wentToRunoff.has(e.id) ? "tied, went to a runoff" : `called off`}
                       </span>
                     </span>
-                    <ElectionStatusBadge status={e.status} method={e.method} />
+                    <ElectionStatusBadge status={e.status} method={e.method} wentToRunoff={wentToRunoff.has(e.id)} />
                   </Link>
                 </li>
               ))}

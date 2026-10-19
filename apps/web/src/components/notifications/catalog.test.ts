@@ -8,14 +8,14 @@ import { notificationIcon } from "@/components/notifications/kinds";
 
 /**
  * The kind catalog has to match what the code sends. These tests read the
- * source: the `kind` of every notify(), notifyAdmins(), notifyClubCapability()
- * and notifyInBatches() call in src must be in NOTIFICATION_KINDS, and every
- * catalog kind must be sent somewhere. (prisma/seed/verify.ts then checks the
- * seeded bells against the catalog.)
+ * source: the `kind` of every notify(), notifyAdmins(), notifyClubCapability(),
+ * notifyInBatches() and notifyEach() call in src must be in NOTIFICATION_KINDS,
+ * and every catalog kind must be sent somewhere. (prisma/seed/verify.ts then
+ * checks the seeded bells against the catalog.)
  */
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const CALLEES = ["notify", "notifyAdmins", "notifyClubCapability", "notifyInBatches"];
+const CALLEES = ["notify", "notifyAdmins", "notifyClubCapability", "notifyInBatches", "notifyEach"];
 
 /**
  * Call sites whose kind the file alone can't spell out: a template, a spread

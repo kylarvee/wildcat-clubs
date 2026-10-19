@@ -217,14 +217,18 @@ async function CustomDocuments() {
                 ) : null}
               </div>
               <dl className="grid gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs text-ink-3">Primary way leaders are chosen</dt>
-                  <dd className="text-ink">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod] : "Not stated"}{s.successionMethod && s.successionMethod !== d.club.successionMethod ? " (a change)" : ""}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-ink-3">Students join by</dt>
-                  <dd className="text-ink">{s.joinPolicy ? JOIN_LABEL[s.joinPolicy] : "Not stated"}{s.joinPolicy && s.joinPolicy !== d.club.joinPolicy ? " (a change)" : ""}</dd>
-                </div>
+                {/* Each kind of document states only what it governs: bylaws the succession method, a constitution the join policy. */}
+                {s.governs === "successionMethod" ? (
+                  <div>
+                    <dt className="text-xs text-ink-3">Primary way leaders are chosen</dt>
+                    <dd className="text-ink">{s.successionMethod ? SUCCESSION_LABEL[s.successionMethod] : "Not stated"}{s.successionMethod && s.successionMethod !== d.club.successionMethod ? " (a change)" : ""}</dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt className="text-xs text-ink-3">Students join by</dt>
+                    <dd className="text-ink">{s.joinPolicy ? JOIN_LABEL[s.joinPolicy] : "Not stated"}{s.joinPolicy && s.joinPolicy !== d.club.joinPolicy ? " (a change)" : ""}</dd>
+                  </div>
+                )}
                 {s.note ? (
                   <div className="sm:col-span-2">
                     <dt className="text-xs text-ink-3">Note from the club</dt>

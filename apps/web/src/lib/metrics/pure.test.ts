@@ -3,26 +3,36 @@ import { DAY_MS, campusDate } from "@/lib/time";
 import {
   academicYearBuckets,
   accumulateNetwork,
+  activityScore,
   attendanceRate,
   bucketIndexOf,
   bucketsBetween,
   checkinLines,
+  clubRisk,
+  compareRisk,
   countsFromCheckins,
   evaluateClubActivity,
-  individualRetention,
+  heldLatelyText,
   involvementWindow,
   isActiveStudent,
+  isHeldEvent,
   lastBuckets,
+  latestRetention,
   linesFromCounts,
+  noRetentionText,
   occurrenceCounts,
+  periodsAttended,
   pilotPeriodEnd,
   retentionSeries,
   reviewGate,
+  shortPeriodLabel,
   standingFromHistory,
   termEnd,
   type ClubActivityInput,
+  type ClubRiskInput,
   type TermLike,
 } from "./pure";
+import type { ClubActivity } from "./types";
 
 // A Weber State-shaped calendar. Dates are stored as campus midnight, like the seed.
 const term = (name: string, academicYear: string, start: [number, number, number], end: [number, number, number], countsForActivity = true): TermLike => ({
@@ -226,16 +236,28 @@ describe("retention", () => {
     expect(series[3].end.getTime()).toBe(campusDate(2026, 11, 1).getTime() - 1);
   });
 
-  it("is null, not zero, when the previous period had nobody", () => {
+  it("is null, not zero, unless both periods had attendees (a month off is a gap, not a drop)", () => {
     const series = retentionSeries(buckets, [seen("a", 2), seen("a", 2), seen("x", 9)], AT);
     expect(series[2]).toMatchObject({ attendees: 1, previousAttendees: 0, rate: null });
-    expect(series[3]).toMatchObject({ attendees: 0, previousAttendees: 1, retained: 0, rate: 0 });
+    expect(series[3]).toMatchObject({ attendees: 0, previousAttendees: 1, retained: 0, rate: null });
+    // Nobody came back, but people did come: a real 0%.
+    expect(retentionSeries(buckets, [seen("a", 2), seen("b", 3)], AT)[3]).toMatchObject({ attendees: 1, previousAttendees: 1, retained: 0, rate: 0 });
   });
 
-  it("measures a person over the periods since they joined; the current one only counts once they've come", () => {
-    expect(individualRetention(buckets, [0, 2], AT)).toEqual({ periods: 3, attendedPeriods: 2, rate: 2 / 3 });
-    expect(individualRetention(buckets, [0, 2, 3], AT)).toEqual({ periods: 4, attendedPeriods: 3, rate: 3 / 4 });
-    expect(individualRetention(buckets.slice(3), [], AT)).toEqual({ periods: 0, attendedPeriods: 0, rate: null });
+  it("names the period each point compares with", () => {
+    const series = retentionSeries(buckets, [], AT);
+    expect(series.map((p) => [p.previousLabel, p.label])).toEqual([
+      [null, "Jul 2026"],
+      ["Jul 2026", "Aug 2026"],
+      ["Aug 2026", "Sep 2026"],
+      ["Sep 2026", "Oct 2026"],
+    ]);
+  });
+
+  it("counts months attended per person over the periods since they joined; the current one only counts once they've come", () => {
+    expect(periodsAttended(buckets, [0, 2], AT)).toEqual({ periods: 3, attendedPeriods: 2, rate: 2 / 3 });
+    expect(periodsAttended(buckets, [0, 2, 3], AT)).toEqual({ periods: 4, attendedPeriods: 3, rate: 3 / 4 });
+    expect(periodsAttended(buckets.slice(3), [], AT)).toEqual({ periods: 0, attendedPeriods: 0, rate: null });
   });
 
   it("starts someone's history at their first check-in or joining, whichever came first", () => {
@@ -251,6 +273,149 @@ describe("retention", () => {
     expect(involvementWindow({ status: "LEFT", joinedAt: campusDate(2025, 9, 1), endedAt: left }, null, AT)!.end).toEqual(left);
     // A pending request isn't membership yet.
     expect(involvementWindow({ status: "PENDING", joinedAt: null, endedAt: null }, null, AT)).toBeNull();
+  });
+});
+
+describe("retention, the one figure", () => {
+  // Mid-October: Oct is still running, so Sep is the latest complete month.
+  const months = lastBuckets("month", AT, 13); // Sep 2025 … Oct 2026 (in progress)
+  const idx = (label: string) => months.findIndex((b) => b.label === label);
+  const came = (label: string, ...users: string[]) => users.map((userId) => ({ userId, bucket: idx(label) }));
+  const headline = (attendance: { userId: string; bucket: number }[], at = AT) => latestRetention(retentionSeries(months, attendance, at).slice(1));
+
+  it("compares the latest two complete months, never the one still running", () => {
+    const r = headline([...came("Aug 2026", "a", "b", "c", "d"), ...came("Sep 2026", "a", "b", "e"), ...came("Oct 2026", "a")]);
+    expect(r).toEqual({ from: "Aug 2026", to: "Sep 2026", rate: 0.5, retained: 2, previousAttendees: 4, months: "Aug → Sep", label: "Aug → Sep: 50% came back" });
+  });
+
+  it("gives the same answer on any day of the month (the old rules disagreed mid-month)", () => {
+    const facts = [...came("Aug 2026", "a", "b"), ...came("Sep 2026", "a", "b", "c")];
+    const early = headline(facts, campusDate(2026, 10, 1, 9));
+    const late = headline([...facts, ...came("Oct 2026", "c")], campusDate(2026, 10, 30, 21));
+    expect(early?.label).toBe("Aug → Sep: 100% came back");
+    expect(late).toEqual(early);
+  });
+
+  it("skips pairs where either month had nobody, so a summer off keeps the spring figure", () => {
+    // Met through April, off May–August, back in September; October still running.
+    const r = headline([...came("Mar 2026", "a", "b", "c"), ...came("Apr 2026", "a", "x"), ...came("Sep 2026", "a", "b"), ...came("Oct 2026", "a", "b")]);
+    expect(r?.label).toBe("Mar → Apr: 33% came back");
+    expect(r).toMatchObject({ retained: 1, previousAttendees: 3 });
+  });
+
+  it("names the year when the pair is from an earlier year, so last October isn't read as this one", () => {
+    const r = headline([...came("Oct 2025", "a", "b"), ...came("Nov 2025", "a"), ...came("Oct 2026", "a")]);
+    expect(r).toMatchObject({ from: "Oct 2025", to: "Nov 2025", months: "Oct → Nov 2025", label: "Oct → Nov 2025: 50% came back" });
+    // Across New Year, the later month's year is this year's: no year needed.
+    expect(headline([...came("Dec 2025", "a", "b"), ...came("Jan 2026", "b")])?.label).toBe("Dec → Jan: 50% came back");
+  });
+
+  it("counts a real 0%: both months had attendees and nobody came back", () => {
+    expect(headline([...came("Aug 2026", "a", "b"), ...came("Sep 2026", "c")])?.label).toBe("Aug → Sep: 0% came back");
+  });
+
+  it("is null until two complete months in a row have check-ins", () => {
+    expect(headline([])).toBeNull();
+    expect(headline([...came("Sep 2026", "a"), ...came("Oct 2026", "a")])).toBeNull(); // Oct isn't over
+    expect(headline([...came("Jun 2026", "a"), ...came("Aug 2026", "a")])).toBeNull(); // not in a row
+    expect(noRetentionText()).toBe("Shows once two full months in a row have check-ins");
+  });
+
+  it("works the same for quarters and longer periods", () => {
+    const quarters = lastBuckets("quarter", AT, 4); // Q1 … Q4 2026 (in progress)
+    const series = retentionSeries(quarters, [{ userId: "a", bucket: 1 }, { userId: "b", bucket: 1 }, { userId: "a", bucket: 2 }, { userId: "a", bucket: 3 }], AT);
+    expect(latestRetention(series)?.label).toBe("Q2 → Q3: 50% came back");
+    expect(shortPeriodLabel("2025-2026")).toBe("2025-2026");
+    expect(shortPeriodLabel("2026")).toBe("2026");
+    expect(shortPeriodLabel("Dec 2025")).toBe("Dec");
+  });
+});
+
+describe("activity score", () => {
+  const at = AT;
+  const occ = (daysFromNow: number, hasCheckin = true) => ({ startsAt: new Date(at.getTime() + daysFromNow * DAY_MS), hasCheckin });
+
+  it("counts held events in the last 30 days, not dates on the calendar", () => {
+    // Scheduling ten future meetings adds nothing; holding them does.
+    const future = Array.from({ length: 10 }, (_, i) => occ(i + 1, false));
+    expect(activityScore(future, at)).toBe(0);
+    expect(activityScore([...future, occ(-2), occ(-9), occ(-16)], at)).toBe(3);
+  });
+
+  it("leaves out events nobody checked in to, and ones older than 30 days", () => {
+    expect(activityScore([occ(-3, false), occ(-31), occ(-30), occ(-0.01)], at)).toBe(2);
+    expect(isHeldEvent(occ(0), at)).toBe(true); // starting right now, with a check-in
+    expect(isHeldEvent(occ(0.5), at)).toBe(false); // check-in window open, event not started
+  });
+
+  it("says what it counts", () => {
+    expect(heldLatelyText(9)).toBe("Held 9 events in the last 30 days");
+    expect(heldLatelyText(1)).toBe("Held 1 event in the last 30 days");
+  });
+});
+
+describe("at risk", () => {
+  const RULE_8 = { minEvents: 2, minMembers: 8 };
+  const activity = (p: Partial<ClubActivity> = {}): ClubActivity => ({
+    active: true,
+    inPilot: false,
+    pilotEndsAt: null,
+    heldEventsCurrentTerm: 4,
+    heldEventsPreviousTerm: 5,
+    registeredMembers: 20,
+    activeMembers: 9,
+    reasons: [],
+    currentTermName: "Fall 2026",
+    previousTermName: "Spring 2026",
+    ...p,
+  });
+  const input = (p: Partial<ClubActivity>, o: Partial<ClubRiskInput> = {}): ClubRiskInput => ({ status: "APPROVED", activity: activity(p), at: AT, term: FALL_26, rule: RULE_8, ...o });
+  const PAST_HALF = campusDate(2026, 11, 2, 12); // Fall 2026 runs Aug 24 – Dec 12
+
+  it("flags inactive clubs with the metrics layer's reasons", () => {
+    const r = clubRisk(input({ active: false, heldEventsCurrentTerm: 0, heldEventsPreviousTerm: 1, reasons: ["Only 0 events…"] }));
+    expect(r).toEqual({ kind: "inactive", tag: "Inactive", reasons: ["Only 0 events…"], endsThisTerm: false });
+  });
+
+  it("flags pilots that don't meet the bar yet, most urgent when the pilot ends this term", () => {
+    const ending = clubRisk(input({ inPilot: true, pilotEndsAt: termEnd(FALL_26), heldEventsCurrentTerm: 1, registeredMembers: 5 }));
+    expect(ending).toMatchObject({ kind: "pilot", endsThisTerm: true });
+    expect(ending?.reasons).toEqual(["Only 1 event with check-ins in Fall 2026 (needs 2 in one term).", "Only 5 registered members (needs 8)."]);
+    expect(ending?.tag).toBe("Pilot period ends Dec 12, 2026");
+    const later = clubRisk(input({ inPilot: true, pilotEndsAt: termEnd(SPRING_27), heldEventsCurrentTerm: 0 }));
+    expect(later).toMatchObject({ kind: "pilot", endsThisTerm: false, reasons: ["No events with check-ins in Fall 2026 (needs 2 in one term)."] });
+    // A pilot already meeting the bar isn't at risk, however soon it ends.
+    expect(clubRisk(input({ inPilot: true, pilotEndsAt: termEnd(FALL_26) }))).toBeNull();
+  });
+
+  it("flags clubs active only on last term's record once the term is half over", () => {
+    const thin = { heldEventsCurrentTerm: 1, heldEventsPreviousTerm: 6 };
+    expect(clubRisk(input(thin))).toBeNull(); // mid-October: still early in Fall
+    expect(clubRisk(input(thin, { at: PAST_HALF }))).toEqual({
+      kind: "slipping",
+      tag: "At the line",
+      reasons: ["Only 1 event with check-ins in Fall 2026 so far; active on Spring 2026's record (needs 2 in one term)."],
+      endsThisTerm: false,
+    });
+  });
+
+  it("flags clubs sitting exactly at the member minimum", () => {
+    expect(clubRisk(input({ registeredMembers: 8 }))?.reasons).toEqual(["Exactly 8 registered members, the minimum — one departure makes it inactive."]);
+    expect(clubRisk(input({ registeredMembers: 9 }))).toBeNull();
+  });
+
+  it("never lists clubs that aren't approved", () => {
+    expect(clubRisk(input({ active: false, reasons: ["This club has been retired."] }, { status: "RETIRED" }))).toBeNull();
+  });
+
+  it("orders inactive, then pilots (ending this term first), then slipping", () => {
+    const rows = [
+      { name: "B slipping", kind: "slipping" as const, tag: "", reasons: [], endsThisTerm: false },
+      { name: "C pilot later", kind: "pilot" as const, tag: "", reasons: [], endsThisTerm: false },
+      { name: "D pilot now", kind: "pilot" as const, tag: "", reasons: [], endsThisTerm: true },
+      { name: "A inactive", kind: "inactive" as const, tag: "", reasons: [], endsThisTerm: false },
+    ];
+    expect(rows.sort(compareRisk).map((r) => r.name)).toEqual(["A inactive", "D pilot now", "C pilot later", "B slipping"]);
   });
 });
 

@@ -69,7 +69,7 @@ async function sendInvite(invite: { id: string; token: string; name: string; ema
   const href = inviteHref(invite.token);
   await emailAddress(invite.email, `Will you advise ${club.name}?`, inviteEmailBody({ name: invite.name, inviterName: inviter.name, clubName: club.name, clubBlurb: club.shortDescription }), href);
   if (invite.inviteeId) {
-    await notify({ userIds: [invite.inviteeId], kind: "advisor.invited", title: `${inviter.name} asked you to advise ${club.name}`, href, email: false });
+    await notify({ userIds: [invite.inviteeId], kind: "advisor.invited", title: `${inviter.name} asked you to advise ${club.name}`, href });
   }
 }
 

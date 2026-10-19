@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { tasksAwaitingGrade } from "@/lib/authz/requirements";
 import { eventFollowers } from "@/lib/domain/event-notices";
-import { notify, notifyInBatches } from "@/lib/domain/notify";
+import { notifyEach, notifyInBatches } from "@/lib/domain/notify";
 import { eventAudience, placeOf } from "@/lib/events/notices";
 import { dueSoonNotice, dueStage, PRUNED_KEY_PREFIXES, pruneBefore, reminderKeys, startingSoonNotice, startingSoonWindow } from "@/lib/jobs/reminder-rules";
 
@@ -17,7 +17,9 @@ import { dueSoonNotice, dueStage, PRUNED_KEY_PREFIXES, pruneBefore, reminderKeys
  *    push, never email.
  *  - Requirements due: each open required task a week and a day before it's
  *    due (reminder-rules dueStage), in-app, by email and push. A test handed in
- *    on time that's waiting for grading is left alone.
+ *    on time that's waiting for grading is left alone. They go out together
+ *    (notifyEach), so a requirement every member owes queues its emails for
+ *    the "Send queued messages" job instead of sending hundreds at once.
  *
  * Every reminder claims its ReminderLog key before it's sent, so a run that
  * repeats or overlaps another sends nothing twice. Keys older than 30 days are
@@ -90,7 +92,7 @@ async function remindEventsStartingSoon(now: Date): Promise<{ events: number; pe
     const userIds = eventAudience({ visibility: e.visibility, followerIds, memberIds, excludeIds: checkedIn.map((a) => a.userId) });
     if (!userIds.length) continue;
     const copy = startingSoonNotice({ title: e.title, startsAt: o.startsAt, place: placeOf(e, o.roomOverride).text, host: e.club?.name ?? null, required: !e.clubId });
-    await notifyInBatches({ userIds, kind: "event.starting_soon", title: copy.title, body: copy.body, href: `/events/${e.id}?o=${o.id}`, email: false });
+    await notifyInBatches({ userIds, kind: "event.starting_soon", title: copy.title, body: copy.body, href: `/events/${e.id}?o=${o.id}` });
     events++;
     people += userIds.length;
   }
@@ -113,7 +115,7 @@ async function remindRequirementsDue(now: Date): Promise<number> {
     orderBy: { dueAt: "asc" },
   });
   const waiting = await tasksAwaitingGrade(tasks, now);
-  let sent = 0;
+  const notices: { userIds: string[]; title: string; body: string; href: string }[] = [];
   for (const t of tasks) {
     if (!t.dueAt || !t.assigneeId || waiting.has(t.id)) continue;
     const stage = dueStage({ dueAt: t.dueAt, createdAt: t.createdAt }, now);
@@ -121,8 +123,8 @@ async function remindRequirementsDue(now: Date): Promise<number> {
     // A leader's requirement names the club whose permissions pause if it's late (lib/domain/requirements).
     const gatesClub = t.sourceType === "requirement" ? (t.club?.name ?? null) : null;
     const copy = dueSoonNotice({ title: t.title, dueAt: t.dueAt, gatesClub }, now);
-    await notify({ userIds: [t.assigneeId], kind: "requirement.due_soon", title: copy.title, body: copy.body, href: t.href ?? "/tasks" });
-    sent++;
+    notices.push({ userIds: [t.assigneeId], title: copy.title, body: copy.body, href: t.href ?? "/tasks" });
   }
-  return sent;
+  await notifyEach({ kind: "requirement.due_soon", notices });
+  return notices.length;
 }

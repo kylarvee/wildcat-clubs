@@ -84,6 +84,7 @@ export type ClubListItem = {
 const EMPTY_METRICS: ClubMetricsView = {
   registeredMembers: 0,
   activeMembers: 0,
+  retention: null,
   retentionRate: null,
   avgRating: null,
   reviewCount: 0,

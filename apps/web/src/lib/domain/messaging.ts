@@ -728,7 +728,6 @@ export async function sendMessage(actor: Actor | null, conversationId: string, b
       title: convo.type === "DIRECT" ? `${actor.name} sent you a message` : `${actor.name} in ${convo.title || "your leader group"}`,
       body: previewText(text, 140),
       href: `/messages/${conversationId}`,
-      email: false,
       exceptUserId: actor.id,
     });
   }
@@ -874,7 +873,6 @@ export async function createLeadersGroup(actor: Actor | null, input: unknown): P
     title: `${actor.name} added you to “${title}”`,
     body: "A leader group in Wildcat Clubs Messages.",
     href: `/messages/${created.id}`,
-    email: false,
     exceptUserId: actor.id,
   });
   return created;
@@ -906,7 +904,6 @@ export async function addGroupMembers(actor: Actor | null, conversationId: strin
     title: `${actor.name} added you to “${access.convo.title || "a leader group"}”`,
     body: "A leader group in Wildcat Clubs Messages.",
     href: `/messages/${conversationId}`,
-    email: false,
     exceptUserId: actor.id,
   });
   return { added: fresh.length };

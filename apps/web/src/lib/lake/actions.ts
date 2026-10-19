@@ -40,6 +40,8 @@ const q = (v: unknown, yes: (s: string) => string, no: string) => {
   return s ? yes(s) : no;
 };
 const an = (word: string) => (/^[aeiou]/i.test(word) ? `an ${word}` : `a ${word}`);
+/** The four ways to fill a seat, by the names lib/roles/labels SUCCESSION_NAME gives them. */
+const SUCCESSION_WORDS: Record<string, string> = { ADVISOR_PRESIDENT: "Advisor & President", NEXT_IN_LINE: "Next in line", SELF_SELECT: "Self-select", MEMBER_VOTE: "Member vote" };
 
 export const ACTIONS = {
   // ─── Advisors and ambassadors ──────────────────────────────────────────────
@@ -117,6 +119,20 @@ export const ACTIONS = {
   "constitution.custom_withdrawn": { label: "Withdrew a custom document", phrase: "withdrew a custom document", public: false },
   "constitution.custom_approved": { label: "Approved a custom document", phrase: "approved the club's custom document", public: true },
   "constitution.custom_rejected": { label: "Returned a custom document", phrase: "returned the club's custom document", public: false },
+  /** Adopting, or WSUSA approving a custom document, changed who can join or how seats are filled (lib/domain/constitution). */
+  "constitution.settings_changed": {
+    label: "Changed how a club fills seats or who can join",
+    phrase: (d) => {
+      const record = (v: unknown) => (v && typeof v === "object" ? (v as Data) : null);
+      const to = (v: unknown) => text(record(v)?.to);
+      const succession = to(d.successionMethod);
+      const join = to(d.joinPolicy);
+      const seats = succession ? `set the club to fill seats by ${SUCCESSION_WORDS[succession] ?? "another method"}` : null;
+      const joining = join === "APPROVAL" ? "made joining the club take a leader's approval" : join === "OPEN" ? "opened the club to anyone who joins" : null;
+      return [seats, joining].filter(Boolean).join(" and ") || "changed how the club fills seats or who can join";
+    },
+    public: true,
+  },
 
   // ─── Directory (admin) ─────────────────────────────────────────────────────
   "college.created": { label: "Added a college", phrase: (d) => q(d.name, (n) => `added ${n} to the directory`, "added a college"), public: false },

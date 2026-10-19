@@ -5,6 +5,7 @@ import { ArrowRight, RefreshCw, X } from "lucide-react";
 import type { NetworkLinkDetails, NetworkNodeDetails } from "@/lib/analytics/network";
 import type { NetworkPayload, NetworkViewNode } from "@/lib/analytics/network-model";
 import { STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
+import { noRetentionText } from "@/lib/metrics/pure";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/layout";
@@ -188,7 +189,11 @@ function NodeBody({
         <StatBox label="Attending members" value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : details ? fmt(details.activeMembers) : "—"} hint="came to an event lately" />
         <StatBox label="Check-ins" value={fmt(node.size)} hint={data.windowPhrase} />
         {isClub ? (
-          <StatBox label="Retention" value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : pct(club?.retentionRate ?? null)} hint="came back last month" />
+          <StatBox
+            label="Retention"
+            value={loading ? <Skeleton className="mt-1 h-5 w-10" /> : pct(club?.retentionRate ?? null)}
+            hint={loading ? undefined : (club?.retentionLabel ?? (club ? noRetentionText() : undefined))}
+          />
         ) : (
           <StatBox label="Clubs" value={fmt(node.clubIds.length)} />
         )}

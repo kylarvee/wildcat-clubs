@@ -7,7 +7,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { fmtMoney } from "@/lib/time";
 import { describeSchedule } from "@/lib/events/summary";
-import { FUNDING_STATUS_LABEL, plural } from "@/lib/funding/labels";
+import { plural } from "@/lib/funding/labels";
 import type { BudgetLine, EventCostGroup } from "@/lib/domain/funding";
 
 const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -26,11 +26,22 @@ export function LineMath({ line }: { line: Pick<BudgetLine, "quantity" | "unitCo
   );
 }
 
-function LockNote({ lock }: { lock: NonNullable<BudgetLine["lockedBy"]> }) {
+/** Where a line stands with funding: locked by a request (in review, or funded in full), or what WSUSA funded of it (lib/funding/locks). */
+function FundingNote({ line }: { line: Pick<BudgetLine, "lockedBy" | "decisions" | "fundedCents" | "openCents" | "requestable"> }) {
+  const lock = line.lockedBy;
+  if (lock)
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-xs text-ink-2">
+        <Lock className="h-3 w-3" aria-hidden />
+        {lock.status === "SUBMITTED" ? `In “${lock.title}” · in WSUSA review` : `Funded in full by “${lock.title}”`}
+      </span>
+    );
+  const last = line.decisions.at(-1);
+  if (!last) return null;
+  if (!line.requestable) return <span className="mt-1 block text-xs text-ink-2">Funded: {fmtMoney(line.fundedCents)} in “{last.title}”</span>;
   return (
-    <span className="mt-1 inline-flex items-center gap-1 text-xs text-ink-2">
-      <Lock className="h-3 w-3" aria-hidden />
-      In “{lock.title}” · {FUNDING_STATUS_LABEL[lock.status].toLowerCase()}
+    <span className="mt-1 block text-xs font-medium text-warning">
+      {line.fundedCents ? `${fmtMoney(line.fundedCents)} funded in “${last.title}” · ${fmtMoney(line.openCents)} left to ask for` : `Not funded in “${last.title}” · free to ask another source`}
     </span>
   );
 }
@@ -45,7 +56,7 @@ export function CostLineRow({ line, sourceNames, actions }: { line: BudgetLine; 
           {line.category} · {sourceNames[line.fundingSource]}
           {line.eventId && !line.perOccurrence ? " · once" : ""}
         </p>
-        {line.lockedBy ? <LockNote lock={line.lockedBy} /> : null}
+        <FundingNote line={line} />
       </div>
       <p className="col-start-1 row-start-2 text-sm text-ink-2 sm:col-start-auto sm:row-start-auto">
         <LineMath line={line} />

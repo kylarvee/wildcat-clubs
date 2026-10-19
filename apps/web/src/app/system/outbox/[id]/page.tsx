@@ -9,7 +9,7 @@ import { PLATFORM } from "@/lib/institution";
 import { fmtLongDate, fmtTime } from "@/lib/time";
 import { Card } from "@/components/ui/card";
 import { Callout, KeyValue, PageHeader } from "@/components/ui/layout";
-import { ChannelIcon, LinkedText, OUTBOX_CHANNEL_LABEL, OutboxStatusBadge, toLocalPath } from "@/components/system/outbox";
+import { ChannelIcon, LinkedText, OUTBOX_CHANNEL_LABEL, OutboxStatusBadge, outboxKindLabel, toLocalPath } from "@/components/system/outbox";
 
 export const metadata: Metadata = { title: "Outbox message" };
 
@@ -39,7 +39,12 @@ export default async function OutboxMessagePage({ params, searchParams }: { para
   const appUrl = process.env.APP_URL ?? "http://localhost:3000";
   const sender = process.env.PLATFORM_SENDER_EMAIL ?? "clubs@weber.edu";
   const localLink = m.href ? (m.href.startsWith("/") ? m.href : toLocalPath(m.href, appUrl)) : null;
-  const sentAt = `${fmtLongDate(m.createdAt)} at ${fmtTime(m.createdAt)}`;
+  const when = (d: Date) => `${fmtLongDate(d)} at ${fmtTime(d)}`;
+  const queued = m.status === "QUEUED";
+  // A queued message went out with a later run; others went out as they were made.
+  const sentAt = when(!queued && m.sentAt ? m.sentAt : m.createdAt);
+  const waited = !queued && m.sentAt && m.sentAt.getTime() - m.createdAt.getTime() > 60_000;
+  const kind = outboxKindLabel(m.kind);
 
   return (
     <div className="space-y-6">
@@ -63,7 +68,15 @@ export default async function OutboxMessagePage({ params, searchParams }: { para
         </Callout>
       ) : m.status === "MOCKED" ? (
         <Callout tone="info" title="Recorded, not sent">
-          {m.channel === "EMAIL" ? "Email" : "Push"} was in mock mode when this was created, so nobody received it. This is exactly what they would have received.
+          {m.channel === "EMAIL" ? "Email" : "Push"} was in mock mode when this went out, so nobody received it. This is exactly what they would have received.
+        </Callout>
+      ) : queued ? (
+        <Callout tone="info" title="Waiting to send">
+          This is part of a big send, so it waits for the <span className="font-medium">Send queued messages</span> job, which sends the oldest waiting messages first, about 200 a run.{" "}
+          <Link href="/system/jobs" className="font-medium underline underline-offset-2">
+            Run the jobs now
+          </Link>
+          .
         </Callout>
       ) : null}
 
@@ -97,7 +110,9 @@ export default async function OutboxMessagePage({ params, searchParams }: { para
                 ),
             },
             { label: "Status", value: <OutboxStatusBadge status={m.status} /> },
-            { label: m.status === "MOCKED" ? "Recorded" : "Sent", value: sentAt },
+            { label: queued ? "Queued" : m.status === "MOCKED" ? "Recorded" : m.status === "FAILED" ? "Tried" : "Sent", value: sentAt },
+            ...(waited ? [{ label: "Queued", value: when(m.createdAt) }] : []),
+            ...(kind ? [{ label: "Notification", value: <span className="break-all font-mono text-xs text-ink-2">{kind}</span> }] : []),
             {
               label: "Opens",
               value: localLink ? (

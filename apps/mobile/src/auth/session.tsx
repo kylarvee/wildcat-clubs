@@ -1,5 +1,5 @@
 import { createContext, use, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { ApiError, configureApi } from '@/api/client';
 import { Api } from '@/api/endpoints';
 import type { MMe, MSession, MUser } from '@/api/types';
@@ -17,7 +17,8 @@ import { getItem, KEYS, removeItem, setItem } from '@/lib/storage';
 type Status = 'loading' | 'signedOut' | 'signedIn';
 
 export type PushState =
-  | { kind: 'on' }
+  /** Registered with the server. `delivering`: the server's Push switch is on too, so pushes really arrive. */
+  | { kind: 'on'; delivering: boolean }
   | { kind: 'off' }
   | { kind: 'denied'; canAskAgain: boolean }
   | { kind: 'unavailable'; reason: string };
@@ -33,6 +34,8 @@ type SessionValue = {
   setUnread: (n: number) => void;
   push: PushState;
   setPushEnabled: (on: boolean) => Promise<void>;
+  /** Asks the server again whether pushes reach this phone (its Push switch can change while the app is open). */
+  refreshPushStatus: () => Promise<void>;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -116,9 +119,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const outcome = await getPushToken(ask);
     if (outcome.status === 'registered') {
       try {
-        await Api.registerPush({ token: outcome.token, platform: outcome.platform });
+        const r = await Api.registerPush({ token: outcome.token, platform: outcome.platform });
         await setItem(KEYS.pushToken, outcome.token);
-        setPush({ kind: 'on' });
+        setPush({ kind: 'on', delivering: r.delivering });
       } catch {
         setPush({ kind: 'unavailable', reason: "Couldn't reach Wildcat Clubs to turn on notifications. We'll try again next time you open the app." });
       }
@@ -218,12 +221,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [syncPush],
   );
 
+  /**
+   * Re-sends this phone's stored token, which changes nothing on the server
+   * when it's already registered, to learn whether pushes are delivered now.
+   * At most every 30 seconds; quiet when offline.
+   */
+  const lastPushCheck = useRef(0);
+  const pushOn = push.kind === 'on';
+  const refreshPushStatus = useCallback(async () => {
+    if (!pushOn || !token.current || Date.now() - lastPushCheck.current < 30_000) return;
+    const stored = await getItem(KEYS.pushToken);
+    if (!stored) return;
+    lastPushCheck.current = Date.now();
+    try {
+      const r = await Api.registerPush({ token: stored, platform: Platform.OS === 'ios' ? 'ios' : 'android' });
+      setPush((p) => (p.kind === 'on' ? { kind: 'on', delivering: r.delivering } : p));
+    } catch {
+      // Offline: keep what we last knew.
+    }
+  }, [pushOn]);
+
   const setUnread = useCallback((n: number) => {
     setMe((m) => (m ? { ...m, unreadNotifications: n } : m));
     setAppBadge(n);
   }, []);
 
-  const value: SessionValue = { status, user, me, signIn, signOut, refreshMe, setUnread, push, setPushEnabled };
+  const value: SessionValue = { status, user, me, signIn, signOut, refreshMe, setUnread, push, setPushEnabled, refreshPushStatus };
   return <SessionContext value={value}>{children}</SessionContext>;
 }
 

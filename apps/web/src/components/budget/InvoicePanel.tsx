@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { InvoiceStatus } from "@prisma/client";
 import { ChevronDown, Download, ExternalLink, FileText } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { InvoiceBadge } from "@/components/budget/StatusBadge";
 import { fmtLongDate, fmtMoney } from "@/lib/time";
 
@@ -11,9 +12,11 @@ export const invoicePdfUrl = (id: string, download = false) => `/api/invoices/${
 
 /**
  * One invoice: number, amount, where it stands, and the PDF (preview inline,
- * open in a tab, or download). Admin pages pass their buttons as children.
+ * open in a tab, or download). Admin pages pass their buttons as children,
+ * and the open invoice's due date (its task's) to show whether it's late.
  */
-export function InvoicePanel({ invoice, children, defaultOpen }: { invoice: InvoiceSummary; children?: ReactNode; defaultOpen?: boolean }) {
+export function InvoicePanel({ invoice, children, defaultOpen, dueAt, now = new Date() }: { invoice: InvoiceSummary; children?: ReactNode; defaultOpen?: boolean; dueAt?: Date | null; now?: Date }) {
+  const late = invoice.status === "OPEN" && dueAt ? dueAt < now : false;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start gap-3">
@@ -26,9 +29,13 @@ export function InvoicePanel({ invoice, children, defaultOpen }: { invoice: Invo
             {fmtMoney(invoice.amountCents)} · created {fmtLongDate(invoice.createdAt)}
             {invoice.createdBy ? ` by ${invoice.createdBy.name}` : ""}
             {invoice.processedAt ? ` · processed ${fmtLongDate(invoice.processedAt)}` : ""}
+            {invoice.status === "OPEN" && dueAt ? ` · ${late ? "was due" : "due"} ${fmtLongDate(dueAt)} in the finance system` : ""}
           </p>
         </div>
-        <InvoiceBadge status={invoice.status} />
+        <span className="flex flex-wrap gap-1.5">
+          {late ? <Badge tone="danger">Past due</Badge> : null}
+          <InvoiceBadge status={invoice.status} />
+        </span>
       </div>
       <div className="flex flex-wrap gap-2">
         <a href={invoicePdfUrl(invoice.id, true)} className={buttonClasses("outline", "sm")} download>

@@ -5,7 +5,7 @@ import { act } from "@/lib/domain/kit";
 import * as constitution from "@/lib/domain/constitution";
 import type { DraftData } from "@/lib/constitution/templates";
 
-export async function createDraftAction(input: { title?: string; clubId?: string | null; fromDraftId?: string | null }) {
+export async function createDraftAction(input: { title?: string; clubId?: string | null; fromDraftId?: string | null; fromCurrent?: boolean | null }) {
   const r = await act(async (actor) => {
     const d = await constitution.createDraft(actor, input);
     return { id: d.id };

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  decideLines,
   dollarsToCents,
+  earlierFundedCents,
   formatInvoiceNumber,
   lineCents,
   nextInvoiceNumber,
   occurrencesInTerm,
   parseInvoiceNumber,
-  partialAmountProblem,
   requestTotals,
   sumBySource,
   sumCents,
@@ -96,12 +97,51 @@ describe("totals", () => {
     expect(t.bySource.COLLEGE).toEqual({ requested: 0, approved: 0 });
   });
 
-  it("checks partial approval amounts", () => {
-    expect(partialAmountProblem(10000, 6000)).toBeNull();
-    expect(partialAmountProblem(10000, 0)).toMatch(/Don't approve/);
-    expect(partialAmountProblem(10000, 10000)).toMatch(/Approve/);
-    expect(partialAmountProblem(10000, 12000)).toMatch(/less than/);
-    expect(partialAmountProblem(10000, Number.NaN)).not.toBeNull();
+  it("counts approved money by the source that funded it", () => {
+    const t = requestTotals([
+      { status: "APPROVED", fundingSource: "DEPARTMENT", fundedSource: "WSUSA", amountRequestedCents: 20000, amountApprovedCents: 20000 },
+      { status: "PARTIALLY_APPROVED", fundingSource: "COLLEGE", fundedSource: null, amountRequestedCents: 9000, amountApprovedCents: 4000 },
+    ]);
+    expect(t.bySource.DEPARTMENT).toEqual({ requested: 20000, approved: 0 });
+    expect(t.bySource.WSUSA).toEqual({ requested: 0, approved: 20000 });
+    expect(t.bySource.COLLEGE).toEqual({ requested: 9000, approved: 4000 });
+  });
+});
+
+describe("line-by-line decisions", () => {
+  const lines = [
+    { id: "food", totalCents: 22000 },
+    { id: "room", totalCents: 15000 },
+    { id: "banner", totalCents: 18500 },
+  ];
+
+  it("approves every line in full when no amounts are changed", () => {
+    expect(decideLines(lines)).toMatchObject({ ok: true, status: "APPROVED", approvedCents: 55500, reduced: 0 });
+    expect(decideLines(lines, { food: 22000 })).toMatchObject({ ok: true, status: "APPROVED" });
+  });
+
+  it("makes it a partial approval when any line gets less, and sums the lines", () => {
+    const d = decideLines(lines, { banner: 0 });
+    expect(d).toMatchObject({ ok: true, status: "PARTIALLY_APPROVED", approvedCents: 37000, reduced: 1 });
+    if (d.ok) expect(d.lines.map((l) => l.approvedCents)).toEqual([22000, 15000, 0]);
+    expect(decideLines(lines, { food: 12000, banner: 0 })).toMatchObject({ ok: true, approvedCents: 27000, reduced: 2 });
+  });
+
+  it("refuses more than a line asks for, negative or missing amounts, and approving nothing", () => {
+    expect(decideLines(lines, { room: 15001 })).toMatchObject({ ok: false, problem: expect.stringMatching(/more than it asks/) });
+    expect(decideLines(lines, { room: -1 })).toMatchObject({ ok: false });
+    expect(decideLines(lines, { room: Number.NaN })).toMatchObject({ ok: false });
+    expect(decideLines(lines, { food: 0, room: 0, banner: 0 })).toMatchObject({ ok: false, problem: expect.stringMatching(/Don't approve/) });
+  });
+
+  it("refuses an amount for a line that isn't in the request", () => {
+    expect(decideLines(lines, { other: 100 })).toMatchObject({ ok: false });
+  });
+
+  it("knows how much of a line was funded before it was asked for again", () => {
+    // 12 sets × $95: half funded earlier, so the new request asks for the other $570.
+    expect(earlierFundedCents({ quantity: 12, unitCostCents: 9500, occurrences: 1, totalCents: 57000 })).toBe(57000);
+    expect(earlierFundedCents({ quantity: 1, unitCostCents: 2500, occurrences: 12, totalCents: 30000 })).toBe(0);
   });
 });
 

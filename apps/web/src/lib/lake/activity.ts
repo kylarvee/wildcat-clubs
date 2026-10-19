@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { db, type Tx } from "@/lib/db";
 import { isPublicByDefault } from "@/lib/lake/actions";
+import { activitySubject } from "@/lib/lake/subject";
 
 /**
  * The activity stream. Every domain write appends one row, so the data lake
@@ -21,6 +22,8 @@ export type ActivityInput = {
   data?: Prisma.InputJsonValue;
   /** Leave out to use the action's default from lib/lake/actions. */
   isPublic?: boolean;
+  /** The person the row is about. Leave out to take data.userId (or an election's winnerId). */
+  subjectUserId?: string | null;
 };
 
 export async function logActivity(input: ActivityInput, tx: Tx = db) {
@@ -33,6 +36,7 @@ export async function logActivity(input: ActivityInput, tx: Tx = db) {
       clubId: input.clubId ?? null,
       data: input.data,
       isPublic: input.isPublic ?? isPublicByDefault(input.action),
+      subjectUserId: input.subjectUserId !== undefined ? input.subjectUserId : activitySubject(input.data),
     },
   });
 }

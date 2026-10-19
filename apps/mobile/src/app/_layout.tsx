@@ -29,6 +29,10 @@ export default function RootLayout() {
           <Stack.Screen name="club/[slug]" options={{ title: '' }} />
           <Stack.Screen name="event/[id]" options={{ title: 'Event' }} />
           <Stack.Screen name="c/[code]" options={{ title: 'Check in' }} />
+          <Stack.Screen name="tasks" options={{ title: 'Tasks' }} />
+          {/* Leader check-in tools: the rotating QR fills the screen; Add someone opens over it. */}
+          <Stack.Screen name="live/[id]" options={{ presentation: 'fullScreenModal', headerShown: false, title: 'Check-in QR' }} />
+          <Stack.Screen name="live/add/[id]" options={{ presentation: 'modal', title: 'Add someone' }} />
         </Stack>
         <Boot />
         {Platform.OS !== 'web' ? <NotificationTaps /> : null}

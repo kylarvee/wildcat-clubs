@@ -22,9 +22,9 @@ export function BudgetTiles({ planned, money: m, lineCount, termName }: { planne
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Stat label="Planned" value={<TileMoney cents={planned.totalCents} />} hint={lineCount ? `${plural(lineCount, "cost line")} in ${termName}` : `No costs in ${termName} yet`} />
       <Stat
-        label="Not requested yet"
+        label="Left to ask for"
         value={<TileMoney cents={planned.unrequestedCents} />}
-        hint={!lineCount ? "Add costs to request funding" : planned.unrequestedCents ? "Lines no request covers yet" : "Every line is covered"}
+        hint={!lineCount ? "Add costs to request funding" : planned.unrequestedCents ? "Lines in no request yet, and what wasn't funded" : "Every line is covered"}
       />
       <Stat label="Requested" value={<TileMoney cents={m.requested} />} hint={m.pending ? `${fmtMoney(m.pending)} still in WSUSA review` : m.requested ? "Every request is decided" : "Nothing submitted yet"} />
       <Stat label="Approved" value={<TileMoney cents={m.approved} />} hint={share === null ? "Decisions show up here" : `${share}% of what you asked for`} />
@@ -33,8 +33,10 @@ export function BudgetTiles({ planned, money: m, lineCount, termName }: { planne
 }
 
 /**
- * Planned, requested and approved money by funding source. A table, not a
- * chart: four sources × three amounts read best as numbers. Narrow spaces
+ * Planned, requested and approved money by funding source: planned by each
+ * line's source, requested by the source the club expects, approved by the
+ * source that funded it. A table, not a chart: four sources × three amounts
+ * read best as numbers. Narrow spaces
  * (phones, and `compact` side panels) get a stacked list instead, so no
  * amount is ever cut off.
  */
@@ -42,7 +44,16 @@ export function SourceBreakdown({ planned, money: m, club, className, compact }:
   const rows = SOURCE_ORDER.map((s) => {
     const name = sourceName(s, club);
     const [label, detail] = name.includes(" · ") ? name.split(" · ") : [name, null];
-    return { s, label, detail, planned: planned.bySource[s], requested: m.bySource[s].requested, approved: m.bySource[s].approved, quiet: !planned.bySource[s] && !m.bySource[s].requested };
+    // A source can fund what was planned and requested from another (WSUSA records "Funded by"), so approved money counts too.
+    return {
+      s,
+      label,
+      detail,
+      planned: planned.bySource[s],
+      requested: m.bySource[s].requested,
+      approved: m.bySource[s].approved,
+      quiet: !planned.bySource[s] && !m.bySource[s].requested && !m.bySource[s].approved,
+    };
   });
   const totals = { planned: planned.totalCents, requested: m.requested, approved: m.approved };
   const active = rows.filter((r) => !r.quiet);

@@ -2,15 +2,24 @@ import Link from "next/link";
 import type { OutboxChannel, OutboxStatus } from "@prisma/client";
 import { Bell, Mail } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/badge";
+import { kindRule, NOTIFICATION_CATEGORIES } from "@/components/notifications/catalog";
 
 /** Shared bits for the outbox list and message pages. Server-safe (no hooks). */
 
-export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = { MOCKED: "Recorded (mock)", SENT: "Sent", FAILED: "Failed" };
-const STATUS_TONE: Record<OutboxStatus, Tone> = { MOCKED: "neutral", SENT: "success", FAILED: "danger" };
+export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = { QUEUED: "Waiting to send", MOCKED: "Recorded (mock)", SENT: "Sent", FAILED: "Failed" };
+const STATUS_TONE: Record<OutboxStatus, Tone> = { QUEUED: "info", MOCKED: "neutral", SENT: "success", FAILED: "danger" };
 export const OUTBOX_CHANNEL_LABEL: Record<OutboxChannel, string> = { EMAIL: "Email", PUSH: "Push" };
 
 export function OutboxStatusBadge({ status }: { status: OutboxStatus }) {
   return <Badge tone={STATUS_TONE[status]}>{OUTBOX_STATUS_LABEL[status]}</Badge>;
+}
+
+/** "Funding · funding.submitted": the Settings → Notifications category a message's kind belongs to, and the kind itself. */
+export function outboxKindLabel(kind: string | null): string | null {
+  if (!kind) return null;
+  const rule = kindRule(kind);
+  const category = rule ? NOTIFICATION_CATEGORIES.find((c) => c.key === rule.category)?.label : null;
+  return category ? `${category} · ${kind}` : kind;
 }
 
 export function ChannelIcon({ channel, className }: { channel: OutboxChannel; className?: string }) {

@@ -4,7 +4,10 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, ROLE_LABEL, type ClubAccess } from "@/lib/authz";
-import { activeMemberIdsFor } from "@/lib/metrics";
+import { activeMemberIdsFor, clubMemberAttendanceCounts } from "@/lib/metrics";
+import { currentOrLastTerm, getTerms } from "@/lib/terms";
+import { clubRules } from "@/lib/constitution/club-rules";
+import { selectionRulesFor } from "@/lib/constitution/rules";
 import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
@@ -12,19 +15,34 @@ import { assignRole, endRoleAssignment } from "@/lib/domain/roles";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { clubPipeline } from "@/lib/roles/queries";
 import {
+  attendanceRows,
   canSelfNominate,
   confirmersFor,
+  earliestVotingOpen,
   firstToAccept,
   inClubPipeline,
   isKeyHolder,
   leadersBelow,
+  noticeEarliest,
+  NOTICE_GRACE_MS,
   organizersAddCandidates,
   pipelineCandidates,
+  quorumOf,
+  readSelectionRules,
+  selectionRulesJson,
   SUCCESSION_METHODS,
+  tieResolution,
   unanimousChoice,
   usesBallots,
   type KeyHolders,
   type PipelinePerson,
+  type Quorum,
+  type SelectionRules,
+  type TieResolution,
+  type VoterRoll,
+  type VoterRollRow,
+  type VoterStatus,
+  voterStatusIn,
 } from "@/lib/roles/pipeline";
 import { fmtDate } from "@/lib/time";
 
@@ -39,8 +57,8 @@ import { fmtDate } from "@/lib/time";
  *   CLOSED ──(apply the result → roles.assignRole)──▶ APPLIED
  *   any unfinished state ──▶ CANCELLED
  *
- *   MEMBER_VOTE        Active members vote by secret ballot; the most votes wins
- *                      (whoever applies it breaks a tie, and that's recorded).
+ *   MEMBER_VOTE        Members vote by secret ballot; the most votes wins,
+ *                      under the club's bylaw rules (below).
  *   SELF_SELECT        Current student leaders vote by secret ballot, never for
  *                      themselves. It counts only if it's unanimous.
  *   NEXT_IN_LINE       No ballots. Starts in VOTING ("waiting for answers"): each
@@ -56,6 +74,21 @@ import { fmtDate } from "@/lib/time";
  * candidates (fromPipeline). Results apply through the Org Chart write path,
  * and whoever moves up leaves the seat they moved up from, which then shows as
  * open in the pipeline (nothing cascades on its own).
+ *
+ * Bylaw rules: a new selection freezes the club's rules from its builder
+ * bylaws in effect (lib/constitution/club-rules) into Election.rules, so an
+ * amendment never changes a vote under way. Member votes follow them:
+ *   minEvents      who votes: members who'd been to that many of the club's
+ *                  events this term when voting opened (voterRoll); without
+ *                  it, active members per lib/metrics.
+ *   quorumPercent  a result counts only if that share of eligible voters
+ *                  voted; otherwise it's "No quorum" and can't be applied.
+ *   tieBreak       a runoff between the tied candidates (startRunoff), or the
+ *                  advisor or the President chooses (pipeline tieResolution);
+ *                  without it, whoever applies the result chooses.
+ *   noticeDays     voting opens no sooner than that many days after the
+ *                  selection was started (announced).
+ * Self-select always counts the current leaders' ballots, unanimously.
  *
  * Status advances lazily (whenever a selection is read through syncElection)
  * and from the scheduled job (advanceElections), so nothing depends on someone
@@ -90,23 +123,43 @@ export async function currentLeaderIds(clubId: string): Promise<string[]> {
   return [...new Set(rows.map((r) => r.userId))];
 }
 
+/** The parts of a selection that decide who votes in it. */
+export type BallotFacts = { clubId: string; method: SuccessionMethod; status: ElectionStatus; votingOpensAt: Date; rules: Prisma.JsonValue };
+
+export { voterStatusIn, type VoterRoll, type VoterRollRow, type VoterStatus } from "@/lib/roles/pipeline";
+
 /**
- * Who may vote right now.
- *   MEMBER_VOTE   active members per lib/metrics (attended recently). If the
- *                 club has no attendance yet, every ACTIVE member votes.
- *   SELF_SELECT   current student leaders.
- *   NEXT_IN_LINE, ADVISOR_PRESIDENT   nobody: there are no ballots.
+ * Who votes in a selection, and why (pipeline VoterRoll). Under the bylaws'
+ * attendance rule it counts each registered member's check-ins at the
+ * club's events (hosted or co-hosted, lib/metrics) this term, up to when
+ * voting opened, or up to now before it opens.
  */
-export async function eligibleVoterIds(clubId: string, method: SuccessionMethod): Promise<string[]> {
-  if (method === "SELF_SELECT") return currentLeaderIds(clubId);
-  if (method !== "MEMBER_VOTE") return [];
+export async function voterRoll(e: BallotFacts): Promise<VoterRoll> {
+  const final = e.status !== "NOMINATING";
+  const countedUntil = final ? e.votingOpensAt : new Date();
+  const base = { minEvents: null, termName: null, countedUntil, final, rows: [] as VoterRollRow[] };
+  if (e.method === "SELF_SELECT") return { ...base, basis: "leaders", eligibleIds: await currentLeaderIds(e.clubId) };
+  if (e.method !== "MEMBER_VOTE") return { ...base, basis: "none", eligibleIds: [] };
   const members = await db.membership.findMany({
-    where: { clubId, status: "ACTIVE", user: { status: "ACTIVE", kind: "STUDENT" } },
+    where: { clubId: e.clubId, status: "ACTIVE", user: { status: "ACTIVE", kind: "STUDENT" } },
     select: { userId: true },
   });
-  const memberIds = new Set(members.map((m) => m.userId));
-  const active = (await activeMemberIdsFor(clubId)).filter((id) => memberIds.has(id));
-  return active.length > 0 ? active : [...memberIds];
+  const memberIds = members.map((m) => m.userId);
+  const { minEvents } = readSelectionRules(e.rules);
+  if (!minEvents) {
+    const ids = new Set(memberIds);
+    const active = (await activeMemberIdsFor(e.clubId)).filter((id) => ids.has(id));
+    return { ...base, basis: "active", eligibleIds: active.length > 0 ? active : memberIds };
+  }
+  const term = currentOrLastTerm(await getTerms(), countedUntil);
+  const counts = await clubMemberAttendanceCounts(e.clubId, { from: term?.startsOn, to: countedUntil });
+  const rows = attendanceRows(memberIds, (userId) => counts.get(userId)?.attended ?? 0, minEvents);
+  return { ...base, basis: "attendance", minEvents, termName: term?.name ?? null, eligibleIds: rows.filter((r) => r.eligible).map((r) => r.userId), rows };
+}
+
+/** Who may vote in a selection (voterRoll). */
+export async function eligibleVoterIds(e: BallotFacts): Promise<string[]> {
+  return (await voterRoll(e)).eligibleIds;
 }
 
 /** Whether someone can be a candidate, with a plain reason when they can't. Any mode: an active student member. */
@@ -157,12 +210,13 @@ function dueWhere(now: Date): Prisma.ElectionWhereInput {
 const memberHref = (e: { id: string; club: { slug: string } }) => `/clubs/${e.club.slug}/elections/${e.id}`;
 const manageHref = (e: { id: string; club: { slug: string } }) => `/clubs/${e.club.slug}/manage/elections/${e.id}`;
 
-async function onVotingOpened(e: SyncedElection, actorId: string | null) {
+/** `openedAt`: when voting actually opened (the roll is counted to then). */
+async function onVotingOpened(e: SyncedElection, actorId: string | null, openedAt: Date = e.votingOpensAt) {
   await logActivity({ actorId, action: "election.voting_opened", entityType: "election", entityId: e.id, clubId: e.clubId });
   // An empty ballot isn't worth a notification; organizers see the warning instead.
   if (e._count.candidates === 0 || e.votingClosesAt <= new Date()) return;
   await notify({
-    userIds: await eligibleVoterIds(e.clubId, e.method),
+    userIds: await eligibleVoterIds({ ...e, status: "VOTING", votingOpensAt: openedAt }),
     kind: "election.voting_opened",
     title: `Voting is open: ${e.title}`,
     body: e.method === "SELF_SELECT" ? `${e.club.name}'s leaders choose together: it has to be unanimous, and ballots are secret.` : `Cast your secret ballot for ${e.club.name}. One vote each.`,
@@ -192,7 +246,7 @@ async function onVotingClosed(e: SyncedElection, actorId: string | null) {
     select: { id: true, userId: true, acceptedAt: true, user: { select: { name: true } } },
   });
   const tellEveryone = (title: string, body: string) =>
-    notify({ userIds: [...candidates.map((c) => c.userId), e.createdById], exceptUserId: actorId, kind: "election.results", title, body, href: memberHref(e), email: false });
+    notify({ userIds: [...candidates.map((c) => c.userId), e.createdById], exceptUserId: actorId, kind: "election.results", title, body, href: memberHref(e) });
 
   if (e.method === "NEXT_IN_LINE") {
     const first = firstToAccept(candidates);
@@ -206,14 +260,19 @@ async function onVotingClosed(e: SyncedElection, actorId: string | null) {
     return;
   }
 
-  const [votes, voters] = await Promise.all([db.vote.count({ where: { electionId: e.id } }), eligibleVoterIds(e.clubId, e.method)]);
+  const [votes, voters] = await Promise.all([db.vote.count({ where: { electionId: e.id } }), eligibleVoterIds({ ...e, status: "VOTING" })]);
   // Turnout (and, for self-select, whether it was unanimous) is frozen here so later roster changes don't rewrite it.
   const data: Record<string, unknown> = { votes, eligibleVoters: voters.length };
   if (e.method === "SELF_SELECT") data.unanimous = await unanimousOf(e.id, voters);
   await logActivity({ actorId, action: "election.closed", entityType: "election", entityId: e.id, clubId: e.clubId, data: data as Prisma.InputJsonObject });
+  const quorum = e.method === "MEMBER_VOTE" ? quorumOf({ quorumPercent: readSelectionRules(e.rules).quorumPercent, eligibleVoters: voters.length, votes }) : null;
   await tellEveryone(
-    `Results are in: ${e.title}`,
-    e.method === "SELF_SELECT" && !data.unanimous ? "The leaders didn't choose unanimously, so the seat will be chosen again." : `${votes} vote${votes === 1 ? "" : "s"} cast. See how it went.`,
+    quorum && !quorum.met ? `No quorum: ${e.title}` : `Results are in: ${e.title}`,
+    e.method === "SELF_SELECT" && !data.unanimous
+      ? "The leaders didn't choose unanimously, so the seat will be chosen again."
+      : quorum && !quorum.met
+        ? `${votes} of ${voters.length} eligible voters voted, and ${e.club.name}'s bylaws need ${quorum.needed}, so the result doesn't count. The organizers will hold the vote again or fill the seat another way.`
+        : `${votes} vote${votes === 1 ? "" : "s"} cast. See how it went.`,
   );
 }
 
@@ -278,6 +337,8 @@ type Plan = {
   closes: Date;
   pool: PipelinePerson[];
   now: Date;
+  /** The club's bylaw rules, frozen into Election.rules. */
+  rules: SelectionRules;
 };
 
 /** Checks a new selection without writing anything: who may start it, the seat, the mode's dates, and its candidates from the pipeline. */
@@ -294,11 +355,16 @@ async function planSelection(actor: Actor | null, input: unknown): Promise<Plan>
   const method = v.method ?? club.successionMethod;
   const now = new Date();
   const closes = v.votingClosesAt;
+  const rules = selectionRulesFor(await clubRules(club.id));
   let opens = now;
   if (usesBallots(method)) {
     if (!v.votingOpensAt) throw invalid("Choose when voting opens.");
     opens = v.votingOpensAt;
     if (opens.getTime() < now.getTime()) throw invalid(method === "MEMBER_VOTE" ? "Voting has to open in the future, so members have time to run." : "Voting has to open in the future, so there's time to add candidates.");
+    const raw = method === "MEMBER_VOTE" ? earliestVotingOpen(now, rules.noticeDays) : null;
+    if (raw && opens.getTime() < raw.getTime() - NOTICE_GRACE_MS) {
+      throw invalid(`${club.name}'s bylaws give members ${rules.noticeDays} day${rules.noticeDays === 1 ? "" : "s"}' notice before a vote, so voting can open ${when(noticeEarliest(now, rules.noticeDays)!)} at the earliest.`);
+    }
     if (closes.getTime() - opens.getTime() < HOUR) throw invalid("Keep voting open for at least an hour.");
   } else if (closes.getTime() - now.getTime() < HOUR) {
     throw invalid(method === "NEXT_IN_LINE" ? "Give people at least an hour to answer." : "Choose a decide-by date at least an hour from now.");
@@ -310,7 +376,7 @@ async function planSelection(actor: Actor | null, input: unknown): Promise<Plan>
   if (method === "NEXT_IN_LINE" && pool.length === 0) {
     throw invalid(`Nobody is next in line for ${seat.name}: the seats below it are empty. Choose another way to fill it.`);
   }
-  return { actor: actor!, club, seat, method, title: v.title, opens, closes, pool, now };
+  return { actor: actor!, club, seat, method, title: v.title, opens, closes, pool, now, rules };
 }
 
 async function writeSelection(plan: Plan) {
@@ -326,6 +392,7 @@ async function writeSelection(plan: Plan) {
         votingOpensAt: plan.opens,
         votingClosesAt: plan.closes,
         createdById: actor.id,
+        rules: selectionRulesJson(plan.rules),
       },
     });
     // createdAt keeps pipeline order: candidates are listed, and next in line is decided, in it.
@@ -389,7 +456,6 @@ async function announceSelection(plan: Plan, e: { id: string; title: string; vot
     title: `You're a candidate for ${seat.name}`,
     body: `You're on ${club.name}'s org chart below ${seat.name}, so you're a candidate automatically. ${method === "MEMBER_VOTE" ? "Add a statement, or withdraw if you'd rather not run." : "You can withdraw if you'd rather not."}`,
     href: memberHref(ref),
-    email: false,
   });
   if (method === "MEMBER_VOTE") {
     const members = await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE", user: { status: "ACTIVE", kind: "STUDENT" } }, select: { userId: true } });
@@ -398,9 +464,8 @@ async function announceSelection(plan: Plan, e: { id: string; title: string; vot
       exceptUserId: actor.id,
       kind: "election.nominations_open",
       title: `Nominations are open: ${e.title}`,
-      body: `Run for ${seat.name} in ${club.name} before voting opens ${when(e.votingOpensAt)}.`,
+      body: `Run for ${seat.name} in ${club.name} before voting opens ${when(e.votingOpensAt)}.${plan.rules.minEvents ? ` To vote, you'll need to have been to ${plan.rules.minEvents} club event${plan.rules.minEvents === 1 ? "" : "s"} this semester by then.` : ""}`,
       href: memberHref(ref),
-      email: false,
     });
   } else if (method === "SELF_SELECT") {
     await notify({
@@ -410,6 +475,7 @@ async function announceSelection(plan: Plan, e: { id: string; title: string; vot
       title: `${club.name}'s leaders will choose the next ${seat.name}`,
       body: `Voting opens ${when(e.votingOpensAt)}. It has to be unanimous, and no one votes for themselves.`,
       href: memberHref(ref),
+      // A heads-up: they're emailed when voting opens.
       email: false,
     });
   } else {
@@ -532,7 +598,7 @@ async function removeCandidate(actor: Actor, e: SyncedElection, c: CandidateRow,
   });
   await logActivity({ actorId: actor.id, action: how === "declined" ? "election.declined" : "election.withdrawn", entityType: "election", entityId: e.id, clubId: e.clubId, data: { userId: c.userId, self: how !== "removed" } });
   if (how === "removed") {
-    await notify({ userIds: [c.userId], kind: "election.withdrawn", title: `You're no longer a candidate for ${e.position.name}`, body: `${actor.name} took you off the list in ${e.club.name}.`, href: memberHref(e), email: false });
+    await notify({ userIds: [c.userId], kind: "election.withdrawn", title: `You're no longer a candidate for ${e.position.name}`, body: `${actor.name} took you off the list in ${e.club.name}.`, href: memberHref(e) });
   }
   if (wasProposed) {
     const keys = await keyHolders(e.clubId);
@@ -543,7 +609,6 @@ async function removeCandidate(actor: Actor, e: SyncedElection, c: CandidateRow,
       title: `The proposal for ${e.position.name} is off`,
       body: `${c.user.name} is no longer a candidate in ${e.club.name}. Propose someone else.`,
       href: manageHref(e),
-      email: false,
     });
   }
 }
@@ -580,7 +645,6 @@ export async function answerMoveUp(actor: Actor | null, candidateId: string, yes
     title: `${actor.name} said yes to moving up to ${e.position.name}`,
     body: `The first in line who says yes by ${when(e.votingClosesAt)} takes the seat.`,
     href: manageHref(e),
-    email: false,
   });
 }
 
@@ -594,9 +658,12 @@ export async function openVoting(actor: Actor | null, electionId: string) {
   if (e.status !== "NOMINATING") throw invalid("Voting is already open or finished.");
   if (e._count.candidates === 0) throw invalid("Add at least one candidate before opening voting.");
   const now = new Date();
+  const rules = readSelectionRules(e.rules);
+  const earliest = e.method === "MEMBER_VOTE" ? earliestVotingOpen(e.createdAt, rules.noticeDays) : null;
+  if (earliest && now < earliest) throw invalid(`${e.club.name}'s bylaws give members ${rules.noticeDays} day${rules.noticeDays === 1 ? "" : "s"}' notice before a vote, so voting can open from ${when(earliest)}.`);
   if (e.votingClosesAt.getTime() - now.getTime() < HOUR) throw invalid("Voting would close within the hour. Cancel this election and start a new one with a later closing time.");
   const r = await db.election.updateMany({ where: { id: e.id, status: "NOMINATING" }, data: { status: "VOTING", votingOpensAt: now } });
-  if (r.count) await onVotingOpened(e, actor!.id);
+  if (r.count) await onVotingOpened(e, actor!.id, now);
 }
 
 /** End voting — or, next in line, answers — now, before the scheduled close. */
@@ -618,7 +685,7 @@ async function cancelSelection(actor: Actor, e: SyncedElection, opts: { tellCand
   for (const c of candidates) await resolveTasks("electionAnswer", c.id, actor.id, db, "CANCELLED");
   await logActivity({ actorId: actor.id, action: "election.cancelled", entityType: "election", entityId: e.id, clubId: e.clubId, isPublic: true });
   if (opts.tellCandidates) {
-    await notify({ userIds: candidates.map((c) => c.userId), exceptUserId: actor.id, kind: "election.cancelled", title: `${e.title} was cancelled`, href: memberHref(e), email: false });
+    await notify({ userIds: candidates.map((c) => c.userId), exceptUserId: actor.id, kind: "election.cancelled", title: `${e.title} was cancelled`, href: memberHref(e) });
   }
 }
 
@@ -631,15 +698,10 @@ export async function cancelElection(actor: Actor | null, electionId: string) {
 
 // ─── Voting ──────────────────────────────────────────────────────────────────
 
-/** Whether this person may vote in this election right now, and why not. */
-export async function voterEligibility(userId: string, e: { clubId: string; method: SuccessionMethod }): Promise<{ eligible: boolean; reason?: string }> {
+/** Whether this person may vote in this selection, and why not (under an attendance rule, counted to when voting opened). */
+export async function voterEligibility(userId: string, e: BallotFacts): Promise<VoterStatus> {
   if (!usesBallots(e.method)) return { eligible: false, reason: "This selection has no ballots." };
-  const ids = await eligibleVoterIds(e.clubId, e.method);
-  if (ids.includes(userId)) return { eligible: true };
-  return {
-    eligible: false,
-    reason: e.method === "SELF_SELECT" ? "The club's current student leaders choose this seat, so only they vote." : "Only active members of the club can vote.",
-  };
+  return voterStatusIn(await voterRoll(e), userId);
 }
 
 export async function hasVoted(electionId: string, userId: string) {
@@ -678,18 +740,28 @@ export type ElectionResults = {
   leaders: string[];
   /** SELF_SELECT: the unanimous choice's candidate id, or null when the leaders didn't agree. Always null otherwise. */
   unanimousCandidateId: string | null;
+  /** MEMBER_VOTE under a quorum rule: the ballots needed and whether they came in. Null otherwise. */
+  quorum: Quorum | null;
+  /** The bylaw rules the selection froze when it started. */
+  rules: SelectionRules;
 };
 
-/** Counts per candidate for ballot modes — only once voting has closed. Null before that, and for modes without ballots. */
+/**
+ * Counts per candidate for ballot modes, only once voting has closed. A vote
+ * that closed and was then started over or sent to a runoff keeps its counts;
+ * one called off before it closed never has them. Null before that, and for
+ * modes without ballots.
+ */
 export async function electionResults(electionId: string): Promise<ElectionResults | null> {
-  const e = await db.election.findUnique({ where: { id: electionId }, select: { id: true, clubId: true, method: true, status: true, candidates: { select: { id: true, userId: true } } } });
-  if (!e || !usesBallots(e.method) || (e.status !== "CLOSED" && e.status !== "APPLIED")) return null;
+  const e = await db.election.findUnique({ where: { id: electionId }, select: { id: true, clubId: true, method: true, status: true, votingOpensAt: true, rules: true, candidates: { select: { id: true, userId: true } } } });
+  if (!e || !usesBallots(e.method) || e.status === "NOMINATING" || e.status === "VOTING") return null;
+  const frozenRow = await db.activityLog.findFirst({ where: { action: "election.closed", entityType: "election", entityId: e.id }, orderBy: { at: "desc" }, select: { data: true } });
+  if (e.status === "CANCELLED" && !frozenRow) return null;
   const grouped = await db.vote.groupBy({ by: ["candidateId"], where: { electionId: e.id }, _count: { _all: true } });
   const counts = new Map(grouped.map((g) => [g.candidateId, g._count._all]));
   const totalVotes = grouped.reduce((n, g) => n + g._count._all, 0);
-  const frozenRow = await db.activityLog.findFirst({ where: { action: "election.closed", entityType: "election", entityId: e.id }, orderBy: { at: "desc" }, select: { data: true } });
   const frozen = (frozenRow?.data ?? null) as Record<string, unknown> | null;
-  const live = typeof frozen?.eligibleVoters === "number" && (e.method !== "SELF_SELECT" || (frozen && "unanimous" in frozen)) ? null : await eligibleVoterIds(e.clubId, e.method);
+  const live = typeof frozen?.eligibleVoters === "number" && (e.method !== "SELF_SELECT" || (frozen && "unanimous" in frozen)) ? null : await eligibleVoterIds(e);
   const eligibleVoters = typeof frozen?.eligibleVoters === "number" ? frozen.eligibleVoters : (live ?? []).length;
   const rows = e.candidates
     .map((c) => ({ candidateId: c.id, userId: c.userId, votes: counts.get(c.id) ?? 0, share: totalVotes ? (counts.get(c.id) ?? 0) / totalVotes : null }))
@@ -699,6 +771,7 @@ export async function electionResults(electionId: string): Promise<ElectionResul
   if (e.method === "SELF_SELECT") {
     unanimousCandidateId = frozen && "unanimous" in frozen ? (typeof frozen.unanimous === "string" ? frozen.unanimous : null) : await unanimousOf(e.id, live ?? []);
   }
+  const rules = readSelectionRules(e.rules);
   return {
     rows,
     totalVotes,
@@ -706,7 +779,25 @@ export async function electionResults(electionId: string): Promise<ElectionResul
     turnout: eligibleVoters ? Math.min(1, totalVotes / eligibleVoters) : null,
     leaders: rows.filter((r) => r.votes === top).map((r) => r.candidateId),
     unanimousCandidateId,
+    quorum: e.method === "MEMBER_VOTE" ? quorumOf({ quorumPercent: rules.quorumPercent, eligibleVoters, votes: totalVotes }) : null,
+    rules,
   };
+}
+
+/**
+ * MEMBER_VOTE: how a closed result settles. "noQuorum" can't be applied
+ * (start again, or use another way); "tie" names who settles it under the
+ * bylaws (a runoff, or who chooses); "winner" applies in one step.
+ */
+export type VoteOutcome = { kind: "none" } | { kind: "noQuorum"; quorum: Quorum } | { kind: "winner"; candidateId: string } | { kind: "tie"; candidateIds: string[]; resolution: TieResolution };
+
+export async function voteOutcome(e: { clubId: string; method: SuccessionMethod }, results: ElectionResults, candidates: { id: string; userId: string }[]): Promise<VoteOutcome> {
+  if (e.method !== "MEMBER_VOTE" || results.rows.length === 0) return { kind: "none" };
+  if (results.quorum && !results.quorum.met) return { kind: "noQuorum", quorum: results.quorum };
+  if (results.leaders.length === 1) return { kind: "winner", candidateId: results.leaders[0] };
+  const keys = await keyHolders(e.clubId);
+  const tiedUserIds = candidates.filter((c) => results.leaders.includes(c.id)).map((c) => c.userId);
+  return { kind: "tie", candidateIds: results.leaders, resolution: tieResolution({ tieBreak: results.rules.tieBreak, isRunoff: Boolean(results.rules.runoffOf), ...keys, tiedUserIds }) };
 }
 
 /** NEXT_IN_LINE: who was asked, in pipeline order, who said yes, and who's first in line among them. */
@@ -785,9 +876,8 @@ async function seatWinner(actor: Actor, access: ClubAccess, e: SyncedElection, w
     exceptUserId: actor.id,
     kind: "election.applied",
     title: `${winnerUser?.name ?? "Someone"} is now ${e.position.name} of ${e.club.name}`,
-    body: opts.logData?.tieBroken ? "The vote was tied; the organizer chose between the tied candidates." : undefined,
+    body: opts.logData?.tieBroken ? `The vote was tied; ${TIE_SETTLED_BY[String(opts.logData.tieBrokenBy)] ?? "the organizer"} chose between the tied candidates.` : undefined,
     href: memberHref(e),
-    email: false,
   });
   return { winnerUserId: winner.userId, movedUpFrom: movingFrom?.seatName ?? null, tieBroken: Boolean(opts.logData?.tieBroken) };
 }
@@ -831,22 +921,91 @@ export async function applyElectionResult(actor: Actor | null, electionId: strin
     return seatWinner(actor, access, e, { id: choice.candidateId, userId: choice.userId }, { permissions: v.permissions, fromStatus: "CLOSED", logData: { votes: choice.votes, unanimous: true } });
   }
 
+  // Member vote: the bylaws decide whether it counts (quorum) and who settles a tie.
+  const outcome = await voteOutcome(e, results, results.rows.map((r) => ({ id: r.candidateId, userId: r.userId })));
+  if (outcome.kind === "noQuorum") {
+    throw invalid(`No quorum: ${results.totalVotes} of ${results.eligibleVoters} eligible voters voted, and ${e.club.name}'s bylaws need ${outcome.quorum.needed}, so the result doesn't count. Start again, or fill the seat another way.`);
+  }
+  if (outcome.kind === "none") throw invalid("No one ran in this election. Cancel it instead.");
   let winnerId: string;
-  const tieBroken = results.leaders.length > 1;
-  if (!tieBroken) {
-    winnerId = results.leaders[0];
+  let tieBrokenBy: string | null = null;
+  if (outcome.kind === "winner") {
+    winnerId = outcome.candidateId;
     if (v.winnerCandidateId && v.winnerCandidateId !== winnerId) throw invalid("That candidate didn't win.");
   } else {
+    const res = outcome.resolution;
+    if (res.kind === "runoff") throw invalid(`It's a tie, and ${e.club.name}'s bylaws settle ties with a runoff between the tied candidates. Start the runoff instead.`);
+    const named = res.by === "advisor" || res.by === "president";
+    if (access.viaPlatform === null && (res.by === "wsusa" || (named && !res.userIds.includes(actor.id)))) {
+      throw forbidden(res.by === "wsusa" ? "It's a tie, and nobody in the club can settle it under its bylaws, so a WSUSA administrator does." : `It's a tie, and under ${e.club.name}'s bylaws the ${res.by === "advisor" ? "advisor" : "President"} casts the deciding vote.`);
+    }
     if (!v.winnerCandidateId) throw conflict("It's a tie. Choose the winner from the tied candidates.");
-    if (!results.leaders.includes(v.winnerCandidateId)) throw invalid("Choose one of the tied candidates.");
+    if (!outcome.candidateIds.includes(v.winnerCandidateId)) throw invalid("Choose one of the tied candidates.");
     winnerId = v.winnerCandidateId;
+    tieBrokenBy = named && res.userIds.includes(actor.id) ? res.by : access.viaPlatform !== null && res.by !== "organizer" ? "wsusa" : res.by;
   }
+  const tieBroken = outcome.kind === "tie";
   const winner = results.rows.find((r) => r.candidateId === winnerId)!;
   return seatWinner(actor, access, e, { id: winner.candidateId, userId: winner.userId }, {
     permissions: v.permissions,
     fromStatus: "CLOSED",
-    logData: { votes: winner.votes, tieBroken, ...(tieBroken ? { tiedCandidateIds: results.leaders } : {}) },
+    logData: { votes: winner.votes, tieBroken, ...(tieBroken ? { tiedCandidateIds: results.leaders, tieBrokenBy } : {}) },
   });
+}
+
+/** Who settled a tie, as the winner's notice says it. */
+const TIE_SETTLED_BY: Record<string, string> = { advisor: "the advisor", president: "the President", wsusa: "WSUSA", organizer: "the organizer" };
+
+const RunoffInput = z.object({ votingClosesAt: z.coerce.date({ error: "Choose when the runoff closes." }) });
+
+const runoffTitle = (title: string) => (title.endsWith(" — runoff") ? title : `${title.slice(0, 110)} — runoff`);
+
+/**
+ * A tied member vote whose bylaws call for a runoff: the tied candidates go
+ * on a new ballot that opens right away (the vote was announced already, so
+ * there's no notice period again), under the same frozen rules. The tied
+ * vote ends (CANCELLED, its counts kept) and the runoff points back at it
+ * (rules.runoffOf). If the runoff ties too, the advisor decides.
+ */
+export async function startRunoff(actor: Actor | null, electionId: string, input: unknown) {
+  assertSignedIn(actor);
+  const v = parse(RunoffInput, input);
+  const e = await loadSynced(electionId);
+  await assertClubCap(actor, e.clubId, "elections");
+  if (e.method !== "MEMBER_VOTE" || e.status !== "CLOSED") throw invalid("Only a closed member vote that tied goes to a runoff.");
+  const results = await electionResults(e.id);
+  if (!results) throw invalid("Only a closed member vote that tied goes to a runoff.");
+  const candidates = await db.electionCandidate.findMany({ where: { electionId: e.id }, orderBy: { createdAt: "asc" } });
+  const outcome = await voteOutcome(e, results, candidates);
+  if (outcome.kind !== "tie") throw invalid(outcome.kind === "noQuorum" ? "Too few members voted for this result to count, so there's no tie to settle. Start again instead." : "This vote isn't tied.");
+  if (outcome.resolution.kind !== "runoff") throw invalid("The bylaws settle this tie by choosing between the tied candidates, not with a runoff.");
+  const now = new Date();
+  const closes = v.votingClosesAt;
+  if (closes.getTime() - now.getTime() < HOUR) throw invalid("Keep the runoff open for at least an hour.");
+  if (closes.getTime() - now.getTime() > 180 * DAY) throw invalid("Choose a date within six months.");
+
+  const claimed = await db.election.updateMany({ where: { id: e.id, status: "CLOSED" }, data: { status: "CANCELLED" } });
+  if (!claimed.count) throw conflict("This vote just changed. Reload to see it.");
+  const tied = candidates.filter((c) => outcome.candidateIds.includes(c.id));
+  const rules: SelectionRules = { ...results.rules, noticeDays: null, runoffOf: e.id };
+  const runoff = await db.$transaction(async (tx) => {
+    const r = await tx.election.create({
+      data: { clubId: e.clubId, positionId: e.position.id, title: runoffTitle(e.title), method: "MEMBER_VOTE", status: "VOTING", votingOpensAt: now, votingClosesAt: closes, createdById: actor.id, rules: selectionRulesJson(rules) },
+    });
+    await tx.electionCandidate.createMany({
+      data: tied.map((c, i) => ({ electionId: r.id, userId: c.userId, statement: c.statement, nominatedById: c.nominatedById, fromPipeline: c.fromPipeline, createdAt: new Date(now.getTime() + i) })),
+    });
+    return r;
+  });
+  await logActivity({ actorId: actor.id, action: "election.created", entityType: "election", entityId: runoff.id, clubId: e.clubId, data: { title: runoff.title, seat: e.position.name, method: "MEMBER_VOTE", candidates: tied.length, runoffOf: e.id }, isPublic: true });
+  const opened = await syncElection(runoff.id);
+  if (opened) await onVotingOpened(opened, actor.id, now);
+  return runoff;
+}
+
+/** The runoff that settled a tied member vote, if it went to one. */
+export async function runoffFor(electionId: string) {
+  return db.election.findFirst({ where: { rules: { path: ["runoffOf"], equals: electionId } }, select: { id: true, title: true, status: true } });
 }
 
 // ─── Advisor & President ─────────────────────────────────────────────────────
@@ -915,6 +1074,7 @@ export async function proposeCandidate(actor: Actor | null, electionId: string, 
     title: `You've been proposed for ${e.position.name}`,
     body: `${actor.name} proposed you for ${e.position.name} of ${e.club.name}. It takes effect once it's confirmed. You can withdraw if you'd rather not.`,
     href: memberHref(e),
+    // A heads-up for the candidate; the people who must confirm it are emailed above.
     email: false,
   });
   return { canConfirmNow: confirmers.includes(actor.id), waitingOn: others.length };
@@ -941,7 +1101,7 @@ export async function withdrawProposal(actor: Actor | null, electionId: string) 
   await logActivity({ actorId: actor.id, action: proposer ? "election.proposal_withdrawn" : "election.proposal_declined", entityType: "election", entityId: e.id, clubId: e.clubId, data: { userId: candidate?.userId ?? null } });
   const name = candidate?.user.name ?? "the candidate";
   if (proposer) {
-    await notify({ userIds: confirmers, exceptUserId: actor.id, kind: "election.proposal_withdrawn", title: `${actor.name} withdrew the proposal of ${name} for ${e.position.name}`, href: manageHref(e), email: false });
+    await notify({ userIds: confirmers, exceptUserId: actor.id, kind: "election.proposal_withdrawn", title: `${actor.name} withdrew the proposal of ${name} for ${e.position.name}`, href: manageHref(e) });
   } else if (e.proposedById) {
     await notify({
       userIds: [e.proposedById],

@@ -4,7 +4,7 @@ import { Text } from '@/components/Text';
 
 type Tone = 'brand' | 'success' | 'warning' | 'danger' | 'neutral' | 'live';
 
-/** A small status pill ("Member", "Requested", "Happening now"). */
+/** A small status pill ("Member", "Request pending", "Happening now"). */
 export function Badge({ label, tone = 'neutral' }: { label: string; tone?: Tone }) {
   const c = useColors();
   const map: Record<Tone, { bg: string; fg: string }> = {

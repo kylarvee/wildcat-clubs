@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/session";
 import { loadVisibleClub } from "@/lib/clubs/context";
 import { canSeeElections, syncClubElections } from "@/lib/domain/elections";
 import { clubElections } from "@/lib/roles/election-queries";
+import { readSelectionRules } from "@/lib/roles/pipeline";
 import { SUCCESSION_HOW, SUCCESSION_NAME } from "@/lib/roles/labels";
 import { ElectionStatusBadge, fmtWhen } from "@/components/elections/ElectionBits";
 import { ButtonLink } from "@/components/ui/button";
@@ -14,9 +15,9 @@ export const metadata = { title: "Elections" };
 
 type Row = Awaited<ReturnType<typeof clubElections>>[number];
 
-function when(e: Row) {
+function when(e: Row, wentToRunoff: Set<string>) {
   if (e.status === "APPLIED") return e.appliedAt ? `filled ${fmtWhen(e.appliedAt)}` : "filled";
-  if (e.status === "CANCELLED") return "called off";
+  if (e.status === "CANCELLED") return wentToRunoff.has(e.id) ? "tied, went to a runoff" : "called off";
   if (e.method === "ADVISOR_PRESIDENT") return `decide by ${fmtWhen(e.votingClosesAt)}`;
   if (e.method === "NEXT_IN_LINE") return e.status === "VOTING" ? `answers due ${fmtWhen(e.votingClosesAt)}` : `answers closed ${fmtWhen(e.votingClosesAt)}`;
   if (e.status === "NOMINATING") return `voting opens ${fmtWhen(e.votingOpensAt)}`;
@@ -49,6 +50,7 @@ export default async function ClubElectionsPage({ params }: { params: Promise<{ 
   const all = await clubElections(club.id);
   const open = all.filter((e) => e.status === "NOMINATING" || e.status === "VOTING" || e.status === "CLOSED");
   const past = all.filter((e) => e.status === "APPLIED" || e.status === "CANCELLED");
+  const wentToRunoff = new Set(all.map((e) => readSelectionRules(e.rules).runoffOf).filter((x): x is string => Boolean(x)));
 
   return (
     <Container size="md">
@@ -64,12 +66,12 @@ export default async function ClubElectionsPage({ params }: { params: Promise<{ 
         <div className="space-y-8">
           {open.length ? (
             <Section title="In progress">
-              <ElectionList slug={club.slug} items={open} />
+              <ElectionList slug={club.slug} items={open} wentToRunoff={wentToRunoff} />
             </Section>
           ) : null}
           {past.length ? (
             <Section title="Past">
-              <ElectionList slug={club.slug} items={past} />
+              <ElectionList slug={club.slug} items={past} wentToRunoff={wentToRunoff} />
             </Section>
           ) : null}
         </div>
@@ -78,7 +80,7 @@ export default async function ClubElectionsPage({ params }: { params: Promise<{ 
   );
 }
 
-function ElectionList({ slug, items }: { slug: string; items: Row[] }) {
+function ElectionList({ slug, items, wentToRunoff }: { slug: string; items: Row[]; wentToRunoff: Set<string> }) {
   return (
     <Card>
       <ul className="divide-y divide-line">
@@ -88,10 +90,10 @@ function ElectionList({ slug, items }: { slug: string; items: Row[] }) {
               <span className="min-w-0 flex-1">
                 <span className="block font-medium text-ink">{e.title}</span>
                 <span className="block text-sm text-ink-3">
-                  {e.position.name} · {SUCCESSION_NAME[e.method]} · {e._count.candidates} {e.method === "NEXT_IN_LINE" ? "in line" : `candidate${e._count.candidates === 1 ? "" : "s"}`} · {when(e)}
+                  {e.position.name} · {SUCCESSION_NAME[e.method]} · {e._count.candidates} {e.method === "NEXT_IN_LINE" ? "in line" : `candidate${e._count.candidates === 1 ? "" : "s"}`} · {when(e, wentToRunoff)}
                 </span>
               </span>
-              <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
+              <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} wentToRunoff={wentToRunoff.has(e.id)} />
             </Link>
           </li>
         ))}

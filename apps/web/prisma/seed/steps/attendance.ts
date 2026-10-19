@@ -33,7 +33,9 @@ function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, 
   if (occ.attendees.has(userId)) return;
   const { rng } = ctx;
   const r = rng.next();
-  const when = at ?? checkinAt(ctx, occ);
+  // Explicit times (live meetings, trainings) can land after NOW; nobody checks in from the future.
+  const raw = at ?? checkinAt(ctx, occ);
+  const when = raw > ctx.NOW ? new Date(ctx.NOW.getTime() - 60_000) : raw;
   const clubs = club ? [club, ...ev.cohosts.filter((c) => c.status === "APPROVED").map((c) => ctx.clubById.get(c.clubId)!)] : [];
   const member = !joining && clubs.some((c) => ctx.memberAt(c, userId, when) || ctx.rolesAt(c, userId, when).length > 0);
   const online = ev.locationType === "VIRTUAL";

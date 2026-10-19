@@ -176,7 +176,6 @@ export async function renewClub(actor: Actor | null, input: unknown, now: Date =
     kind: "club.renewed",
     ...renewedNotice(name, window.year, actor.name),
     href: `/clubs/${state.club.slug}/manage`,
-    email: false,
   });
   return { year: window.year, at: renewal.submittedAt, slug: state.club.slug };
 }

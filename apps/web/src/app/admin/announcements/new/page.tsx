@@ -20,7 +20,7 @@ export default async function NewUniversityAnnouncementPage() {
       <PageHeader
         title="New university announcement"
         breadcrumbs={[{ href: "/admin/announcements", label: "University announcements" }, { label: "New" }]}
-        description="Embed events, files, videos or documents with Insert. Large audiences are notified in batches, so everyone hears within a few minutes."
+        description="Embed events, files, videos or documents with Insert. Everyone sees it in their notifications right away; for large audiences, emails and phone alerts go out in batches over the next hour or so."
       />
       <AnnouncementComposer
         mode="create"

@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma, type ClubType, type FundingSource, type FundingStatus, type Term } from "@prisma/client";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { can, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
@@ -13,16 +13,18 @@ import { getConfig } from "@/lib/config";
 import { budgetTermFor, getTerms } from "@/lib/terms";
 import { DAY_MS, fmtDate, fmtMoney } from "@/lib/time";
 import { defaultFundingSource } from "@/lib/funding/defaults";
-import { sourceName } from "@/lib/funding/labels";
+import { plural, sourceName } from "@/lib/funding/labels";
+import { grantedCents, lineStanding, type CoveringLine } from "@/lib/funding/locks";
+import { INVOICE_DUE_DAYS, fundingTasks } from "@/lib/funding/review";
 import {
   ACTIVE_REQUEST_STATUSES,
   MAX_LINE_CENTS,
   MAX_REQUEST_CENTS,
   MIN_JUSTIFICATION,
+  decideLines,
   dollarsToCents,
   lineCents,
   nextInvoiceNumber,
-  partialAmountProblem,
   requestTotals,
   sumBySource,
   sumCents,
@@ -37,21 +39,32 @@ import {
  *   - Event costs are BudgetItems with an eventId, entered ONLY in the Events
  *     Builder (lib/domain/events). This module reads them, never edits them.
  *   - General costs (eventId null) are entered here.
- * A funding request asks one source for money in one term. It's built from
- * cost lines; on submission each line is snapshotted into FundingRequestItem
- * (occurrences in that term × one set), so later edits never rewrite history.
+ * A funding request asks for money in one term from the source the club
+ * expects (`fundingSource`, "Expected source"). WSUSA reviews every request
+ * and records the source that actually funds it (`fundedSource`). It's built
+ * from cost lines; on submission each line is snapshotted into
+ * FundingRequestItem (occurrences in that term × one set, less anything
+ * already funded), so later edits never rewrite history.
+ *
+ * WSUSA decides line by line (`approvedCents`; the request's approved amount
+ * is their sum). Locks follow lib/funding/locks: a line in review or funded in
+ * full stays locked; one funded for less lets go, so the club can ask another
+ * source for the rest.
  *
  * Who may act: the club's "budget" capability for club actions (only APPROVED
  * clubs have it), `admin.funding` for decisions and invoices.
  *
  * Tasks: submitting opens an ADMINS approval task (sourceType "funding");
- * deciding or withdrawing closes it. An invoice opens an ADMINS INVOICE task
- * (sourceType "invoice") that closes when the invoice is marked processed.
+ * deciding or withdrawing closes it. Approving creates the invoice in the same
+ * step, with an ADMINS INVOICE task (sourceType "invoice", due in
+ * INVOICE_DUE_DAYS) that closes when the invoice is marked processed. The
+ * "Funding follow-ups" job (lib/jobs/funding) reminds WSUSA about both when
+ * they run late.
  */
 
 // ─── Shapes ──────────────────────────────────────────────────────────────────
 
-const FUNDING = z.enum(["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"], { error: "Pick where the money should come from." });
+const FUNDING = z.enum(["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"], { error: "Pick a funding source from the list." });
 const id = z.string().trim().min(1).max(64);
 
 const EVENT_SELECT = {
@@ -94,8 +107,16 @@ export type BudgetLine = {
   setCents: number;
   /** setCents × occurrences — the line's cost this term. */
   totalCents: number;
-  /** The submitted or approved request that already covers this line this term. */
+  /** The request holding this line locked this term (lib/funding/locks): in WSUSA review, or funded in full. */
   lockedBy: { id: string; title: string; status: FundingStatus } | null;
+  /** WSUSA's decisions on this line in approved requests this term, oldest first. */
+  decisions: { id: string; title: string; askedCents: number; approvedCents: number }[];
+  /** What approved requests granted for it this term. */
+  fundedCents: number;
+  /** What a new request would ask for: its cost this term minus what's funded (0 while locked). */
+  openCents: number;
+  /** A new request may include it (unlocked, and not already funded in full). */
+  requestable: boolean;
 };
 
 export type EventCostGroup = {
@@ -111,7 +132,7 @@ export type EventCostGroup = {
 };
 
 export type TermRequest = FundingRequestRow & {
-  /** Drafts: what the chosen lines add up to right now. Others: the submitted amount. */
+  /** Drafts: what the chosen lines would ask for right now. Others: the submitted amount. */
   liveCents: number;
   /** Drafts: chosen lines that are no longer in this term's budget. */
   staleLines: number;
@@ -129,14 +150,21 @@ export type ClubTermBudget = {
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
 
-/** Which line ids an active request already covers, per request (this term only). */
-function lockMap(requests: FundingRequestRow[]) {
-  const locks = new Map<string, { id: string; title: string; status: FundingStatus }>();
+type Covering = CoveringLine & { request: { id: string; title: string; status: FundingStatus; decidedAt: Date | null } };
+
+/** Every submitted or approved request line covering each cost line, by line id (this term's requests only). */
+function coverageMap(requests: FundingRequestRow[]) {
+  const map = new Map<string, Covering[]>();
   for (const r of requests) {
     if (!ACTIVE_REQUEST_STATUSES.includes(r.status)) continue;
-    for (const i of r.items) if (i.budgetItemId && !locks.has(i.budgetItemId)) locks.set(i.budgetItemId, { id: r.id, title: r.title, status: r.status });
+    for (const i of r.items) {
+      if (!i.budgetItemId) continue;
+      const list = map.get(i.budgetItemId) ?? [];
+      list.push({ status: r.status, totalCents: i.totalCents, approvedCents: i.approvedCents, request: { id: r.id, title: r.title, status: r.status, decidedAt: r.decidedAt } });
+      map.set(i.budgetItemId, list);
+    }
   }
-  return locks;
+  return map;
 }
 
 /**
@@ -162,12 +190,18 @@ export async function loadClubTermBudget(clubId: string, termId: string): Promis
 
   const summaries = await eventCostSummaries(items.map((i) => i.eventId).filter((x): x is string => Boolean(x)));
   const meetingsIn = (eventId: string, tId: string | null) => summaries.get(eventId)?.occurrencesByTerm.find((b) => b.termId === tId)?.occurrences ?? 0;
-  const locks = lockMap(requests);
+  const coverage = coverageMap(requests);
 
   const lines: BudgetLine[] = [];
   for (const i of items) {
     const t = termLineTotal(i, termId, i.eventId ? meetingsIn(i.eventId, termId) : 0);
     if (t.occurrences === 0) continue;
+    const covering = coverage.get(i.id) ?? [];
+    const standing = lineStanding(t.totalCents, covering);
+    const decisions = covering
+      .filter((c) => c.status !== "SUBMITTED")
+      .sort((a, b) => (a.request.decidedAt?.getTime() ?? 0) - (b.request.decidedAt?.getTime() ?? 0))
+      .map((c) => ({ id: c.request.id, title: c.request.title, askedCents: c.totalCents, approvedCents: grantedCents(c) }));
     lines.push({
       id: i.id,
       termId: i.termId,
@@ -182,7 +216,11 @@ export async function loadClubTermBudget(clubId: string, termId: string): Promis
       occurrences: t.occurrences,
       setCents: t.setCents,
       totalCents: t.totalCents,
-      lockedBy: locks.get(i.id) ?? null,
+      lockedBy: standing.lockedBy ? { id: standing.lockedBy.request.id, title: standing.lockedBy.request.title, status: standing.lockedBy.request.status } : null,
+      decisions,
+      fundedCents: standing.fundedCents,
+      openCents: standing.openCents,
+      requestable: standing.requestable,
     });
   }
 
@@ -218,7 +256,7 @@ export async function loadClubTermBudget(clubId: string, termId: string): Promis
   const termRequests: TermRequest[] = requests.map((r) => {
     if (r.status !== "DRAFT") return { ...r, liveCents: r.amountRequestedCents, staleLines: 0 };
     const chosen = r.items.map((i) => (i.budgetItemId ? liveById.get(i.budgetItemId) : undefined));
-    return { ...r, liveCents: chosen.reduce((s, l) => s + (l?.totalCents ?? 0), 0), staleLines: chosen.filter((l) => !l).length };
+    return { ...r, liveCents: chosen.reduce((s, l) => s + (l?.openCents ?? 0), 0), staleLines: chosen.filter((l) => !l).length };
   });
 
   const eventCents = sumCents(lines.filter((l) => l.eventId));
@@ -232,7 +270,8 @@ export async function loadClubTermBudget(clubId: string, termId: string): Promis
       totalCents: eventCents + generalCents,
       eventCents,
       generalCents,
-      unrequestedCents: sumCents(lines.filter((l) => !l.lockedBy)),
+      // Lines no request covers yet, plus whatever WSUSA didn't fund.
+      unrequestedCents: lines.reduce((s, l) => s + l.openCents, 0),
       bySource: sumBySource(lines),
     },
     requests: termRequests,
@@ -362,12 +401,15 @@ async function assertTerm(termId: string) {
   return term;
 }
 
-/** A general cost line can't change while a submitted or approved request covers it. */
-/** One lock rule for every cost line, general or event (costLineLocks). */
+/**
+ * A general cost line can't change while a request holds it: in WSUSA review,
+ * or funded in full. One lock rule for every cost line, general or event
+ * (lib/funding/locks, through costLineLocks).
+ */
 async function assertNotRequested(itemId: string) {
   const lock = (await costLineLocks([itemId])).get(itemId);
   if (lock) {
-    const where = lock.status === "SUBMITTED" ? "is being reviewed" : "was approved";
+    const where = lock.status === "SUBMITTED" ? "is being reviewed" : "WSUSA funded in full";
     throw conflict(`This cost is part of “${lock.title}”, which ${where}, so it's locked to match what you asked for. Add a new line instead.`);
   }
 }
@@ -418,6 +460,7 @@ export async function removeBudgetItem(actor: Actor | null, itemId: string) {
 // ─── Funding requests (club side) ────────────────────────────────────────────
 
 const RequestFields = {
+  /** The source the club expects ("Expected source"). WSUSA may fund it from another. */
   fundingSource: FUNDING,
   title: z.string({ error: "Give the request a short title." }).trim().min(3, "Give the request a short title (at least 3 characters).").max(140, "Keep the title under 140 characters."),
   justification: z
@@ -432,7 +475,7 @@ const NewRequest = z.object({ clubId: id, termId: id, ...RequestFields });
 const EditRequest = z.object(RequestFields);
 export type FundingRequestInput = z.input<typeof NewRequest>;
 
-/** Turns chosen line ids into this term's lines, refusing ones another active request already covers. */
+/** Turns chosen line ids into this term's lines, refusing ones a request holds or that are already funded in full. */
 function resolveSelection(budget: ClubTermBudget, ids: string[], requestId: string | null) {
   const byId = new Map(budget.lines.map((l) => [l.id, l]));
   const out: BudgetLine[] = [];
@@ -440,10 +483,14 @@ function resolveSelection(budget: ClubTermBudget, ids: string[], requestId: stri
     const line = byId.get(lineId);
     if (!line) throw invalid(`One of the cost lines you picked isn't in ${budget.term.name}'s budget anymore — someone may have changed or removed it. Reload and pick again.`);
     if (line.lockedBy && line.lockedBy.id !== requestId) throw conflict(`“${line.description}” is already part of “${line.lockedBy.title}”, so it can't be requested twice.`);
+    if (!line.lockedBy && !line.requestable) throw conflict(`“${line.description}” is already funded in full, so there's nothing left to ask for.`);
     out.push(line);
   }
   return out;
 }
+
+/** What the chosen lines ask for: each line's cost less what's already funded. */
+const askedCents = (lines: BudgetLine[]) => lines.reduce((s, l) => s + l.openCents, 0);
 
 function snapshotRows(lines: BudgetLine[]) {
   // Event lines grouped by event, then general costs — the order the admin reads them in.
@@ -455,7 +502,8 @@ function snapshotRows(lines: BudgetLine[]) {
     quantity: l.quantity,
     unitCostCents: l.unitCostCents,
     occurrences: l.occurrences,
-    totalCents: l.totalCents,
+    // A line funded in part before asks only for the rest (earlierFundedCents() reads the difference back).
+    totalCents: l.openCents,
   }));
 }
 
@@ -463,13 +511,13 @@ function assertTotal(total: number) {
   if (total > MAX_REQUEST_CENTS) throw invalid(`One request can ask for up to ${fmtMoney(MAX_REQUEST_CENTS)}. Split it into separate requests.`);
 }
 
-/** Starts a DRAFT request for one term and one funding source. */
+/** Starts a DRAFT request for one term, with the source the club expects. */
 export async function createFundingRequest(actor: Actor | null, input: unknown) {
   const v = parse(NewRequest, input);
   await assertClubCap(actor, v.clubId, "budget");
   const budget = await loadClubTermBudget(v.clubId, v.termId);
   const lines = resolveSelection(budget, v.budgetItemIds, null);
-  const total = sumCents(lines);
+  const total = askedCents(lines);
   assertTotal(total);
   const request = await db.$transaction(async (tx) => {
     const r = await tx.fundingRequest.create({
@@ -506,7 +554,7 @@ export async function updateFundingRequest(actor: Actor | null, requestId: strin
   const v = parse(EditRequest, input);
   const budget = await loadClubTermBudget(request.clubId, request.termId);
   const lines = resolveSelection(budget, v.budgetItemIds, request.id);
-  const total = sumCents(lines);
+  const total = askedCents(lines);
   assertTotal(total);
   await db.$transaction(async (tx) => {
     const claimed = await tx.fundingRequest.updateMany({
@@ -547,7 +595,7 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
   if (chosen.some((x) => !x)) throw invalid("Some lines in this draft were removed from the budget after you saved it. Check the lines and save the draft again before submitting.");
   const lines = resolveSelection(budget, chosen as string[], request.id);
   if (!lines.length) throw invalid("Pick at least one cost line to request.");
-  const total = sumCents(lines);
+  const total = askedCents(lines);
   if (total <= 0) throw invalid("The lines you picked add up to $0.00. Add the costs before asking for money.");
   assertTotal(total);
 
@@ -566,7 +614,7 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
       {
         kind: "APPROVAL",
         title: `Funding request from ${club.name}: ${request.title}`,
-        description: `${fmtMoney(total)} requested from ${source} for ${request.term.name}.`,
+        description: `${fmtMoney(total)} for ${request.term.name}. The club expects it from ${source}; record the source that funds it when you approve.`,
         assignee: { type: "ADMINS" },
         clubId: club.id,
         href: `/admin/funding/${request.id}`,
@@ -582,16 +630,15 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
   await notifyAdmins({
     kind: "funding.submitted",
     title: `Funding request: ${club.name} — ${request.title}`,
-    body: `${fmtMoney(total)} requested from ${source} for ${request.term.name}.`,
+    body: `${fmtMoney(total)} for ${request.term.name}, expected from ${source}.`,
     href: `/admin/funding/${request.id}`,
   });
   await notifyClubCapability(club.id, "budget", {
     kind: "funding.submitted",
     title: `Funding request submitted: ${request.title}`,
-    body: `${actor!.name} asked ${source} for ${fmtMoney(total)}. WSUSA usually responds within about ${cfg["wsusa.office"].reviewDays} business days.`,
+    body: `${actor!.name} sent it to WSUSA for ${fmtMoney(total)}, expected from ${source}. WSUSA reviews every request, usually within about ${cfg["wsusa.office"].reviewDays} business days, and may fund it from another source.`,
     href: `/clubs/${club.slug}/manage/budget/requests/${request.id}`,
     exceptUserId: actor!.id,
-    email: false,
   });
   return { id: request.id, amountRequestedCents: total };
 }
@@ -609,7 +656,7 @@ export async function withdrawFundingRequest(actor: Actor | null, requestId: str
     await resolveTasks("funding", request.id, actor!.id, tx, "CANCELLED");
     await logActivity({ actorId: actor!.id, action: "funding.withdrawn", entityType: "fundingRequest", entityId: request.id, clubId: request.clubId, data: { title: request.title, reason: v.reason ?? null } }, tx);
   });
-  await notifyAdmins({ kind: "funding.withdrawn", title: `${request.club.name} withdrew “${request.title}”`, body: v.reason || undefined, href: `/admin/funding/${request.id}`, email: false, push: false });
+  await notifyAdmins({ kind: "funding.withdrawn", title: `${request.club.name} withdrew “${request.title}”`, body: v.reason || undefined, href: `/admin/funding/${request.id}` });
   return { id: request.id };
 }
 
@@ -617,9 +664,17 @@ export async function withdrawFundingRequest(actor: Actor | null, requestId: str
 
 const Decision = z.object({
   requestId: id,
-  decision: z.enum(["APPROVE", "PARTIAL", "DENY"], { error: "Choose approve, partly approve or deny." }),
-  /** Dollars, for a partial approval. */
-  amount: z.coerce.number({ error: "Enter the amount you're approving." }).min(0).max(MAX_REQUEST_CENTS / 100).nullish(),
+  decision: z.enum(["APPROVE", "DENY"], { error: "Choose approve or don't approve." }),
+  /**
+   * Approvals: dollars approved per request line (the FundingRequestItem id).
+   * Lines left out get their full total; any line that gets less makes it a
+   * partial approval.
+   */
+  lines: z
+    .record(z.string().trim().min(1).max(64), z.coerce.number({ error: "Enter each line's approved amount in dollars." }).min(0, "Approved amounts can't be negative.").max(MAX_REQUEST_CENTS / 100))
+    .nullish(),
+  /** Approvals: the source that funds it ("Funded by"). Defaults to the source the club expects. */
+  fundedSource: FUNDING.nullish(),
   note: z
     .string()
     .trim()
@@ -629,8 +684,60 @@ const Decision = z.object({
 });
 export type FundingDecisionInput = z.input<typeof Decision>;
 
-const DECIDED: Record<"APPROVE" | "PARTIAL" | "DENY", FundingStatus> = { APPROVE: "APPROVED", PARTIAL: "PARTIALLY_APPROVED", DENY: "DENIED" };
+/** Campus calendar year, so an invoice made late on Dec 31 isn't numbered for the next year. */
+const campusYear = (d: Date) => Number(fmtDate(d, "yyyy"));
 
+/** Writes WSUSA's line-by-line decision: every line's approved cents (0 for all of a denial). */
+async function recordLineDecisions(tx: Tx, requestId: string, lines: { id: string; totalCents: number; approvedCents: number }[] | null) {
+  if (!lines) {
+    await tx.fundingRequestItem.updateMany({ where: { requestId }, data: { approvedCents: 0 } });
+    return;
+  }
+  await tx.$executeRaw`UPDATE "FundingRequestItem" SET "approvedCents" = "totalCents" WHERE "requestId" = ${requestId}`;
+  for (const l of lines) if (l.approvedCents < l.totalCents) await tx.fundingRequestItem.update({ where: { id: l.id }, data: { approvedCents: l.approvedCents } });
+}
+
+/**
+ * The approved request's invoice (one per request, made in the approval's
+ * transaction): the next WC-<year>-<seq> number, and the admins' INVOICE task
+ * to make sure the money moves in the university finance system.
+ */
+async function openInvoice(
+  tx: Tx,
+  r: { requestId: string; clubId: string; clubName: string; title: string; cents: number; source: string; actorId: string; at: Date },
+) {
+  const year = campusYear(r.at);
+  const used = await tx.invoice.findMany({ where: { number: { startsWith: `WC-${year}-` } }, select: { number: true } });
+  const number = nextInvoiceNumber(
+    used.map((u) => u.number),
+    year,
+  );
+  const inv = await tx.invoice.create({ data: { number, requestId: r.requestId, amountCents: r.cents, createdById: r.actorId, createdAt: r.at } });
+  await createTask(
+    {
+      kind: "INVOICE",
+      title: `Make sure funding for ${r.clubName} — ${r.title} goes through in the university finance system`,
+      description: `Invoice ${number} · ${fmtMoney(r.cents)}, funded by ${r.source}. Mark the invoice processed once the transfer shows up.`,
+      assignee: { type: "ADMINS" },
+      clubId: r.clubId,
+      href: `/admin/funding/${r.requestId}`,
+      dueAt: new Date(r.at.getTime() + INVOICE_DUE_DAYS * DAY_MS),
+      source: { type: "invoice", id: inv.id },
+      createdById: r.actorId,
+    },
+    tx,
+  );
+  await logActivity({ actorId: r.actorId, action: "invoice.created", entityType: "invoice", entityId: inv.id, clubId: r.clubId, data: { number, cents: r.cents, requestId: r.requestId } }, tx);
+  return { id: inv.id, number };
+}
+
+/**
+ * WSUSA's decision on a submitted request: approve it (every line in full, or
+ * some lines for less: a partial approval), or don't. An approval records the
+ * source that funds it and creates the invoice and its INVOICE task in the
+ * same step. Lines approved for less than they asked (and every line of a
+ * request that isn't approved) unlock, so the club can ask another source.
+ */
 export async function decideFundingRequest(actor: Actor | null, input: unknown) {
   assertCan(actor, "admin.funding");
   const v = parse(Decision, input);
@@ -638,107 +745,80 @@ export async function decideFundingRequest(actor: Actor | null, input: unknown) 
   if (!request) throw notFound("Funding request");
   if (request.status !== "SUBMITTED") throw conflict("This request isn't waiting for a decision — someone may have decided it already, or the club withdrew it.");
 
+  let status: FundingStatus = "DENIED";
   let approved: number | null = null;
-  if (v.decision === "APPROVE") approved = request.amountRequestedCents;
-  if (v.decision === "PARTIAL") {
-    approved = dollarsToCents(v.amount ?? 0);
-    const problem = partialAmountProblem(request.amountRequestedCents, approved);
-    if (problem) throw invalid(problem);
+  let lines: { id: string; totalCents: number; approvedCents: number }[] | null = null;
+  let reduced = 0;
+  if (v.decision === "APPROVE") {
+    const amounts = Object.fromEntries(Object.entries(v.lines ?? {}).map(([lineId, dollars]) => [lineId, dollarsToCents(dollars)]));
+    const d = decideLines(request.items, amounts);
+    if (!d.ok) throw invalid(d.problem);
+    ({ status, approvedCents: approved, lines, reduced } = d);
   }
-  if (v.decision !== "APPROVE" && (v.note ?? "").length < 3) throw invalid(v.decision === "DENY" ? "Tell the club why, so they know what to change or where else to look." : "Tell the club what's covered and why the rest isn't.");
+  if (status !== "APPROVED" && (v.note ?? "").length < 3)
+    throw invalid(status === "DENIED" ? "Tell the club why, so they know what to change or where else to look." : "Tell the club what's covered and why the rest isn't.");
+  const fundedSource: FundingSource | null = status === "DENIED" ? null : (v.fundedSource ?? request.fundingSource);
+  const fundedBy = fundedSource ? sourceName(fundedSource, request.club) : null;
 
-  const status = DECIDED[v.decision];
   const now = new Date();
-  await db.$transaction(async (tx) => {
-    const claimed = await tx.fundingRequest.updateMany({
-      where: { id: request.id, status: "SUBMITTED" },
-      data: { status, amountApprovedCents: approved, decidedById: actor.id, decidedAt: now, decisionNote: v.note },
-    });
-    if (!claimed.count) throw conflict("Someone just decided this request, or the club withdrew it.");
-    await resolveTasks("funding", request.id, actor.id, tx);
-    await logActivity({ actorId: actor.id, action: `funding.${status.toLowerCase()}`, entityType: "fundingRequest", entityId: request.id, clubId: request.clubId, data: { requested: request.amountRequestedCents, cents: approved ?? 0 } }, tx);
-  });
+  let invoice: { id: string; number: string } | null = null;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      invoice = await db.$transaction(async (tx) => {
+        const claimed = await tx.fundingRequest.updateMany({
+          where: { id: request.id, status: "SUBMITTED" },
+          data: { status, amountApprovedCents: approved, fundedSource, decidedById: actor.id, decidedAt: now, decisionNote: v.note },
+        });
+        if (!claimed.count) throw conflict("Someone just decided this request, or the club withdrew it.");
+        await recordLineDecisions(tx, request.id, lines);
+        await resolveTasks("funding", request.id, actor.id, tx);
+        await logActivity(
+          {
+            actorId: actor.id,
+            action: `funding.${status.toLowerCase()}`,
+            entityType: "fundingRequest",
+            entityId: request.id,
+            clubId: request.clubId,
+            data: { title: request.title, requested: request.amountRequestedCents, cents: approved ?? 0, source: fundedSource, reducedLines: reduced },
+          },
+          tx,
+        );
+        if (!approved || !fundedBy) return null;
+        return openInvoice(tx, { requestId: request.id, clubId: request.clubId, clubName: request.club.name, title: request.title, cents: approved, source: fundedBy, actorId: actor.id, at: now });
+      });
+      break;
+    } catch (e) {
+      // Another approval took the invoice number between our read and write: the whole decision rolled back, so try again.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 4) continue;
+      throw e;
+    }
+  }
 
+  const href = `/clubs/${request.club.slug}/manage/budget/requests/${request.id}`;
   const title =
-    v.decision === "APPROVE" ? `Funding approved: ${request.title}` : v.decision === "PARTIAL" ? `Funding partly approved: ${request.title}` : `Funding not approved: ${request.title}`;
+    status === "APPROVED" ? `Funding approved: ${request.title}` : status === "PARTIALLY_APPROVED" ? `Funding partly approved: ${request.title}` : `Funding not approved: ${request.title}`;
   const lead =
-    v.decision === "APPROVE"
-      ? `WSUSA approved the full ${fmtMoney(approved!)}.`
-      : v.decision === "PARTIAL"
-        ? `WSUSA approved ${fmtMoney(approved!)} of the ${fmtMoney(request.amountRequestedCents)} requested.`
+    status === "APPROVED"
+      ? `WSUSA approved the full ${fmtMoney(approved!)}, funded by ${fundedBy}.`
+      : status === "PARTIALLY_APPROVED"
+        ? `WSUSA approved ${fmtMoney(approved!)} of the ${fmtMoney(request.amountRequestedCents)} requested, funded by ${fundedBy}. ${plural(reduced, "line")} got less than asked; ${reduced === 1 ? "it's" : "they're"} free again, so you can ask another source for the rest.`
         : `WSUSA didn't approve the ${fmtMoney(request.amountRequestedCents)} requested.`;
   await notifyClubCapability(request.clubId, "budget", {
     kind: `funding.${status.toLowerCase()}`,
     title,
     body: v.note ? `${lead} ${v.note}` : lead,
-    href: `/clubs/${request.club.slug}/manage/budget/requests/${request.id}`,
+    href,
   });
-  return { status, amountApprovedCents: approved };
-}
-
-/** Campus calendar year, so an invoice made late on Dec 31 isn't numbered for the next year. */
-const campusYear = (d: Date) => Number(fmtDate(d, "yyyy"));
-
-/**
- * Creates the request's invoice (one per request) for the approved amount, with
- * the next WC-<year>-<seq> number, and opens the admins' INVOICE task to make
- * sure the money moves in the university finance system.
- */
-export async function createInvoice(actor: Actor | null, requestId: string) {
-  assertCan(actor, "admin.funding");
-  const request = await loadFundingRequest(requestId);
-  if (!request) throw notFound("Funding request");
-  if (request.status !== "APPROVED" && request.status !== "PARTIALLY_APPROVED") throw invalid("Only approved requests get an invoice.");
-  const amount = request.amountApprovedCents ?? 0;
-  if (amount <= 0) throw invalid("This request has no approved amount to invoice.");
-
-  const year = campusYear(new Date());
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const invoice = await db.$transaction(async (tx) => {
-        // Lock the request row so two admins can't both create its invoice.
-        await tx.$queryRaw`SELECT id FROM "FundingRequest" WHERE id = ${request.id} FOR UPDATE`;
-        const existing = await tx.invoice.findFirst({ where: { requestId: request.id }, select: { number: true } });
-        if (existing) throw conflict(`This request already has invoice ${existing.number}.`);
-        const used = await tx.invoice.findMany({ where: { number: { startsWith: `WC-${year}-` } }, select: { number: true } });
-        const number = nextInvoiceNumber(
-          used.map((u) => u.number),
-          year,
-        );
-        const inv = await tx.invoice.create({ data: { number, requestId: request.id, amountCents: amount, createdById: actor.id } });
-        await createTask(
-          {
-            kind: "INVOICE",
-            title: `Make sure funding for ${request.club.name} — ${request.title} goes through in the university finance system`,
-            description: `Invoice ${number} · ${fmtMoney(amount)} from ${sourceName(request.fundingSource, request.club)}. Mark the invoice processed once the transfer shows up.`,
-            assignee: { type: "ADMINS" },
-            clubId: request.clubId,
-            href: `/admin/funding/${request.id}`,
-            dueAt: new Date(Date.now() + 10 * DAY_MS),
-            source: { type: "invoice", id: inv.id },
-            createdById: actor.id,
-          },
-          tx,
-        );
-        await logActivity({ actorId: actor.id, action: "invoice.created", entityType: "invoice", entityId: inv.id, clubId: request.clubId, data: { number, cents: amount, requestId: request.id } }, tx);
-        return inv;
-      });
-      // In-app only: the club can download the invoice now; the email comes when the money goes through.
-      await notifyClubCapability(request.clubId, "budget", {
-        kind: "invoice.created",
-        title: `Invoice ${invoice.number} is ready`,
-        body: `WSUSA created the invoice for “${request.title}” (${fmtMoney(amount)}) and is sending it through the university finance system.`,
-        href: `/clubs/${request.club.slug}/manage/budget/requests/${request.id}`,
-        email: false,
-        push: false,
-      });
-      return { id: invoice.id, number: invoice.number };
-    } catch (e) {
-      // Another invoice took the number between our read and write: try the next one.
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 4) continue;
-      throw e;
-    }
+  if (invoice) {
+    // In-app only: the club can download the invoice now; the email comes when the money goes through.
+    await notifyClubCapability(request.clubId, "budget", {
+      kind: "invoice.created",
+      title: `Invoice ${invoice.number} is ready`,
+      body: `It covers the ${fmtMoney(approved!)} approved for “${request.title}”. WSUSA is sending it through the university finance system.`,
+      href,
+    });
   }
+  return { status, amountApprovedCents: approved, fundedSource, invoice };
 }
 
 /** The money went through in the university finance system: close the invoice and its task, tell the club. */
@@ -763,7 +843,7 @@ export async function markInvoiceProcessed(actor: Actor | null, invoiceId: strin
 
 // ─── Admin reads ─────────────────────────────────────────────────────────────
 
-/** Approved requests whose money hasn't gone through yet: no invoice, or an open one. */
+/** Approved requests whose money hasn't gone through yet: an open invoice (or, approved before invoices came with approval, none). */
 const INVOICE_PENDING: Prisma.FundingRequestWhereInput = {
   status: { in: ["APPROVED", "PARTIALLY_APPROVED"] },
   OR: [{ invoices: { none: {} } }, { invoices: { some: { status: "OPEN" } } }],
@@ -771,18 +851,30 @@ const INVOICE_PENDING: Prisma.FundingRequestWhereInput = {
 
 export type AdminQueue = "submitted" | "approved" | "all";
 
+/** Requests by source: the one that funded it once WSUSA approves, else the one the club expects. */
+const bySource = (source: FundingSource): Prisma.FundingRequestWhereInput => ({ OR: [{ fundedSource: source }, { fundedSource: null, fundingSource: source }] });
+
+/** Open invoices' due dates (their INVOICE tasks'), by invoice id. */
+export async function invoiceDueDates(invoiceIds: string[]): Promise<Map<string, Date>> {
+  if (!invoiceIds.length) return new Map();
+  const tasks = await db.task.findMany({ where: { sourceType: "invoice", sourceId: { in: invoiceIds }, status: "OPEN", dueAt: { not: null } }, select: { sourceId: true, dueAt: true } });
+  return new Map(tasks.map((t) => [t.sourceId!, t.dueAt!]));
+}
+
 /** The admin funding queue. Drafts are the club's own work and never show here. */
 export async function adminFundingQueue(actor: Actor | null, opts: { queue: AdminQueue; source?: FundingSource | null; clubId?: string | null; take?: number }) {
   assertCan(actor, "admin.funding");
   const where: Prisma.FundingRequestWhereInput = {
-    status: opts.queue === "submitted" ? "SUBMITTED" : opts.queue === "approved" ? { in: ["APPROVED", "PARTIALLY_APPROVED"] } : { not: "DRAFT" },
-    ...(opts.queue === "approved" ? { OR: INVOICE_PENDING.OR } : {}),
-    ...(opts.source ? { fundingSource: opts.source } : {}),
-    ...(opts.clubId ? { clubId: opts.clubId } : {}),
+    AND: [
+      { status: opts.queue === "submitted" ? "SUBMITTED" : opts.queue === "approved" ? { in: ["APPROVED", "PARTIALLY_APPROVED"] } : { not: "DRAFT" } },
+      ...(opts.queue === "approved" ? [{ OR: INVOICE_PENDING.OR }] : []),
+      ...(opts.source ? [bySource(opts.source)] : []),
+      ...(opts.clubId ? [{ clubId: opts.clubId }] : []),
+    ],
   };
   const orderBy: Prisma.FundingRequestOrderByWithRelationInput[] =
     opts.queue === "submitted" ? [{ submittedAt: "asc" }] : opts.queue === "approved" ? [{ decidedAt: "asc" }] : [{ submittedAt: { sort: "desc", nulls: "last" } }];
-  const [rows, total] = await Promise.all([
+  const [found, total] = await Promise.all([
     db.fundingRequest.findMany({
       where,
       orderBy,
@@ -796,6 +888,8 @@ export async function adminFundingQueue(actor: Actor | null, opts: { queue: Admi
     }),
     db.fundingRequest.count({ where }),
   ]);
+  const due = await invoiceDueDates(found.flatMap((r) => r.invoices.filter((i) => i.status === "OPEN").map((i) => i.id)));
+  const rows = found.map((r) => ({ ...r, invoices: r.invoices.map((i) => ({ ...i, dueAt: due.get(i.id) ?? null })) }));
   return { rows, total };
 }
 
@@ -806,27 +900,32 @@ export async function adminFundingCounts() {
 }
 
 /**
- * The admin funding page's headline numbers: what's waiting on a decision,
- * what's approved but not yet through the finance system, and what was
- * approved for the current budget semester.
+ * The admin funding page's headline numbers: what's waiting on a decision
+ * (and how much of it is past WSUSA's review time), what's approved but not
+ * yet through the finance system (and past due), and what was approved for
+ * the current budget semester. "Late" is lib/funding/review's rule, the same
+ * one the WSUSA queue and the follow-up job use.
  */
 export async function adminFundingOverview(actor: Actor | null, now = new Date()) {
   assertCan(actor, "admin.funding");
-  const terms = await getTerms();
+  const [terms, cfg] = await Promise.all([getTerms(), getConfig()]);
   const term = budgetTermFor(terms, now);
-  const [waiting, oldest, needsInvoice, openInvoices, approvedThisTerm] = await Promise.all([
+  const reviewDays = cfg["wsusa.office"].reviewDays;
+  const openTasks = (late: Prisma.TaskWhereInput) => db.task.count({ where: { status: "OPEN", assigneeType: "ADMINS", ...late } });
+  const [waiting, oldest, pastReview, openInvoices, invoicesPastDue, approvedThisTerm] = await Promise.all([
     db.fundingRequest.aggregate({ where: { status: "SUBMITTED" }, _count: { _all: true }, _sum: { amountRequestedCents: true } }),
     db.fundingRequest.findFirst({ where: { status: "SUBMITTED" }, orderBy: { submittedAt: "asc" }, select: { submittedAt: true } }),
-    db.fundingRequest.count({ where: { status: { in: ["APPROVED", "PARTIALLY_APPROVED"] }, invoices: { none: {} } } }),
+    openTasks(fundingTasks("review", true, now, reviewDays)),
     db.invoice.aggregate({ where: { status: "OPEN" }, _count: { _all: true }, _sum: { amountCents: true } }),
+    openTasks(fundingTasks("invoice", true, now, reviewDays)),
     term
       ? db.fundingRequest.aggregate({ where: { termId: term.id, status: { in: ["APPROVED", "PARTIALLY_APPROVED"] } }, _count: { _all: true }, _sum: { amountApprovedCents: true } })
       : null,
   ]);
   return {
-    waiting: { count: waiting._count._all, cents: waiting._sum.amountRequestedCents ?? 0, oldestSubmittedAt: oldest?.submittedAt ?? null },
-    needsInvoice,
-    openInvoices: { count: openInvoices._count._all, cents: openInvoices._sum.amountCents ?? 0 },
+    reviewDays,
+    waiting: { count: waiting._count._all, cents: waiting._sum.amountRequestedCents ?? 0, oldestSubmittedAt: oldest?.submittedAt ?? null, pastReview },
+    openInvoices: { count: openInvoices._count._all, cents: openInvoices._sum.amountCents ?? 0, pastDue: invoicesPastDue },
     approvedThisTerm: term ? { termName: term.name, count: approvedThisTerm?._count._all ?? 0, cents: approvedThisTerm?._sum.amountApprovedCents ?? 0 } : null,
   };
 }
@@ -842,6 +941,6 @@ export async function priorRequests(clubId: string, exceptId: string) {
     where: { clubId, id: { not: exceptId }, status: { not: "DRAFT" } },
     orderBy: { submittedAt: { sort: "desc", nulls: "last" } },
     take: 12,
-    select: { id: true, title: true, status: true, fundingSource: true, amountRequestedCents: true, amountApprovedCents: true, submittedAt: true, term: { select: { name: true } } },
+    select: { id: true, title: true, status: true, fundingSource: true, fundedSource: true, amountRequestedCents: true, amountApprovedCents: true, submittedAt: true, term: { select: { name: true } } },
   });
 }

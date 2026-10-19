@@ -5,10 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { format } from "date-fns";
 import { selectionStatus, SUCCESSION_NAME } from "@/lib/roles/labels";
+import type { Quorum } from "@/lib/roles/pipeline";
 import { fmtRange, inCampusTime } from "@/lib/time";
 
-/** A selection's status in its mode's own words ("Voting open", "Waiting for answers", "Waiting to confirm"…). */
-export function ElectionStatusBadge({ status, method, proposedCandidateId }: { status: ElectionStatus; method: SuccessionMethod; proposedCandidateId?: string | null }) {
+/** A selection's status in its mode's own words ("Voting open", "Waiting for answers", "Waiting to confirm"…). A tied vote that went to a runoff says so. */
+export function ElectionStatusBadge({ status, method, proposedCandidateId, wentToRunoff }: { status: ElectionStatus; method: SuccessionMethod; proposedCandidateId?: string | null; wentToRunoff?: boolean }) {
+  if (wentToRunoff && status === "CANCELLED") return <Badge tone="neutral">Went to a runoff</Badge>;
   const s = selectionStatus({ status, method, proposedCandidateId });
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
@@ -93,8 +95,8 @@ export function ElectionTimeline(p: { status: ElectionStatus; method: Succession
 
 export type ResultRow = { candidateId: string; name: string; avatarUrl: string | null; avatarColor: string; votes: number; share: number | null; winner: boolean; tied: boolean };
 
-/** Vote counts per candidate and turnout. Counts only — never who voted for whom. */
-export function ElectionResultsView({ rows, totalVotes, eligibleVoters, turnout }: { rows: ResultRow[]; totalVotes: number; eligibleVoters: number; turnout: number | null }) {
+/** Vote counts per candidate and turnout, and whether turnout met the bylaws' quorum. Counts only — never who voted for whom. */
+export function ElectionResultsView({ rows, totalVotes, eligibleVoters, turnout, quorum }: { rows: ResultRow[]; totalVotes: number; eligibleVoters: number; turnout: number | null; quorum?: Quorum | null }) {
   const max = Math.max(1, ...rows.map((r) => r.votes));
   return (
     <div className="space-y-4">
@@ -124,7 +126,8 @@ export function ElectionResultsView({ rows, totalVotes, eligibleVoters, turnout 
       </ul>
       <p className="text-sm text-ink-2">
         {totalVotes} of {eligibleVoters} eligible voter{eligibleVoters === 1 ? "" : "s"} voted
-        {turnout !== null ? <span className="text-ink-3"> · {Math.round(turnout * 100)}% turnout</span> : null}. Ballots are secret — no one can see who voted for whom.
+        {turnout !== null ? <span className="text-ink-3"> · {Math.round(turnout * 100)}% turnout</span> : null}
+        {quorum ? <span className={quorum.met ? "text-ink-3" : "font-medium text-danger"}> · quorum {quorum.met ? "met" : "not met"} ({quorum.needed} needed)</span> : null}. Ballots are secret — no one can see who voted for whom.
       </p>
     </div>
   );

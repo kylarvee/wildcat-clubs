@@ -27,6 +27,7 @@ import { generateCheckinCode, generateCheckinSecret } from "@/lib/attendance/tok
 import { budgetTermFor, getTerms } from "@/lib/terms";
 import { defaultFundingSource } from "@/lib/funding/defaults";
 import { ACTIVE_REQUEST_STATUSES } from "@/lib/funding/math";
+import { holdsLock } from "@/lib/funding/locks";
 import { removeEventFromGoogle, syncEventToGoogle, type GoogleSyncResult } from "@/lib/integrations/google-calendar";
 import { isHttpUrl, joinEventLinks, splitEventLinks } from "@/lib/events/links";
 import { campusParts, toDateInput } from "@/lib/events/wallclock";
@@ -50,8 +51,9 @@ import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
  * occurrence gets a unique check-in code and QR secret.
  *
  * Costs are BudgetItem rows with eventId — entered only here; the Budget tool
- * reads them through eventCostSummary() to request funding. A line that a
- * submitted or approved funding request covers is locked (costLineLocks).
+ * reads them through eventCostSummary() to request funding. A line a funding
+ * request holds (in WSUSA review, or funded in full: lib/funding/locks) is
+ * locked (costLineLocks).
  *
  * Notices: co-host leaders hear about new times and cancellations
  * (tellCohostsAboutChange); the event's followers hear when a date in the next
@@ -475,8 +477,8 @@ async function announceCohostChanges(changes: CohostChange[], host: HostClub, ev
       body: c.status === "PENDING" ? `“${eventTitle}” — approve it to put it on your club's calendar.` : `${host.name} added you, and your club approves co-hosts automatically.`,
       href: `/clubs/${c.clubSlug}/manage/events?tab=cohosts`,
       exceptUserId: actor.id,
-      // Inviting every club at once stays in-app so nobody's inbox floods.
-      email: !bulk && c.status === "PENDING",
+      // Inviting every club at once stays off email so nobody's inbox floods (the registry emails a single invitation).
+      email: bulk ? false : undefined,
     });
   }
 }
@@ -499,17 +501,22 @@ function costData(c: CostRow, host: HostClub) {
 export type CostLock = { title: string; status: FundingStatus };
 
 /**
- * Event cost lines that a submitted or approved funding request covers, by line
- * id. Like general costs (lib/domain/funding), they're locked so the line keeps
- * matching what the club asked for.
+ * Cost lines a funding request holds locked, by line id: in WSUSA review, or
+ * funded in full (the rule is lib/funding/locks'; a line WSUSA funded for
+ * less lets go). Like general costs (lib/domain/funding), they're locked so
+ * the line keeps matching what the club asked for.
  */
 export async function costLineLocks(itemIds: string[], tx: Tx = db): Promise<Map<string, CostLock>> {
   if (itemIds.length === 0) return new Map();
   const rows = await tx.fundingRequestItem.findMany({
     where: { budgetItemId: { in: itemIds }, request: { status: { in: ACTIVE_REQUEST_STATUSES } } },
-    select: { budgetItemId: true, request: { select: { title: true, status: true } } },
+    select: { budgetItemId: true, totalCents: true, approvedCents: true, request: { select: { title: true, status: true } } },
   });
-  return new Map(rows.map((r) => [r.budgetItemId!, r.request]));
+  const locks = new Map<string, CostLock>();
+  for (const r of rows) {
+    if (!locks.has(r.budgetItemId!) && holdsLock({ status: r.request.status, totalCents: r.totalCents, approvedCents: r.approvedCents })) locks.set(r.budgetItemId!, r.request);
+  }
+  return locks;
 }
 
 function lockedCost(description: string, lock: CostLock) {
@@ -758,7 +765,6 @@ async function tellCohostsAboutChange(event: Pick<Event, "id" | "title">, host: 
       body: `${host.name} ${what === "moved" ? "changed the time of" : "cancelled"} an event you co-host.`,
       href: `/events/${event.id}`,
       exceptUserId: actor.id,
-      email: what === "cancelled",
     });
   }
 }
@@ -1004,7 +1010,6 @@ export async function decideCohost(actor: Actor | null, cohostId: string, approv
       title: approve ? `${c.club.name} will co-host “${c.event.title}”` : leaving ? `${c.club.name} stepped back from co-hosting “${c.event.title}”` : `${c.club.name} declined to co-host “${c.event.title}”`,
       href: c.event.club ? `/clubs/${c.event.club.slug}/manage/events?tab=cohosts` : `/events/${c.eventId}`,
       exceptUserId: actor!.id,
-      email: false,
     });
   }
   return updated;

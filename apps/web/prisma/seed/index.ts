@@ -64,7 +64,7 @@ async function main() {
     buildElections(ctx);
     buildFunding(ctx);
     buildFiles(ctx);
-    buildInbox(ctx);
+    buildInbox(ctx, users);
     log(`Built in ${((Date.now() - started) / 1000).toFixed(1)}s — writing…`);
 
     await insertAll(db, ctx, ref, users, log);

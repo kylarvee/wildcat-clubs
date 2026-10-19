@@ -3,8 +3,10 @@ import type { ClubStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
-import { notify } from "@/lib/domain/notify";
+import { notify, notifyAdmins } from "@/lib/domain/notify";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
+import { clubRules } from "@/lib/constitution/club-rules";
+import { staffingDueAt } from "@/lib/constitution/rules";
 import {
   filledGap,
   gapNotice,
@@ -33,7 +35,8 @@ import {
  * checkClubStaffing():
  *   - opens one WSUSA task (ADMINS, APPROVAL, sourceType "clubStaffing",
  *     sourceId "<clubId>:president|advisor|approver") for each gap the change
- *     opened, and tells the club's remaining leaders and advisors in-app;
+ *     opened, and tells the club's remaining leaders and advisors and WSUSA's
+ *     admins (staffing.gap, an "always" kind: in-app, email and push);
  *   - closes the task of every gap that's filled;
  *   - runs under a per-club lock, so there's never a second open task for a gap.
  * A gap that was there before the change gets no task. The scheduled "Club
@@ -90,10 +93,12 @@ export async function checkClubStaffing(clubId: string, opts: StaffingCheck = {}
       }
       const hasAdvisor = current.some((r) => r.role === "ADVISOR");
       const stories = plan.open.map((gap) => ({ club, gap, leftName: ended.find((r) => filledGap(r, gap))?.user.name ?? null, hasAdvisor }));
+      // Due when the club's bylaws say the seat should be filled (vacancyDays) or a new advisor found (advisorReplaceDays); undated when they don't say.
+      const rules = stories.length ? await clubRules(clubId) : null;
       for (const s of stories) {
         const t = gapTask(s);
         await createTask(
-          { kind: "APPROVAL", title: t.title, description: t.description, href: t.href, assignee: { type: "ADMINS" }, clubId, source: { type: STAFFING_SOURCE, id: staffingSourceId(clubId, s.gap) }, createdById: opts.actorId ?? null },
+          { kind: "APPROVAL", title: t.title, description: t.description, href: t.href, assignee: { type: "ADMINS" }, clubId, source: { type: STAFFING_SOURCE, id: staffingSourceId(clubId, s.gap) }, createdById: opts.actorId ?? null, dueAt: rules ? staffingDueAt(s.gap, rules, now) : null },
           tx,
         );
       }
@@ -108,7 +113,10 @@ export async function checkClubStaffing(clubId: string, opts: StaffingCheck = {}
   for (const s of done.stories) {
     await logActivity({ actorId: null, action: "staffing.gap_flagged", entityType: "club", entityId: clubId, clubId, data: { gap: s.gap } });
     const n = gapNotice(s);
-    await notify({ userIds: done.leaders, exceptUserId: opts.actorId, kind: "staffing.gap", title: n.title, body: n.body, href: n.href, email: false, push: false });
+    await notify({ userIds: done.leaders, exceptUserId: opts.actorId, kind: "staffing.gap", title: n.title, body: n.body, href: n.href });
+    // WSUSA hears right away too, with its task's wording (a staffing gap is never held for the daily digest).
+    const t = gapTask(s);
+    await notifyAdmins({ exceptUserId: opts.actorId, kind: "staffing.gap", title: t.title, body: t.description, href: t.href });
   }
   return { opened: done.plan.open, closed: done.plan.close };
 }

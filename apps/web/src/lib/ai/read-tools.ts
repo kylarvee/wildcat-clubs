@@ -8,7 +8,7 @@ import { listClubs, clubUpcomingEvents, type ClubListItem } from "@/lib/clubs/qu
 import { clubListHref, SORT_DEFAULT_DIR, type ClubListParams } from "@/components/clubs/list-params";
 import { CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL, STANDING_LABEL, standingOf } from "@/lib/labels/clubs";
 import { MEMBERSHIP_STATUS_LABEL } from "@/components/admin/users/labels";
-import { clubActivity, clubActivityMany, clubListMetrics, memberClubSummaries, reviewEligibility } from "@/lib/metrics";
+import { clubActivity, clubListMetrics, clubsAtRisk, memberClubSummaries, noRetentionText, reviewEligibility, type ClubListMetrics } from "@/lib/metrics";
 import { feedOccurrences, viewerContext } from "@/lib/events/feed";
 import { canManageEvent, canSeeEventCosts, canViewEvent, eventCostSummary } from "@/lib/domain/events";
 import { foundingChecklist } from "@/lib/domain/clubs";
@@ -51,6 +51,14 @@ function ratingText(avg: number | null, count: number) {
   return avg == null || count === 0 ? "no reviews yet" : `${avg.toFixed(1)} of 5 from ${count} review${count === 1 ? "" : "s"}`;
 }
 
+/** Retention and the activity score, worded exactly as the club page and clubs list show them (lib/metrics). */
+function metricsText(m: Pick<ClubListMetrics, "retention" | "activityScore">) {
+  return {
+    retention: m.retention?.label ?? `no figure yet (${noRetentionText().toLowerCase()})`,
+    events_held_last_30_days: m.activityScore,
+  };
+}
+
 function relationship(s: { member: boolean; pending: boolean; subscribed: boolean; leader: boolean } | undefined) {
   if (!s) return null;
   if (s.leader) return "you're a leader here";
@@ -87,7 +95,7 @@ const searchClubs = readTool({
     sort: z
       .enum(["relevance", "recommended", "name", "rating", "members", "retention", "activity"])
       .optional()
-      .describe("Default: relevance (Best match) with a query, recommended (Recommended) without one; members = attending members"),
+      .describe("Default: relevance (Best match) with a query, recommended (Recommended) without one; members = attending members; activity = most events held in the last 30 days (Events held lately)"),
     limit: z.number().int().min(1).max(20).optional().describe("How many to return (default 8)"),
     archived: z.boolean().optional().describe("Search retired clubs instead of current ones"),
   }),
@@ -128,7 +136,7 @@ const searchClubs = readTool({
       attending_members: c.metrics.activeMembers,
       registered_members: c.metrics.registeredMembers,
       rating: ratingText(c.metrics.avgRating, c.metrics.reviewCount),
-      monthly_retention: percent(c.metrics.retentionRate),
+      ...metricsText(c.metrics),
       you: relationship(result.states.get(c.id)),
     }));
     return {
@@ -216,7 +224,7 @@ const getClub = readTool({
               attending_members: metrics.activeMembers,
               registered_members: metrics.registeredMembers,
               rating: ratingText(metrics.avgRating, metrics.reviewCount),
-              monthly_retention: percent(metrics.retentionRate),
+              ...metricsText(metrics),
               activity: activity
                 ? {
                     standing: STANDING_LABEL[standingOf(activity)],
@@ -732,42 +740,39 @@ const clubHealth = readTool({
   name: "club_health",
   running: "Checking club activity",
   description:
-    "Which clubs are at risk: approved clubs whose standing is Inactive (with the reasons from the metrics layer) and clubs whose pilot period ends soon. Admins see every club; everyone else sees the clubs they lead or advise.",
-  schema: z.object({ pilot_ending_within_days: z.number().int().min(1).max(365).optional().describe("Flag pilot periods ending within this many days (default 60)") }),
-  async run({ actor, now }, input) {
-    const window = (input.pilot_ending_within_days ?? 60) * 86_400_000;
+    "Which clubs are at risk — the same list as WSUSA's admin Overview, from the metrics layer: approved clubs that are Inactive now; clubs in their pilot period that don't meet the activity bar yet (events with check-ins this term, registered members), most urgent when the pilot ends this term; and clubs at the line (active only on last term's record once this term is half over, or exactly at the member minimum). Each comes with plain-language reasons. Admins see every club; everyone else sees the clubs they lead or advise.",
+  schema: z.object({}),
+  async run({ actor, now }) {
     let clubIds: string[] | undefined;
     if (!isAdmin(actor)) {
       const roles = await db.roleAssignment.findMany({ where: { userId: actor.id, endedAt: null, role: { not: "MEMBER" } }, select: { clubId: true } });
       clubIds = [...new Set(roles.map((r) => r.clubId))];
       if (!clubIds.length) throw new ToolError("Club health is for club leaders, advisors and WSUSA admins. This person doesn't lead any clubs; get_club shows any one club's status.");
     }
-    const [activity, clubs, terms] = await Promise.all([
-      clubActivityMany(clubIds, now),
-      db.club.findMany({ where: { status: "APPROVED", ...(clubIds ? { id: { in: clubIds } } : {}) }, select: { id: true, name: true, slug: true } }),
+    // AT RISK has one definition (lib/metrics clubsAtRisk); the Overview reads the same list.
+    const [risky, approved, terms] = await Promise.all([
+      clubsAtRisk({ clubIds, at: now }),
+      db.club.count({ where: { status: "APPROVED", ...(clubIds ? { id: { in: clubIds } } : {}) } }),
       getTerms(),
     ]);
-    const byId = new Map(clubs.map((c) => [c.id, c]));
-    const atRisk: unknown[] = [];
-    const pilotEnding: unknown[] = [];
-    let healthy = 0;
-    for (const [id, a] of activity) {
-      const c = byId.get(id);
-      if (!c) continue;
-      const row = { club: c.name, link: `/clubs/${c.slug}`, registered_members: a.registeredMembers, attending_members: a.activeMembers, held_events_current_term: a.heldEventsCurrentTerm, held_events_previous_term: a.heldEventsPreviousTerm };
-      if (!a.active) atRisk.push({ ...row, reasons: a.reasons });
-      else if (a.inPilot && a.pilotEndsAt && a.pilotEndsAt.getTime() - now.getTime() <= window) pilotEnding.push({ ...row, pilot_ends: fmtDate(a.pilotEndsAt, "MMM d, yyyy"), reasons: a.reasons });
-      else healthy++;
-    }
     const term = currentOrLastTerm(terms, now);
     return {
       data: {
         scope: clubIds ? "clubs this person leads or advises" : "every approved club",
         term: term?.name ?? null,
-        inactive: atRisk,
-        pilot_period_ending_soon: pilotEnding,
-        active_and_fine: healthy,
-        ...(clubIds ? {} : { admin_pages: { clubs: "/admin/clubs", analytics: "/admin/analytics" } }),
+        at_risk: risky.map((c) => ({
+          club: c.name,
+          link: `/clubs/${c.slug}`,
+          risk: c.endsThisTerm ? `${c.tag} · this term` : c.tag,
+          reasons: c.reasons,
+          registered_members: c.activity.registeredMembers,
+          attending_members: c.activity.activeMembers,
+          held_events_current_term: c.activity.heldEventsCurrentTerm,
+          held_events_previous_term: c.activity.heldEventsPreviousTerm,
+          ...(c.activity.inPilot && c.activity.pilotEndsAt ? { pilot_ends: fmtDate(c.activity.pilotEndsAt, "MMM d, yyyy") } : {}),
+        })),
+        active_and_fine: approved - risky.length,
+        ...(clubIds ? {} : { admin_pages: { overview: "/admin", analytics: "/admin/analytics" } }),
       },
       label: "Checked which clubs are at risk",
     };

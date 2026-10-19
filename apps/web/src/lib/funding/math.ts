@@ -6,7 +6,11 @@ import type { FundingSource, FundingStatus } from "@prisma/client";
  * exactly the numbers the domain will store. All amounts are integer cents.
  */
 
-/** Statuses whose line items are spoken for: the club can't ask for them twice or edit them. */
+/**
+ * Statuses whose lines a request has claimed: in WSUSA review, or approved.
+ * Whether a claimed line still locks its cost line is lib/funding/locks'
+ * rule (a line funded for less than it asked lets go).
+ */
 export const ACTIVE_REQUEST_STATUSES: FundingStatus[] = ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED"];
 /** Statuses that count as money the club asked for (withdrawn and draft requests don't). */
 export const ASKED_STATUSES: FundingStatus[] = ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "DENIED"];
@@ -73,11 +77,20 @@ export function sumBySource<T extends { fundingSource: FundingSource; totalCents
   return out;
 }
 
-export type RequestMoney = { status: FundingStatus; fundingSource: FundingSource; amountRequestedCents: number; amountApprovedCents: number | null };
+export type RequestMoney = {
+  status: FundingStatus;
+  /** The source the club expects. */
+  fundingSource: FundingSource;
+  /** The source that funded it (set when WSUSA approves). */
+  fundedSource?: FundingSource | null;
+  amountRequestedCents: number;
+  amountApprovedCents: number | null;
+};
 
 /**
  * Requested = everything the club asked for (submitted or decided, not
- * withdrawn); approved = what was granted; pending = still waiting on a decision.
+ * withdrawn), by the source it expects; approved = what was granted, by the
+ * source that funded it; pending = still waiting on a decision.
  */
 export function requestTotals(requests: RequestMoney[]) {
   const bySource = { UNIVERSITY: { requested: 0, approved: 0 }, WSUSA: { requested: 0, approved: 0 }, COLLEGE: { requested: 0, approved: 0 }, DEPARTMENT: { requested: 0, approved: 0 } } as Record<
@@ -94,18 +107,53 @@ export function requestTotals(requests: RequestMoney[]) {
     }
     if (APPROVED_STATUSES.includes(r.status)) {
       approved += r.amountApprovedCents ?? 0;
-      bySource[r.fundingSource].approved += r.amountApprovedCents ?? 0;
+      bySource[r.fundedSource ?? r.fundingSource].approved += r.amountApprovedCents ?? 0;
     }
     if (r.status === "SUBMITTED") pending += r.amountRequestedCents;
   }
   return { requested, approved, pending, bySource };
 }
 
-/** Problem with a partial approval amount, or null when it's fine. */
-export function partialAmountProblem(requestedCents: number, approvedCents: number): string | null {
-  if (!Number.isFinite(approvedCents) || approvedCents <= 0) return "Enter the amount you're approving. To approve nothing, choose Don't approve instead.";
-  if (approvedCents >= requestedCents) return "A partial approval has to be less than the amount requested. To approve everything, choose Approve instead.";
-  return null;
+// ─── WSUSA's decision, line by line ──────────────────────────────────────────
+
+export type DecisionLine = { id: string; totalCents: number };
+
+export type LineDecision =
+  | {
+      ok: true;
+      /** APPROVED when every line gets what it asked for; PARTIALLY_APPROVED when any line gets less. */
+      status: "APPROVED" | "PARTIALLY_APPROVED";
+      /** The request's approved amount: the sum of its lines. */
+      approvedCents: number;
+      lines: { id: string; totalCents: number; approvedCents: number }[];
+      /** Lines approved for less than they asked (0 included). */
+      reduced: number;
+    }
+  | { ok: false; problem: string };
+
+/**
+ * An approval, line by line. `approved` maps a line's id to the cents WSUSA
+ * approves for it; lines left out get their full total. "Partly approved" is
+ * just an approval where some lines get less.
+ */
+export function decideLines(lines: DecisionLine[], approved: Record<string, number> = {}): LineDecision {
+  const ids = new Set(lines.map((l) => l.id));
+  if (Object.keys(approved).some((id) => !ids.has(id))) return { ok: false, problem: "One of the amounts is for a line that isn't in this request. Reload the page and try again." };
+  const out = lines.map((l) => ({ id: l.id, totalCents: l.totalCents, approvedCents: Object.hasOwn(approved, l.id) ? approved[l.id] : l.totalCents }));
+  for (const l of out) {
+    if (!Number.isFinite(l.approvedCents)) return { ok: false, problem: "Enter an amount in dollars for every line, like 120.00 (0 funds none of it)." };
+    if (!Number.isInteger(l.approvedCents) || l.approvedCents < 0) return { ok: false, problem: "Approved amounts can't be negative." };
+    if (l.approvedCents > l.totalCents) return { ok: false, problem: "A line can't be approved for more than it asks for." };
+  }
+  const approvedCents = out.reduce((s, l) => s + l.approvedCents, 0);
+  if (approvedCents <= 0) return { ok: false, problem: "That approves nothing. To fund none of it, choose Don't approve." };
+  const reduced = out.filter((l) => l.approvedCents < l.totalCents).length;
+  return { ok: true, status: reduced ? "PARTIALLY_APPROVED" : "APPROVED", approvedCents, lines: out, reduced };
+}
+
+/** A request line's snapshot covers less than the whole line when part of it was funded before: what was. */
+export function earlierFundedCents(line: { quantity: number; unitCostCents: number; occurrences: number; totalCents: number }): number {
+  return Math.max(0, lineCents(line.quantity, line.unitCostCents) * line.occurrences - line.totalCents);
 }
 
 // ─── Invoice numbers ─────────────────────────────────────────────────────────

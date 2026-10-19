@@ -16,6 +16,8 @@ import { NoPermission } from "@/components/workspace/NoPermission";
 import { NewDraftButton } from "@/components/constitution/DraftControls";
 import { CustomUploadForm, WithdrawButton } from "@/components/constitution/CustomUploadForm";
 import { JOIN_LABEL, SUCCESSION_LABEL } from "@/components/founding/copy";
+import { clubRules } from "@/lib/constitution/club-rules";
+import { ruleFacts } from "@/lib/constitution/rules";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   return workspaceTitle((await params).slug, "Constitution");
@@ -36,21 +38,26 @@ export default async function ClubConstitutionPage({ params }: { params: Promise
   // Retired clubs keep their documents readable for leaders and admins; everything else needs the capability.
   if (!allowed && !(readOnly && access.isLeader)) return <NoPermission what="the constitution and bylaws" suspended={access.suspended} />;
 
-  const [docs, myDrafts, rejections] = await Promise.all([
+  const [docs, myDrafts, rejections, rules] = await Promise.all([
     db.clubDocument.findMany({
       where: { clubId: club.id, kind: { in: ["CONSTITUTION", "BYLAWS"] } },
       orderBy: [{ createdAt: "desc" }],
-      include: { createdBy: { select: { name: true } }, draft: { select: { id: true, ownerId: true } } },
+      include: { createdBy: { select: { name: true } }, draft: { select: { id: true, ownerId: true, updatedAt: true } } },
     }),
     db.constitutionDraft.findMany({ where: { ownerId: user.id }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, updatedAt: true } }),
     db.clubDecision.findMany({ where: { clubId: club.id, action: "DOCUMENT_REJECTED" }, orderBy: { at: "desc" }, take: 1, include: { by: { select: { name: true } } } }),
+    clubRules(club.id),
   ]);
 
   const current = (kind: "CONSTITUTION" | "BYLAWS") => docs.find((d) => d.kind === kind && d.status === "ACTIVE") ?? null;
   const pending = (kind: "CONSTITUTION" | "BYLAWS") => docs.find((d) => d.kind === kind && d.status === "PENDING_APPROVAL") ?? null;
-  const activeBuilder = docs.find((d) => d.status === "ACTIVE" && d.source === "BUILDER" && d.draft);
-  const myActiveDraft = activeBuilder?.draft?.ownerId === user.id ? activeBuilder.draft : null;
+  // Builder documents in effect keep the answers they were made from (older ones link their draft), so any leader with this tool can start from them.
+  const activeBuilder = docs.find((d) => d.status === "ACTIVE" && d.source === "BUILDER" && (d.builderAnswers || d.draft)) ?? null;
+  // The person who adopted it can keep editing their own draft, as long as it hasn't changed since.
+  const adoptedAt = activeBuilder ? (activeBuilder.decidedAt ?? activeBuilder.createdAt).getTime() : 0;
+  const myActiveDraft = activeBuilder?.draft?.ownerId === user.id && activeBuilder.draft.updatedAt.getTime() <= adoptedAt + 60_000 ? activeBuilder.draft : null;
   const otherDrafts = myDrafts.filter((d) => d.id !== myActiveDraft?.id);
+  const builderRules = docs.some((d) => d.status === "ACTIVE" && d.source === "BUILDER" && d.builderAnswers);
   const latest = docs[0];
   const lastRejection = latest?.status === "REJECTED" ? rejections[0] : null;
   const runningDays = club.approvedAt ? Math.floor((Date.now() - club.approvedAt.getTime()) / DAY_MS) : 0;
@@ -124,34 +131,46 @@ export default async function ClubConstitutionPage({ params }: { params: Promise
       </div>
 
       <Card>
-        <CardHeader title="What your documents set" description="Wildcat Clubs applies these automatically when documents are adopted or approved." />
+        <CardHeader
+          title="What your documents set"
+          description={
+            builderRules
+              ? "Wildcat Clubs applies these from the documents in effect. A vote already under way keeps the rules it started with."
+              : "Wildcat Clubs applies these from the documents in effect. Your documents don't carry builder answers, so member votes and WSUSA's follow-up use the platform's standard rules until you adopt with the builder."
+          }
+        />
         <CardBody>
           <KeyValue
             items={[
               { label: "How students join", value: JOIN_LABEL[club.joinPolicy] },
               { label: "Primary way leaders are chosen", value: SUCCESSION_LABEL[club.successionMethod] },
+              ...ruleFacts(rules),
             ]}
           />
+          <p className="mt-4 text-xs text-ink-3">Everything else in your documents (GPA minimums, dues, terms of office, removal and amendment votes) is your club&apos;s to follow, with WSUSA. Wildcat Clubs doesn&apos;t enforce it.</p>
         </CardBody>
       </Card>
 
       {canEdit ? (
         <Card>
-          <CardHeader title="Update with the builder" description="Change sections and fill-ins, preview the PDFs, then adopt. Adopting replaces the current versions right away — no WSUSA approval needed." />
+          <CardHeader
+            title="Update with the builder"
+            description="Change sections and fill-ins, preview the PDFs, then adopt. Starting from the current version copies the answers in effect, whoever adopted them. Adopting replaces the current versions right away — no WSUSA approval needed."
+          />
           <CardBody className="space-y-4">
             <div className="flex flex-wrap gap-2">
               {myActiveDraft ? (
                 <ButtonLink href={`/constitution/${myActiveDraft.id}?club=${club.id}`}>
                   <PenLine className="h-4 w-4" aria-hidden /> Edit the current version
                 </ButtonLink>
-              ) : activeBuilder?.draft ? (
-                <NewDraftButton clubId={club.id} fromDraftId={activeBuilder.draft.id}>
+              ) : activeBuilder ? (
+                <NewDraftButton clubId={club.id} fromCurrent>
                   Start from the current version
                 </NewDraftButton>
               ) : (
                 <NewDraftButton clubId={club.id}>{docs.length ? "Start a new builder draft" : "Start with the default documents"}</NewDraftButton>
               )}
-              {myActiveDraft || activeBuilder?.draft ? (
+              {myActiveDraft || activeBuilder ? (
                 <NewDraftButton clubId={club.id} variant="outline">
                   Start fresh from the defaults
                 </NewDraftButton>

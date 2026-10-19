@@ -5,7 +5,7 @@ import { getConfig } from "@/lib/config";
 import { getTerms } from "@/lib/terms";
 import { fmtDate, fmtTime } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { activeMemberIdsFor, clubAttendanceByOccurrence, clubRetention, registeredMemberCount, type RetentionPoint } from "@/lib/metrics";
+import { activeMemberIdsFor, clubAttendanceByOccurrence, clubRetention, latestRetention, noRetentionText, registeredMemberCount, type RetentionPoint } from "@/lib/metrics";
 import { clubCheckinList, distinctGuestCount, loadClubMatrix, type ClubCheckinList } from "@/lib/attendance/queries";
 import { pct, type RowSort } from "@/lib/attendance/matrix";
 import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
@@ -26,15 +26,7 @@ export const metadata: Metadata = { title: "Attendance" };
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 function toSeries(points: RetentionPoint[]): RetentionSeries {
-  return points.map((p) => ({ label: p.label, rate: p.rate, retained: p.retained, previousAttendees: p.previousAttendees, attendees: p.attendees }));
-}
-
-function retentionHint(points: RetentionPoint[]) {
-  const last = points.at(-1);
-  const prev = points.at(-2);
-  if (!last) return "Shows up after a few events";
-  if (last.rate === null) return `Nobody checked in during ${prev?.label ?? "the period before"}`;
-  return `${last.retained} of ${last.previousAttendees} from ${prev?.label ?? "last period"} came back`;
+  return points.map((p) => ({ label: p.label, previousLabel: p.previousLabel, rate: p.rate, retained: p.retained, previousAttendees: p.previousAttendees, attendees: p.attendees, inProgress: p.inProgress }));
 }
 
 /**
@@ -65,11 +57,15 @@ export default async function ClubAttendancePage({ params, searchParams }: { par
     activeMemberIdsFor(club.id, now),
     registeredMemberCount(club.id),
     distinctGuestCount(club.id, term.from, termUntil),
-    clubRetention(club.id, "month", { count: 12, at: now }),
-    clubRetention(club.id, "quarter", { count: 8, at: now }),
-    clubRetention(club.id, "academicYear", { count: 4, at: now }),
-    clubRetention(club.id, "year", { count: 4, at: now }),
+    // Default counts: the month series is then exactly the clubs list's (ClubListMetrics.retention).
+    clubRetention(club.id, "month", { at: now }),
+    clubRetention(club.id, "quarter", { at: now }),
+    clubRetention(club.id, "academicYear", { at: now }),
+    clubRetention(club.id, "year", { at: now }),
   ]);
+  // RETENTION, the one rule (lib/metrics): the latest two complete periods in a row with check-ins.
+  const monthRetention = latestRetention(retMonth);
+  const quarterRetention = latestRetention(retQuarter);
 
   // Started events nobody checked in to aren't "held" (lib/metrics): leave them out of the average.
   const termRates = termEvents.filter((e) => e.held !== false).map((e) => e.rate).filter((r): r is number => r !== null);
@@ -99,8 +95,8 @@ export default async function ClubAttendancePage({ params, searchParams }: { par
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Stat label="Avg. attendance" value={pct(avgTermRate)} hint={termRates.length ? `across ${termRates.length} event${termRates.length === 1 ? "" : "s"}` : "No check-ins yet this term"} />
           <Stat label="Attending members" value={activeIds.length} hint={`of ${registered} registered`} />
-          <Stat label="Retention · month" value={pct(retMonth.at(-1)?.rate)} hint={retentionHint(retMonth)} />
-          <Stat label="Retention · quarter" value={pct(retQuarter.at(-1)?.rate)} hint={retentionHint(retQuarter)} />
+          <Stat label="Retention · month" value={pct(monthRetention?.rate)} hint={monthRetention?.label ?? noRetentionText("month")} />
+          <Stat label="Retention · quarter" value={pct(quarterRetention?.rate)} hint={quarterRetention?.label ?? noRetentionText("quarter")} />
           <Stat label="Guests" value={guestsThisTerm} hint="non-members who checked in" className="col-span-2 sm:col-span-1" />
         </div>
       </Section>

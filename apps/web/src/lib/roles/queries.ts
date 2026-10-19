@@ -2,7 +2,7 @@ import "server-only";
 import type { ClubRole, ClubType, MembershipStatus, RoleEndReason, RoleRequirement } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
-import { requirementStatus } from "@/lib/authz/requirements";
+import { loadRequirementBatch } from "@/lib/authz/requirements";
 import { seatSort } from "@/lib/domain/orgchart";
 import { pipelineOrder, type PipelineSeat } from "@/lib/roles/pipeline";
 
@@ -149,13 +149,20 @@ export async function clubPipeline(clubId: string): Promise<ClubPipeline> {
   };
 }
 
-/** Officer requirements status per holder — "pending" (within grace) or "overdue" (permissions paused). */
+/**
+ * Officer requirements status per holder — "pending" (within grace) or
+ * "overdue" (permissions paused). One batch for every holder (the evaluator
+ * getClubAccess and the daily sweep use), so a big chart costs the same few
+ * queries as a small one.
+ */
 export async function trainingStatusFor(holders: ChartHolder[], clubApprovedAt: Date | null): Promise<Map<string, "pending" | "overdue">> {
   const out = new Map<string, "pending" | "overdue">();
   if (!clubApprovedAt) return out; // requirements only bind leaders of approved clubs
-  for (const h of holders) {
-    if (h.role === "ADVISOR" || h.role === "MEMBER") continue;
-    const s = await requirementStatus(h.person.id, h.role, { assignmentStartedAt: h.startedAt, clubApprovedAt });
+  const leaders = holders.filter((h) => h.role !== "ADVISOR" && h.role !== "MEMBER");
+  if (!leaders.length) return out;
+  const batch = await loadRequirementBatch([...new Set(leaders.map((h) => h.person.id))]);
+  for (const h of leaders) {
+    const s = batch.status(h.person.id, h.role, { startedAt: h.startedAt, clubApprovedAt });
     if (s.overdue) out.set(h.assignmentId, "overdue");
     else if (!s.allMet) out.set(h.assignmentId, "pending");
   }

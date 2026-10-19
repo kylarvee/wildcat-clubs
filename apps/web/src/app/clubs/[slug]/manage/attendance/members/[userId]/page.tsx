@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
 import { campusDate, fmtDate, fmtLongDate, fmtTime } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { memberClubSummary, memberRetention } from "@/lib/metrics";
+import { memberClubSummary, memberPeriodsAttended } from "@/lib/metrics";
 import { loadMemberHistory, type MemberHistoryItem } from "@/lib/attendance/queries";
 import { memberAt, pct } from "@/lib/attendance/matrix";
 import { Avatar } from "@/components/ui/avatar";
@@ -23,6 +23,17 @@ export const metadata: Metadata = { title: "Member attendance" };
 const SHOW = 100;
 
 type MonthCell = { key: string; label: string; attended: boolean; member: boolean };
+
+/** "5 of 8" months (quarters, years) attended since getting involved; "—" before there's one. */
+function PeriodsStat({ label, noun, p }: { label: string; noun: string; p: { periods: number; attendedPeriods: number; rate: number | null } }) {
+  return (
+    <Stat
+      label={label}
+      value={p.periods ? `${p.attendedPeriods} of ${p.periods}` : "—"}
+      hint={p.periods ? `${pct(p.rate)} of the ${noun} since getting involved` : "Since getting involved"}
+    />
+  );
+}
 
 /** Last 12 campus months: did they come, and were they a member then? */
 function monthStrip(items: MemberHistoryItem[], membership: { joinedAt: Date | null; endedAt: Date | null } | null, now: Date): MonthCell[] {
@@ -55,10 +66,10 @@ export default async function MemberAttendancePage({ params }: { params: Promise
 
   const [summary, monthly, quarterly, yearly, annual, roles] = await Promise.all([
     memberClubSummary(person.id, club.id),
-    memberRetention(person.id, club.id, "month"),
-    memberRetention(person.id, club.id, "quarter"),
-    memberRetention(person.id, club.id, "academicYear"),
-    memberRetention(person.id, club.id, "year"),
+    memberPeriodsAttended(person.id, club.id, "month"),
+    memberPeriodsAttended(person.id, club.id, "quarter"),
+    memberPeriodsAttended(person.id, club.id, "academicYear"),
+    memberPeriodsAttended(person.id, club.id, "year"),
     db.roleAssignment.findMany({ where: { clubId: club.id, userId: person.id, endedAt: null }, select: { role: true, position: { select: { name: true } } } }),
   ]);
 
@@ -110,12 +121,12 @@ export default async function MemberAttendancePage({ params }: { params: Promise
         <Stat label="Attendance rate" value={pct(summary.rate)} hint={summary.heldSinceJoined ? `${summary.attended} of ${summary.heldSinceJoined} since getting involved` : "Counts events since they joined or first came"} />
         <Stat label="Last attended" value={lastAttended ? fmtDate(lastAttended, "MMM d") : "—"} hint={lastAttended ? fmtLongDate(lastAttended) : "No check-ins"} className="col-span-2 lg:col-span-1" />
       </div>
-      {/* Retention at the individual level, for every period the club tracker shows. */}
+      {/* How often they come, per person, for every period the club tracker shows (retention is the club's figure). */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Monthly retention" value={pct(monthly.rate)} hint={monthly.periods ? `came in ${monthly.attendedPeriods} of ${monthly.periods} months` : "Since joining"} />
-        <Stat label="Quarterly retention" value={pct(quarterly.rate)} hint={quarterly.periods ? `came in ${quarterly.attendedPeriods} of ${quarterly.periods} quarters` : "Since joining"} />
-        <Stat label="Academic-year retention" value={pct(yearly.rate)} hint={yearly.periods ? `came in ${yearly.attendedPeriods} of ${yearly.periods} academic years` : "Since joining"} />
-        <Stat label="Annual retention" value={pct(annual.rate)} hint={annual.periods ? `came in ${annual.attendedPeriods} of ${annual.periods} years` : "Since joining"} />
+        <PeriodsStat label="Months attended" noun="months" p={monthly} />
+        <PeriodsStat label="Quarters attended" noun="quarters" p={quarterly} />
+        <PeriodsStat label="Academic years attended" noun="academic years" p={yearly} />
+        <PeriodsStat label="Years attended" noun="years" p={annual} />
       </div>
 
       <Card>

@@ -5,7 +5,6 @@ import type { FundingSource } from "@prisma/client";
 import { FileCheck2, Inbox, SearchX } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
-import { getConfig } from "@/lib/config";
 import { DAY_MS, fmtMoney } from "@/lib/time";
 import { adminFundingCounts, adminFundingOverview, adminFundingQueue, clubsWithRequests, type AdminQueue } from "@/lib/domain/funding";
 import { SOURCE_ORDER, plural } from "@/lib/funding/labels";
@@ -21,15 +20,17 @@ export const metadata: Metadata = { title: "Funding" };
 
 const QUEUES: { key: AdminQueue; label: string; hint: string }[] = [
   { key: "submitted", label: "In WSUSA review", hint: "Oldest first." },
-  { key: "approved", label: "Approved · invoice open", hint: "Approved requests until their invoice is created and processed, oldest decision first." },
+  { key: "approved", label: "Approved · invoice open", hint: "Approved requests until their invoice is processed, oldest decision first." },
   { key: "all", label: "All requests", hint: "Everything clubs have submitted, newest first. Drafts stay private to the club." },
 ];
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 /**
- * WSUSA's funding desk: decide submitted requests, then create and process
- * each approved request's invoice. Requires admin.funding.
+ * WSUSA's funding desk: decide submitted requests (approving one creates its
+ * invoice), then process each invoice. Requests past WSUSA's review time and
+ * invoices past due are counted here as they are in the WSUSA queue
+ * (lib/funding/review). Requires admin.funding.
  */
 export default async function AdminFundingPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("/admin/funding");
@@ -42,11 +43,11 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
   const queue: AdminQueue = QUEUES.some((q) => q.key === str("queue")) ? (str("queue") as AdminQueue) : "submitted";
   const source = SOURCE_ORDER.includes(str("source") as FundingSource) ? (str("source") as FundingSource) : null;
 
-  const [clubs, counts, overview, cfg] = await Promise.all([clubsWithRequests(), adminFundingCounts(), adminFundingOverview(user), getConfig()]);
+  const [clubs, counts, overview] = await Promise.all([clubsWithRequests(), adminFundingCounts(), adminFundingOverview(user)]);
   const clubId = clubs.some((c) => c.id === str("club")) ? str("club") : null;
   const { rows, total } = await adminFundingQueue(user, { queue, source, clubId });
 
-  const reviewDays = cfg["wsusa.office"].reviewDays;
+  const reviewDays = overview.reviewDays;
   const tabHref = (q: AdminQueue) => {
     const qs = new URLSearchParams();
     if (q !== "submitted") qs.set("queue", q);
@@ -64,7 +65,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
     <div className="space-y-6">
       <PageHeader
         title="Funding"
-        description="Clubs' funding requests come here for a decision. Approved requests get an invoice, and each invoice stays on your list until the money goes through in the university finance system."
+        description="Clubs' funding requests come here for a decision, whatever source they expect. Approve every line, part of them, or none, and record the source that funds it. Approving creates the invoice, which stays on your list until the money goes through in the university finance system."
         className="mb-0"
       />
 
@@ -74,8 +75,20 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
           value={overview.waiting.count}
           hint={overview.waiting.count ? `${fmtMoney(overview.waiting.cents)} requested${oldestDays ? ` · oldest ${plural(oldestDays, "day")}` : ""}` : "Nothing waiting"}
         />
-        <Stat label="Need an invoice" value={overview.needsInvoice} hint={overview.needsInvoice ? "Approved, no invoice yet" : "Every approval is invoiced"} />
-        <Stat label="Invoices open" value={overview.openInvoices.count} hint={overview.openInvoices.count ? `${fmtMoney(overview.openInvoices.cents)} to process` : "All processed"} />
+        <Stat
+          label="Past review time"
+          value={<span className={overview.waiting.pastReview ? "text-danger" : undefined}>{overview.waiting.pastReview}</span>}
+          hint={overview.waiting.pastReview ? `Waiting more than ${plural(reviewDays, "business day")}` : `None waiting more than ${plural(reviewDays, "business day")}`}
+        />
+        <Stat
+          label="Invoices open"
+          value={overview.openInvoices.count}
+          hint={
+            overview.openInvoices.count
+              ? `${fmtMoney(overview.openInvoices.cents)} to process${overview.openInvoices.pastDue ? ` · ${overview.openInvoices.pastDue} past due` : ""}`
+              : "All processed"
+          }
+        />
         <Stat
           label={overview.approvedThisTerm ? `Approved · ${overview.approvedThisTerm.termName}` : "Approved this semester"}
           value={<TileMoney cents={overview.approvedThisTerm?.cents ?? 0} />}
@@ -122,7 +135,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
         ) : queue === "submitted" ? (
           <EmptyState icon={<Inbox />} title="No requests waiting" description="When a club submits a funding request it shows up here, oldest first, and in your Tasks." />
         ) : queue === "approved" ? (
-          <EmptyState icon={<FileCheck2 />} title="Every approval is invoiced and processed" description="Approved requests show up here until their invoice is created and marked processed." />
+          <EmptyState icon={<FileCheck2 />} title="Every invoice is processed" description="Approving a request creates its invoice; the request shows up here until the invoice is marked processed." />
         ) : (
           <EmptyState icon={<Inbox />} title="No funding requests yet" description="Requests clubs submit from their Budget tool will be listed here." />
         )}

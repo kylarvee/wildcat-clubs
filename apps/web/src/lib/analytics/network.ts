@@ -142,8 +142,9 @@ export type NetworkNodeDetails =
       members: number;
       activeMembers: number;
       checkins: number;
-      /** Last complete month vs. the one before (lib/metrics clubListMetrics). */
+      /** Month RETENTION (lib/metrics clubListMetrics): its rate, and how it's shown ("Sep → Oct: 62% came back"). */
       retentionRate: number | null;
+      retentionLabel: string | null;
       standing: ClubStanding;
       windowLabel: string;
     }
@@ -205,6 +206,7 @@ async function buildNodeDetails(opts: { window: NetworkWindow; group: NetworkGro
       activeMembers: m?.activeMembers ?? 0,
       checkins: node.size,
       retentionRate: m?.retentionRate ?? null,
+      retentionLabel: m?.retention?.label ?? null,
       standing: m ? standingOf(m) : "inactive",
       windowLabel: base.windowLabel,
     };

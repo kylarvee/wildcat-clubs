@@ -1,5 +1,5 @@
 import type { ClubType, JoinPolicy, SuccessionMethod } from "@prisma/client";
-import { DEFAULT_SUCCESSION, isSuccessionMethod } from "@/lib/roles/pipeline";
+import { DEFAULT_SUCCESSION, isSuccessionMethod, type TieBreak } from "@/lib/roles/pipeline";
 import { CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/lib/labels/clubs";
 
 /**
@@ -12,6 +12,10 @@ import { CLUB_TYPE_LABEL, JOIN_POLICY_LABEL } from "@/lib/labels/clubs";
  * CORE sections are always included; MODULAR sections are opt-in. Field values
  * are shared across both documents (the constitution's Elections article reads
  * the bylaws' succession choice), keyed by field id.
+ *
+ * Honest by construction: a field Wildcat Clubs acts on says what it does
+ * (`applies`, read through lib/constitution/rules), and one it can't check
+ * says so (`clubEnforced`). The text only claims what the platform does.
  */
 
 export type DocKind = "constitution" | "bylaws";
@@ -29,6 +33,10 @@ export type FieldDef = {
   options?: ChoiceOption[];
   min?: number;
   max?: number;
+  /** What Wildcat Clubs does with the answer once the documents are adopted (shown under the field). */
+  applies?: string;
+  /** Written into the documents only: the club and WSUSA enforce it, Wildcat Clubs doesn't. */
+  clubEnforced?: boolean;
 };
 
 export type Block = { type: "p"; text: string } | { type: "list"; items: string[] };
@@ -101,7 +109,14 @@ export const SUCCESSION_OPTIONS: (ChoiceOption & { value: SuccessionMethod })[] 
   { value: "ADVISOR_PRESIDENT", label: "Advisor & President (recommended)", description: "The President or the advisor proposes the next leader, and the other confirms. No ballots." },
   { value: "NEXT_IN_LINE", label: "Next in line", description: "The people in the seats just below are asked to move up. The first in line who says yes takes the seat." },
   { value: "SELF_SELECT", label: "Self-select", description: "The current leaders choose by secret ballot, and the choice has to be unanimous." },
-  { value: "MEMBER_VOTE", label: "Member vote", description: "Active members elect leaders by secret ballot in Wildcat Clubs." },
+  { value: "MEMBER_VOTE", label: "Member vote", description: "Members elect leaders by secret ballot in Wildcat Clubs." },
+];
+
+/** How a tied member vote is settled (lib/roles/pipeline tieResolution). */
+export const TIE_BREAK_OPTIONS: (ChoiceOption & { value: TieBreak })[] = [
+  { value: "RUNOFF", label: "A runoff between the tied candidates" },
+  { value: "ADVISOR", label: "The advisor casts the deciding vote" },
+  { value: "PRESIDENT", label: "The President casts the deciding vote" },
 ];
 
 /** Values older drafts may still hold, mapped the way existing clubs were. */
@@ -203,7 +218,7 @@ const CONSTITUTION: SectionDef[] = [
     core: true,
     summary: "Who can join, non-discrimination, and whether leaders approve join requests.",
     fields: [
-      { id: "joinPolicy", label: "How students join", type: "choice", required: true, default: "OPEN", options: JOIN_OPTIONS, hint: "Wildcat Clubs applies this to your club's Register button when you adopt the documents." },
+      { id: "joinPolicy", label: "How students join", type: "choice", required: true, default: "OPEN", options: JOIN_OPTIONS, applies: "Your club's Register button follows it as soon as you adopt the documents." },
       { id: "membershipNotes", label: "Anything else about membership (optional)", type: "textarea", default: "" },
     ],
     body: (c) => [
@@ -222,7 +237,7 @@ const CONSTITUTION: SectionDef[] = [
     core: false,
     summary: "Charge membership dues, with an optional hardship waiver.",
     fields: [
-      { id: "duesAmount", label: "Dues", type: "text", required: true, default: "$10 per semester" },
+      { id: "duesAmount", label: "Dues", type: "text", required: true, default: "$10 per semester", clubEnforced: true },
       {
         id: "duesWaiver",
         label: "Hardship waivers",
@@ -316,13 +331,22 @@ const CONSTITUTION: SectionDef[] = [
     summary: "The club's WSU faculty or staff advisor and how the club works with them.",
     fields: [
       { id: "advisorMeetings", label: "Leaders meet with the advisor…", type: "text", required: true, default: "at least once each semester" },
-      { id: "advisorReplaceDays", label: "Days to find a new advisor if one leaves", type: "number", required: true, default: "30", min: 1, max: 180 },
+      {
+        id: "advisorReplaceDays",
+        label: "Days to find a new advisor if one leaves",
+        type: "number",
+        required: true,
+        default: "30",
+        min: 1,
+        max: 180,
+        applies: "If your club loses its last advisor, Wildcat Clubs tells WSUSA, and WSUSA's follow-up is due this many days later.",
+      },
     ],
     body: (c) => [
       "The Club has at least one advisor who is a WSU faculty or staff member. Advisors are invited by name and @weber.edu email through Wildcat Clubs and become advisors when they accept.",
       "The advisor guides the Club's leaders, helps the Club follow WSU policy, reviews budgets and funding requests, and has full access to the Club's tools in Wildcat Clubs. Advisors do not vote in Club elections, but they share decisions about succession with the President as the Bylaws describe.",
       `The leaders meet with the advisor ${clause(c.v("advisorMeetings"))}.`,
-      `If the Club loses its advisor, the leaders invite a new one within ${c.v("advisorReplaceDays")} days.`,
+      `If the Club loses its advisor, the leaders invite a new one within ${c.v("advisorReplaceDays")} days. Wildcat Clubs tells WSUSA when the Club's last advisor leaves, and WSUSA follows up if the Club still has none after those ${c.v("advisorReplaceDays")} days.`,
     ],
   },
   {
@@ -418,9 +442,9 @@ const CONSTITUTION: SectionDef[] = [
     title: "Officer Requirements",
     core: true,
     summary: "Eligibility for leaders and the university trainings and tests tied to their roles.",
-    fields: [{ id: "minGpa", label: "Minimum cumulative GPA for leaders", type: "text", required: true, default: "2.0" }],
+    fields: [{ id: "minGpa", label: "Minimum cumulative GPA for leaders", type: "text", required: true, default: "2.0", clubEnforced: true }],
     body: (c) => [
-      `Leaders must be currently enrolled WSU students in good academic and conduct standing, with a cumulative GPA of at least ${c.v("minGpa")} (or any higher minimum WSUSA sets).`,
+      `Leaders must be currently enrolled WSU students in good academic and conduct standing, with a cumulative GPA of at least ${c.v("minGpa")} (or any higher minimum WSUSA sets). Wildcat Clubs doesn't see grades, so the Club and WSUSA check this.`,
       "Officers, Vice Presidents and Presidents complete the trainings and tests WSU and WSUSA assign to their roles in Wildcat Clubs within the time allowed. If a requirement becomes overdue, the leader keeps their title, but their Wildcat Clubs permissions pause until it is complete.",
     ],
   },
@@ -500,13 +524,10 @@ const CONSTITUTION: SectionDef[] = [
     title: "Amendments",
     core: true,
     summary: "How the Constitution and Bylaws change, and when WSUSA approval is needed.",
-    fields: [
-      { id: "amendmentVote", label: "Amendments pass with…", type: "choice", default: "TWO_THIRDS_MEMBERS", options: MEMBER_VOTE_OPTIONS },
-      { id: "noticeDays", label: "Days of notice before an amendment vote", type: "number", required: true, default: "7", min: 1, max: 60 },
-    ],
+    fields: [{ id: "amendmentVote", label: "Amendments pass with…", type: "choice", default: "TWO_THIRDS_MEMBERS", options: MEMBER_VOTE_OPTIONS, clubEnforced: true }],
     body: (c) => [
-      `Any member may propose an amendment. Proposed amendments are shared with the members at least ${c.v("noticeDays")} days before the vote and pass when approved by ${voteText(c.raw("amendmentVote") || "TWO_THIRDS_MEMBERS")}. The Bylaws are amended the same way.`,
-      "Amendments are made in the Wildcat Clubs Constitution Builder and take effect when the new version is adopted for the Club. A constitution or bylaws not made with the builder (a custom document) takes effect only after WSUSA approves it.",
+      `Any member may propose an amendment. Proposed amendments are shared with the members at least ${c.v("noticeDays")} days before the vote (the notice the Bylaws give for every vote) and pass when approved by ${voteText(c.raw("amendmentVote") || "TWO_THIRDS_MEMBERS")}. The Bylaws are amended the same way.`,
+      "The Club holds amendment votes itself; Wildcat Clubs doesn't run them. Once an amendment passes, a leader with the Constitution permission adopts the new version in the Wildcat Clubs Constitution Builder, and it takes effect then. A constitution or bylaws not made with the builder (a custom document) takes effect only after WSUSA approves it.",
       "WSUSA may require changes needed to comply with WSU policy.",
     ],
   },
@@ -543,7 +564,7 @@ const METHOD_SUMMARY: Record<SuccessionMethod, string> = {
   ADVISOR_PRESIDENT: "Advisor & President: the President or the advisor proposes one candidate, and the other confirms.",
   NEXT_IN_LINE: "Next in line: the people in the seats just below are asked whether they will move up, and the first in line who says yes takes the seat.",
   SELF_SELECT: "Self-select: the current leaders choose by secret ballot, and the choice counts only if it is unanimous.",
-  MEMBER_VOTE: "Member vote: active members elect the leader by secret ballot.",
+  MEMBER_VOTE: "Member vote: members elect the leader by secret ballot, as Voting Procedures describes.",
 };
 
 /** How the primary method works, in full. */
@@ -560,7 +581,7 @@ const METHOD_DETAIL: Record<SuccessionMethod, string[]> = {
     "The choice counts only if it is unanimous: every leader other than the person chosen votes, and all for that person. If the leaders don't agree, they choose again or the seat is filled by one of the other methods.",
   ],
   MEMBER_VOTE: [
-    "The Club's primary method is Member vote. Active members elect leaders by secret ballot in the Wildcat Clubs elections tool. Any active member may run, including by nominating themselves, if they meet the leader requirements in the Constitution.",
+    "The Club's primary method is Member vote. Members elect leaders by secret ballot in the Wildcat Clubs elections tool, as Voting Procedures describes. Any active member may run, including by nominating themselves. Candidates must meet the leader requirements in the Constitution, which the Club checks.",
     "The candidate with the most votes wins, subject to Voting Procedures.",
   ],
 };
@@ -578,6 +599,13 @@ function successionBlocks(raw: string): BodyItem[] {
     list(SUCCESSION_OPTIONS.filter((o) => o.value !== method).map((o) => METHOD_SUMMARY[o.value])),
     "However a seat is filled, the people on the Club's org chart below it are considered first: they become candidates automatically, and any of them may decline. The result takes effect when it is recorded in the Club's org chart in Wildcat Clubs.",
   ];
+}
+
+/** Voting Procedures on ties, for each choice (lib/roles/pipeline tieResolution is the same rule). */
+function tieText(raw: string): string {
+  if (raw === "ADVISOR") return "If a vote ends in a tie, the advisor casts the deciding vote (the President does if the Club has no advisor). For member votes, Wildcat Clubs lets only them settle the tie.";
+  if (raw === "PRESIDENT") return "If a vote ends in a tie, the President casts the deciding vote. If the President is one of the tied candidates, or the Club has no President, the advisor does. For member votes, Wildcat Clubs lets only them settle the tie.";
+  return "If a vote ends in a tie, a runoff is held between the tied candidates. If the runoff also ties, the advisor casts the deciding vote (the President does if the Club has no advisor). For member votes, Wildcat Clubs runs the runoff.";
 }
 
 const BYLAWS: SectionDef[] = [
@@ -607,7 +635,8 @@ const BYLAWS: SectionDef[] = [
         required: true,
         default: DEFAULT_SUCCESSION,
         options: SUCCESSION_OPTIONS,
-        hint: "Name one primary method. Wildcat Clubs starts every selection with it once you adopt the documents, and the President and advisor may use any of the other methods for a particular seat at their discretion.",
+        hint: "Name one primary method. The President and advisor may use any of the other methods for a particular seat at their discretion.",
+        applies: "Every selection starts with this method once you adopt the documents.",
       },
     ],
     body: (c) => successionBlocks(c.raw("successionMethod")),
@@ -623,6 +652,7 @@ const BYLAWS: SectionDef[] = [
         label: "Leaders serve…",
         type: "choice",
         default: "ACADEMIC_YEAR",
+        clubEnforced: true,
         options: [
           { value: "ACADEMIC_YEAR", label: "One academic year" },
           { value: "SEMESTER", label: "One semester" },
@@ -649,11 +679,23 @@ const BYLAWS: SectionDef[] = [
     title: "Vacancies",
     core: true,
     summary: "Filling a seat when a leader leaves early.",
-    fields: [{ id: "vacancyDays", label: "Days to fill an officer vacancy", type: "number", required: true, default: "14", min: 1, max: 90 }],
+    fields: [
+      {
+        id: "vacancyDays",
+        label: "Days to fill a vacant seat",
+        type: "number",
+        required: true,
+        default: "14",
+        min: 1,
+        max: 90,
+        applies: "If your club is left without a President, Wildcat Clubs tells WSUSA, and WSUSA's follow-up is due this many days later.",
+      },
+    ],
     body: (c) => [
       "If the President's seat is vacant, the Vice President serves as acting President until it is filled under Succession Method.",
-      `If another seat is vacant, it is filled under Succession Method within ${c.v("vacancyDays")} days. Until then, the President may ask another leader to cover its duties.`,
+      `A vacant seat is filled under Succession Method within ${c.v("vacancyDays")} days. Until then, the President may ask another leader to cover its duties.`,
       "If both the President's and the Vice President's seats are vacant, the advisor appoints an interim President and lets WSUSA know.",
+      `When the Club is left without a President, Wildcat Clubs tells WSUSA, and WSUSA follows up if the seat is still empty after ${c.v("vacancyDays")} days.`,
     ],
   },
   {
@@ -667,6 +709,7 @@ const BYLAWS: SectionDef[] = [
         label: "Removing a leader requires…",
         type: "choice",
         default: "TWO_THIRDS_LEADERS",
+        clubEnforced: true,
         options: [
           { value: "TWO_THIRDS_LEADERS", label: "Two-thirds of the other leaders" },
           { value: "TWO_THIRDS_MEMBERS", label: "Two-thirds of active members voting" },
@@ -677,7 +720,7 @@ const BYLAWS: SectionDef[] = [
     body: (c) => [
       "A leader may be removed for neglecting their duties, violating the Constitution, these Bylaws or WSU policy, or misusing Club funds or accounts.",
       "Any member may raise a concern with the President or the advisor (or, if the concern is about the President, with the Vice President and the advisor). The leader receives the concern in writing and has at least seven days to respond before any vote.",
-      `Removal requires ${{ TWO_THIRDS_LEADERS: "a vote of two-thirds of the other leaders", TWO_THIRDS_MEMBERS: "a vote of two-thirds of active members voting", ADVISOR_LEADERS: "the agreement of the advisor and a majority of the other leaders" }[c.raw("removalVote") as "TWO_THIRDS_LEADERS"] ?? "a vote of two-thirds of the other leaders"}, held by secret ballot in Wildcat Clubs where a vote is needed. The person being removed does not vote. Removal takes effect when it is recorded in the org chart, and the seat is then filled under Vacancies.`,
+      `Removal requires ${{ TWO_THIRDS_LEADERS: "a vote of two-thirds of the other leaders", TWO_THIRDS_MEMBERS: "a vote of two-thirds of active members voting", ADVISOR_LEADERS: "the agreement of the advisor and a majority of the other leaders" }[c.raw("removalVote") as "TWO_THIRDS_LEADERS"] ?? "a vote of two-thirds of the other leaders"}. Where a vote is needed, it is held by secret ballot as the leaders arrange (Wildcat Clubs doesn't run removal votes), and the person being removed does not vote. Removal takes effect when it is recorded in the org chart, and the seat is then filled under Vacancies.`,
       "The advisor or WSUSA may remove a leader immediately for a serious violation of WSU policy.",
     ],
   },
@@ -687,27 +730,44 @@ const BYLAWS: SectionDef[] = [
     core: true,
     summary: "Secret ballots in the platform, quorum and ties.",
     fields: [
-      { id: "quorumPercent", label: "Quorum (% of eligible voters who must vote)", type: "number", required: true, default: "25", min: 1, max: 100 },
-      { id: "votingDays", label: "Days a vote stays open", type: "number", required: true, default: "3", min: 1, max: 30 },
+      {
+        id: "quorumPercent",
+        label: "Quorum (% of eligible voters who must vote)",
+        type: "number",
+        required: true,
+        default: "25",
+        min: 1,
+        max: 100,
+        applies: "If fewer eligible voters take part in a member vote, nobody wins: the vote shows “No quorum,” and your leaders hold it again or fill the seat another way.",
+      },
+      { id: "votingDays", label: "Days a vote stays open", type: "number", required: true, default: "3", min: 1, max: 30, applies: "It's the voting window Wildcat Clubs suggests when a leader sets up a vote. They can change it." },
+      {
+        id: "noticeDays",
+        label: "Days of notice before a vote",
+        type: "number",
+        required: true,
+        default: "7",
+        min: 1,
+        max: 60,
+        hint: "For member votes and amendment votes.",
+        applies: "A member vote can't open sooner than this many days after it's announced. Amendment votes happen outside Wildcat Clubs, so your club gives that notice itself.",
+      },
       {
         id: "tieBreak",
         label: "Breaking a tie",
         type: "choice",
         default: "RUNOFF",
-        options: [
-          { value: "RUNOFF", label: "A runoff between the tied candidates" },
-          { value: "ADVISOR", label: "The advisor casts the deciding vote" },
-        ],
+        options: TIE_BREAK_OPTIONS,
+        applies: "A tied member vote goes to a runoff, or only the person named here can settle it when the result is applied.",
       },
     ],
     body: (c) => [
-      "Club votes on leadership, removal and amendments are held in Wildcat Clubs by secret ballot. Each eligible voter casts one vote, and no one — including leaders and the advisor — can see how an individual voted.",
-      `Eligible voters are active members${c.has("voteAttendance") ? " who meet the Attendance Requirement to Vote" : ""}, except where these Bylaws give a vote to the leaders.`,
-      `A vote stays open for at least ${c.v("votingDays")} days and counts only if at least ${c.v("quorumPercent")}% of eligible voters take part. If a vote misses quorum, it is held once more, and the second vote needs no quorum.`,
-      c.raw("tieBreak") === "ADVISOR"
-        ? "If a vote ends in a tie, the advisor casts the deciding vote."
-        : "If a vote ends in a tie, a runoff is held between the tied candidates. If the runoff also ties, the advisor decides.",
-      "Results are announced to the members and applied in Wildcat Clubs.",
+      "Votes on leadership are held in Wildcat Clubs by secret ballot. Each eligible voter casts one vote, and no one — including leaders and the advisor — can see how an individual voted. Votes on removal and amendments are held by secret ballot as the leaders arrange; Wildcat Clubs doesn't run them.",
+      `Eligible voters are ${c.has("voteAttendance") ? "members who meet the Attendance Requirement to Vote" : "active members"}, except where these Bylaws give a vote to the leaders.`,
+      `A vote is announced at least ${c.v("noticeDays")} days before voting opens and normally stays open for ${c.v("votingDays")} days. For member votes, Wildcat Clubs won't open voting before the notice is up, and it suggests that window when leaders set up a vote.`,
+      `A vote counts only if at least ${c.v("quorumPercent")}% of eligible voters take part. Wildcat Clubs checks this when a member vote closes: if too few voted, nobody wins, and the leaders hold the vote again or fill the seat another way under Succession Method.`,
+      tieText(c.raw("tieBreak")),
+      "Results appear on the Club's elections page in Wildcat Clubs and take effect when they are applied to the org chart.",
     ],
   },
   {
@@ -715,9 +775,20 @@ const BYLAWS: SectionDef[] = [
     title: "Attendance Requirement to Vote",
     core: false,
     summary: "Require a minimum number of events attended to vote.",
-    fields: [{ id: "voteMinEvents", label: "Club events attended this semester to vote", type: "number", required: true, default: "2", min: 1, max: 20 }],
+    fields: [
+      {
+        id: "voteMinEvents",
+        label: "Club events attended this semester to vote",
+        type: "number",
+        required: true,
+        default: "2",
+        min: 1,
+        max: 20,
+        applies: "When a member vote opens, Wildcat Clubs counts each member's check-ins at club events this semester. Only members with enough can vote, and each member sees whether they can and why.",
+      },
+    ],
     body: (c) => [
-      `To vote in Club elections and amendment votes, a member must have attended at least ${c.v("voteMinEvents")} Club events in the current semester, as shown in the Club's Wildcat Clubs attendance records. Eligibility is checked when the vote opens.`,
+      `To vote in Club elections and amendment votes, a member must have attended at least ${c.v("voteMinEvents")} Club events in the current semester, as shown in the Club's Wildcat Clubs attendance records. For member votes, Wildcat Clubs counts them when voting opens and shows each member whether they can vote; for amendment votes, the leaders check.`,
     ],
   },
   {
@@ -828,6 +899,22 @@ export const DOC_LABEL: Record<DocKind, string> = { constitution: "Constitution"
 
 /** Every field across both documents, by id (ids are unique across documents). */
 export const FIELDS: Map<string, FieldDef> = new Map([...CONSTITUTION, ...BYLAWS].flatMap((s) => s.fields.map((f) => [f.id, f] as const)));
+
+/** The document and section that ask each field. */
+const FIELD_HOME: Map<string, { doc: DocKind; section: SectionDef }> = new Map(
+  (["constitution", "bylaws"] as DocKind[]).flatMap((doc) => SECTIONS[doc].flatMap((section) => section.fields.map((f) => [f.id, { doc, section }] as const))),
+);
+
+/** Which document asks this field (so its answer is read from that document's answers). */
+export function fieldDoc(id: string): DocKind | null {
+  return FIELD_HOME.get(id)?.doc ?? null;
+}
+
+/** Whether the field's section is in the documents: core, or an optional section that's turned on. */
+export function fieldIncluded(data: DraftData, id: string): boolean {
+  const home = FIELD_HOME.get(id);
+  return Boolean(home && (home.section.core || data.modules[home.doc].includes(home.section.id)));
+}
 
 // ─── Draft data ──────────────────────────────────────────────────────────────
 

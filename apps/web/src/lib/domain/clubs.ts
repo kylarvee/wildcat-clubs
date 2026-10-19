@@ -439,7 +439,6 @@ export async function setClubGoogleAccountVerified(actor: Actor | null, input: u
       title: `WSUSA verified ${club.name}'s Google account`,
       body: "When Google sync is on, the club's Drive, Calendar and Chat copies run as this account.",
       href: `/clubs/${club.slug}/manage/settings`,
-      email: false,
     });
   }
   return { verified: v.verified };
@@ -601,7 +600,6 @@ export async function submitForReview(actor: Actor | null, clubId: string) {
     title: `${club.name} is with WSUSA for review`,
     body: `${actor!.name} submitted the club. You'll hear back when WSUSA decides.`,
     href: `/clubs/${club.slug}/manage`,
-    email: false,
   });
   return { slug: club.slug };
 }
@@ -713,7 +711,6 @@ export async function addDepartmentForClub(actor: Actor | null, clubId: string, 
     kind: "club.department_added",
     title: `${department.name} is now ${club.name}'s department`,
     href: `/clubs/${club.slug}/manage/profile`,
-    email: false,
   });
   return department;
 }

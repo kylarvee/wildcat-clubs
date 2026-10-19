@@ -1,5 +1,5 @@
 import "server-only";
-import type { ClubDocumentKind, JoinPolicy, SuccessionMethod } from "@prisma/client";
+import type { ClubDocumentKind, JoinPolicy, Prisma, SuccessionMethod } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
@@ -8,18 +8,25 @@ import { clubsWhereUserHolds } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
-import { notifyAdmins, notifyClubCapability } from "@/lib/domain/notify";
+import { notify, notifyAdmins, notifyClubCapability } from "@/lib/domain/notify";
 import { checkUpload, ensureClubFolder, parseForm, slugify, storeClubFile } from "@/lib/domain/clubs";
 import { defaultDraftData, draftProblems, joinPolicyOf, normalizeDraftData, successionOf, type ClubFacts, type DocKind, type DraftData } from "@/lib/constitution/templates";
 import { docToHtml, EMPTY_FACTS, renderDoc } from "@/lib/constitution/render";
 import { renderConstitutionPdf } from "@/lib/constitution/pdf";
+import { currentBuilderAnswers } from "@/lib/constitution/club-rules";
+import { governedSetting, settingsChange, settingsChangeNotice, type ChangeVia, type SettingsChange } from "@/lib/constitution/rules";
 
 /**
  * Constitution & bylaws. Drafts belong to a person (one founder may run
  * several clubs); adopting a draft for a club renders both PDFs into the
- * club's files, makes them the ACTIVE documents, and auto-implements the
- * settings they decide (join policy, succession method). Custom uploads wait
- * for WSUSA approval and only then take effect.
+ * club's files, makes them the ACTIVE documents (each keeps the answers it
+ * was made from, so any later leader can amend it), and auto-implements the
+ * settings they decide (join policy, succession method). The bylaw rules
+ * the engines follow are read from those kept answers (lib/constitution/
+ * club-rules). Custom uploads wait for WSUSA approval and only then take
+ * effect, setting only what that kind of document governs. Whenever either
+ * changes who can join or how seats are filled, the club's members and
+ * WSUSA are told.
  */
 
 export const CONSTITUTION_FOLDER = "Constitution & Bylaws";
@@ -69,13 +76,17 @@ const CreateDraftInput = z.object({
   title: z.string().trim().max(120, "Keep the title under 120 characters.").nullish(),
   clubId: z.string().trim().max(64).nullish(),
   fromDraftId: z.string().trim().max(64).nullish(),
+  /** With clubId: start from the answers behind the club's builder documents in effect. */
+  fromCurrent: z.boolean().nullish(),
 });
 
 /**
  * Starts a draft. With a club, it's pre-filled from the club's current
- * settings; with `fromDraftId`, it copies a draft the person owns or one
- * behind a document in effect at a club they can amend (so a new president
- * can amend what the last one adopted).
+ * settings. With `fromCurrent`, it starts from the answers behind the club's
+ * documents in effect (kept with them, or for older adoptions the draft they
+ * came from), so any leader with the Constitution permission can amend what
+ * a predecessor adopted. With `fromDraftId`, it copies a draft the person
+ * owns or one behind a document at a club they can amend.
  */
 export async function createDraft(actor: Actor | null, input: unknown) {
   assertSignedIn(actor);
@@ -87,7 +98,13 @@ export async function createDraft(actor: Actor | null, input: unknown) {
     if (!club) throw notFound("Club");
   }
   let data: DraftData = defaultDraftData({ joinPolicy: club?.joinPolicy, successionMethod: club?.successionMethod, previewClubId: club?.id ?? null });
-  if (v.fromDraftId) {
+  if (v.fromCurrent) {
+    if (!club) throw invalid("Choose the club whose documents you're amending.");
+    const current = await currentBuilderAnswers(club.id);
+    if (!current) throw notFound("Builder documents in effect");
+    // The club's current settings win, as below (a custom document may have changed one since).
+    data = { ...current.data, previewClubId: club.id, fields: { ...current.data.fields, joinPolicy: club.joinPolicy, successionMethod: club.successionMethod } };
+  } else if (v.fromDraftId) {
     const source = await db.constitutionDraft.findUnique({ where: { id: v.fromDraftId }, include: { documents: { select: { clubId: true } } } });
     if (!source) throw notFound("Draft");
     let allowed = source.ownerId === actor.id;
@@ -103,7 +120,7 @@ export async function createDraft(actor: Actor | null, input: unknown) {
   const draft = await db.constitutionDraft.create({
     data: { ownerId: actor.id, title: v.title || (club ? `${club.name} — constitution & bylaws` : "My constitution & bylaws"), data, successionMethod: successionOf(data) },
   });
-  await logActivity({ actorId: actor.id, action: "constitution.draft_created", entityType: "constitutionDraft", entityId: draft.id, clubId: club?.id ?? null });
+  await logActivity({ actorId: actor.id, action: "constitution.draft_created", entityType: "constitutionDraft", entityId: draft.id, clubId: club?.id ?? null, data: v.fromCurrent ? { fromCurrent: true } : undefined });
   return draft;
 }
 
@@ -147,11 +164,37 @@ async function nextVersion(clubId: string, kind: ClubDocumentKind) {
   return (last._max.version ?? 0) + 1;
 }
 
+/** The answers a builder document keeps (ClubDocument.builderAnswers): the draft's sections and fill-ins, without whose preview it was. */
+function keptAnswers(data: DraftData): Prisma.InputJsonValue {
+  return { ...data, previewClubId: null } as unknown as Prisma.InputJsonValue;
+}
+
+/**
+ * When adopting, or WSUSA approving a custom document, changes who can join
+ * or how seats are filled: logged, and the club's members and WSUSA's
+ * administrators are told in-app (admins also in their daily digest).
+ */
+async function announceSettingsChange(actor: Actor, club: { id: string; name: string; slug: string }, change: SettingsChange, via: ChangeVia) {
+  await logActivity({
+    actorId: actor.id,
+    action: "constitution.settings_changed",
+    entityType: "club",
+    entityId: club.id,
+    clubId: club.id,
+    data: { via: via.kind, joinPolicy: change.joinPolicy, successionMethod: change.successionMethod },
+  });
+  const notice = settingsChangeNotice(club.name, change, via);
+  const members = await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE" }, select: { userId: true } });
+  await notify({ userIds: members.map((m) => m.userId), exceptUserId: actor.id, kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/clubs/${club.slug}` });
+  await notifyAdmins({ kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/admin/clubs/${club.id}`, exceptUserId: actor.id });
+}
+
 /**
  * Adopt a draft for one or more clubs. For each club: both PDFs go into the
  * club's "Constitution & Bylaws" folder (public), become the ACTIVE documents
- * (previous ones SUPERSEDED, pending custom uploads withdrawn), and the club's
- * join policy and succession method follow the draft.
+ * (previous ones SUPERSEDED, pending custom uploads withdrawn) keeping the
+ * answers they were made from, and the club's join policy and succession
+ * method follow the draft. A change to either is announced.
  */
 export async function adoptDraft(actor: Actor | null, input: unknown): Promise<AdoptResult[]> {
   assertSignedIn(actor);
@@ -191,7 +234,7 @@ export async function adoptDraft(actor: Actor | null, input: unknown): Promise<A
       await db.$transaction(async (tx) => {
         await tx.clubDocument.updateMany({ where: { clubId, kind: docKind, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } }, data: { status: "SUPERSEDED", decidedAt: now } });
         await tx.clubDocument.create({
-          data: { clubId, kind: docKind, title: KIND_LABEL[docKind], version, source: "BUILDER", status: "ACTIVE", draftId: draft.id, contentHtml: docToHtml(rendered), fileId: file.id, createdById: actor.id, decidedAt: now },
+          data: { clubId, kind: docKind, title: KIND_LABEL[docKind], version, source: "BUILDER", status: "ACTIVE", draftId: draft.id, contentHtml: docToHtml(rendered), builderAnswers: keptAnswers(draft.data), fileId: file.id, createdById: actor.id, decidedAt: now },
         });
         for (const w of withdrawn) await resolveTasks("clubDocument", w.id, actor.id, tx, "CANCELLED");
       });
@@ -214,8 +257,9 @@ export async function adoptDraft(actor: Actor | null, input: unknown): Promise<A
       body: `${actor.name} adopted version ${versions.constitution} of the constitution and version ${versions.bylaws} of the bylaws.`,
       href: `/clubs/${club.slug}/manage/constitution`,
       exceptUserId: actor.id,
-      email: false,
     });
+    const change = settingsChange(club, { joinPolicy, successionMethod });
+    if (change) await announceSettingsChange(actor, club, change, { kind: "adopted", by: actor.name });
     results.push({ clubId, name: club.name, slug: club.slug, constitutionVersion: versions.constitution, bylawsVersion: versions.bylaws });
   }
   return results;
@@ -225,19 +269,27 @@ export async function adoptDraft(actor: Actor | null, input: unknown): Promise<A
 
 const CUSTOM_EXTENSIONS = /\.(pdf|docx?)$/i;
 
-const CustomInput = z.object({
-  clubId: z.string().trim().min(1),
-  kind: z.enum(["CONSTITUTION", "BYLAWS"], { error: "Choose constitution or bylaws." }),
-  title: z.string().trim().max(120, "Keep the title under 120 characters.").nullish(),
-  successionMethod: z.enum(["ADVISOR_PRESIDENT", "NEXT_IN_LINE", "SELF_SELECT", "MEMBER_VOTE"], { error: "Choose your document's primary way of picking the next leaders." }),
-  joinPolicy: z.enum(["OPEN", "APPROVAL"], { error: "Choose how students join under your document." }),
-  note: z.string().trim().max(2000, "Keep the note under 2,000 characters.").nullish(),
-});
+/** Each kind of document states only the setting it governs: a constitution how students join, bylaws how leaders are chosen. The other answer is ignored. */
+const CustomInput = z
+  .object({
+    clubId: z.string().trim().min(1),
+    kind: z.enum(["CONSTITUTION", "BYLAWS"], { error: "Choose constitution or bylaws." }),
+    title: z.string().trim().max(120, "Keep the title under 120 characters.").nullish(),
+    successionMethod: z.enum(["ADVISOR_PRESIDENT", "NEXT_IN_LINE", "SELF_SELECT", "MEMBER_VOTE"], { error: "Choose your bylaws' primary way of picking the next leaders." }).nullish(),
+    joinPolicy: z.enum(["OPEN", "APPROVAL"], { error: "Choose how students join under your constitution." }).nullish(),
+    note: z.string().trim().max(2000, "Keep the note under 2,000 characters.").nullish(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.kind === "BYLAWS" && !v.successionMethod) ctx.addIssue({ code: "custom", path: ["successionMethod"], message: "Choose your bylaws' primary way of picking the next leaders." });
+    if (v.kind === "CONSTITUTION" && !v.joinPolicy) ctx.addIssue({ code: "custom", path: ["joinPolicy"], message: "Choose how students join under your constitution." });
+  });
 
 /**
  * Uploads a custom constitution or bylaws for WSUSA review. The club states
- * the succession method and join policy the document sets; both are applied
- * when WSUSA approves. Current documents stay in effect until then.
+ * the one setting that document governs (a constitution: how students join;
+ * bylaws: the primary way leaders are chosen), applied when WSUSA approves.
+ * Current documents stay in effect until then, so a pending upload never
+ * changes who can join or how seats are filled.
  */
 export async function submitCustomDocument(actor: Actor | null, input: { file: { name: string; mimeType?: string | null; bytes: Buffer } } & Record<string, unknown>) {
   assertSignedIn(actor);
@@ -245,6 +297,9 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
   await assertClubCap(actor, v.clubId, "constitution");
   checkUpload(input.file, CUSTOM_EXTENSIONS, "Upload your document as a PDF or Word file.");
   const club = await db.club.findUniqueOrThrow({ where: { id: v.clubId }, select: { id: true, name: true, slug: true } });
+  const governs = governedSetting(v.kind);
+  const statedSuccessionMethod = governs === "successionMethod" ? (v.successionMethod ?? null) : null;
+  const statedJoinPolicy = governs === "joinPolicy" ? (v.joinPolicy ?? null) : null;
   const pending = await db.clubDocument.findFirst({ where: { clubId: club.id, kind: v.kind, status: "PENDING_APPROVAL" } });
   if (pending) throw conflict(`Your custom ${KIND_LABEL[v.kind].toLowerCase()} is already waiting for WSUSA. Withdraw it first to upload a new one.`);
 
@@ -260,8 +315,8 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
       version: 0,
       source: "CUSTOM_UPLOAD",
       status: "PENDING_APPROVAL",
-      statedSuccessionMethod: v.successionMethod ?? null,
-      statedJoinPolicy: v.joinPolicy ?? null,
+      statedSuccessionMethod,
+      statedJoinPolicy,
       note: v.note ?? null,
       fileId: file.id,
       createdById: actor.id,
@@ -277,7 +332,7 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
     source: { type: "clubDocument", id: doc.id },
     createdById: actor.id,
   });
-  await logActivity({ actorId: actor.id, action: "constitution.custom_submitted", entityType: "clubDocument", entityId: doc.id, clubId: club.id, data: { kind: v.kind, successionMethod: v.successionMethod, joinPolicy: v.joinPolicy, note: v.note ?? null } });
+  await logActivity({ actorId: actor.id, action: "constitution.custom_submitted", entityType: "clubDocument", entityId: doc.id, clubId: club.id, data: { kind: v.kind, successionMethod: statedSuccessionMethod, joinPolicy: statedJoinPolicy, note: v.note ?? null } });
   await notifyAdmins({
     kind: "constitution.custom_submitted",
     title: `${club.name} uploaded a custom ${KIND_LABEL[v.kind].toLowerCase()} for approval`,
@@ -288,10 +343,21 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
   return doc;
 }
 
-/** The succession method / join policy a club stated when it uploaded a custom document. */
-export async function statedSettings(docId: string): Promise<{ successionMethod: SuccessionMethod | null; joinPolicy: JoinPolicy | null; note: string | null }> {
-  const d = await db.clubDocument.findUnique({ where: { id: docId }, select: { statedSuccessionMethod: true, statedJoinPolicy: true, note: true } });
-  return { successionMethod: d?.statedSuccessionMethod ?? null, joinPolicy: d?.statedJoinPolicy ?? null, note: d?.note ?? null };
+/**
+ * What a club stated its custom document sets, limited to what that kind of
+ * document governs (`governs`): a constitution's join policy, or bylaws'
+ * succession method. The other is always null, even on an older upload that
+ * stated both, so approving bylaws never changes who can join.
+ */
+export async function statedSettings(docId: string): Promise<{ governs: "joinPolicy" | "successionMethod" | null; successionMethod: SuccessionMethod | null; joinPolicy: JoinPolicy | null; note: string | null }> {
+  const d = await db.clubDocument.findUnique({ where: { id: docId }, select: { kind: true, statedSuccessionMethod: true, statedJoinPolicy: true, note: true } });
+  const governs = d ? governedSetting(d.kind) : null;
+  return {
+    governs,
+    successionMethod: governs === "successionMethod" ? (d?.statedSuccessionMethod ?? null) : null,
+    joinPolicy: governs === "joinPolicy" ? (d?.statedJoinPolicy ?? null) : null,
+    note: d?.note ?? null,
+  };
 }
 
 export async function withdrawCustomDocument(actor: Actor | null, docId: string) {
@@ -308,11 +374,11 @@ const DecideDocInput = z
   .object({ docId: z.string().trim().min(1), approve: z.boolean(), note: z.string().trim().max(2000, "Keep the note under 2,000 characters.").nullish() })
   .refine((v) => v.approve || Boolean(v.note), "Add a note so the club knows what to fix.");
 
-/** WSUSA approves (it takes effect, settings apply) or rejects a custom document. */
+/** WSUSA approves (it takes effect, the setting it governs applies, and a change is announced) or rejects a custom document. */
 export async function decideCustomDocument(actor: Actor | null, input: unknown) {
   assertCan(actor, "admin.clubs");
   const v = parseForm(DecideDocInput, input);
-  const doc = await db.clubDocument.findUnique({ where: { id: v.docId }, include: { club: { select: { id: true, name: true, slug: true } } } });
+  const doc = await db.clubDocument.findUnique({ where: { id: v.docId }, include: { club: { select: { id: true, name: true, slug: true, joinPolicy: true, successionMethod: true } } } });
   if (!doc || doc.kind === "OTHER") throw notFound("Document");
   if (doc.status !== "PENDING_APPROVAL") throw conflict("This document was already decided or withdrawn.");
   const stated = await statedSettings(doc.id);
@@ -344,5 +410,7 @@ export async function decideCustomDocument(actor: Actor | null, input: unknown) 
     body: v.note ?? (v.approve ? "It's now in effect, and your club settings follow it." : undefined),
     href: `/clubs/${doc.club.slug}/manage/constitution`,
   });
+  const change = v.approve ? settingsChange(doc.club, { joinPolicy: stated.joinPolicy ?? undefined, successionMethod: stated.successionMethod ?? undefined }) : null;
+  if (change) await announceSettingsChange(actor!, doc.club, change, { kind: "custom", doc: doc.kind });
 }
 

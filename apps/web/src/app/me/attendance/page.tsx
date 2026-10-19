@@ -4,11 +4,12 @@ import { CalendarCheck2, Compass, KeyRound, Star } from "lucide-react";
 import type { CheckInMethod } from "@prisma/client";
 import { requireUser } from "@/lib/auth/session";
 import { getTerms } from "@/lib/terms";
-import { fmtDate, fmtTime } from "@/lib/time";
+import { fmtDate } from "@/lib/time";
 import { INSTITUTION } from "@/lib/institution";
 import { memberClubSummaries } from "@/lib/metrics";
 import { liveOccurrencesForUser } from "@/lib/domain/attendance";
 import { loadPersonAttendance, MY_HISTORY_LIMIT, type ClubRef, type MyAttendanceRow } from "@/lib/attendance/queries";
+import { HistoryTable, type HistoryRow } from "./HistoryTable";
 import { pct } from "@/lib/attendance/matrix";
 import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
 import { CHECKIN_METHODS, METHOD_LABEL } from "@/lib/attendance/rules";
@@ -17,11 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink, buttonClasses } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Container, EmptyState, PageHeader, ProgressBar, Section, Stat } from "@/components/ui/layout";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { LogoMark } from "@/components/shell/Logo";
 import { AutoSubmitSelect } from "@/components/attendance/AutoSubmitSelect";
 import { LiveCheckinPrompt } from "@/components/attendance/LiveCheckinPrompt";
-import { MethodBadge } from "@/components/attendance/MethodMark";
 import { RangeFilter } from "@/components/attendance/RangeFilter";
 
 export const metadata: Metadata = { title: "My attendance" };
@@ -266,7 +264,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
                   }
                 />
               ) : (
-                <HistoryTable rows={filtered.slice(0, SHOW)} />
+                <HistoryTable rows={filtered.slice(0, SHOW).map(historyRow)} />
               )}
               {filtered.length > SHOW ? <p className="mt-2 text-xs text-ink-3">Showing the latest {SHOW}. Narrow the dates or pick a club to see older check-ins.</p> : null}
             </div>
@@ -277,68 +275,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
   );
 }
 
-function ClubCell({ r }: { r: MyAttendanceRow }) {
-  return r.club ? (
-    <Link href={`/clubs/${r.club.slug}`} className="flex min-w-0 items-center gap-2 hover:text-brand-600">
-      <ClubLogo name={r.club.name} src={r.club.logoUrl} color={r.club.logoColor} size="sm" className="h-6 w-6 rounded-md text-[10px]" />
-      <span className="truncate">{r.club.name}</span>
-      {r.clubs.length > 1 ? (
-        <span className="shrink-0 text-xs text-ink-3" title={`With ${r.clubs.slice(1).map((c) => c.name).join(", ")}`}>
-          +{r.clubs.length - 1}
-        </span>
-      ) : null}
-    </Link>
-  ) : (
-    <span className="flex items-center gap-2 text-ink-2">
-      <LogoMark size={24} /> University event
-    </span>
-  );
-}
-
-function HistoryTable({ rows }: { rows: MyAttendanceRow[] }) {
-  // On phones the club and method fold under the event so nothing scrolls sideways.
-  return (
-    <Table>
-      <THead>
-        <tr>
-          <TH scope="col">Date</TH>
-          <TH scope="col">Event</TH>
-          <TH scope="col" className="hidden md:table-cell">
-            Club
-          </TH>
-          <TH scope="col" className="hidden sm:table-cell">
-            How
-          </TH>
-        </tr>
-      </THead>
-      <TBody>
-        {rows.map((r) => (
-          <TR key={r.id}>
-            <TD className="whitespace-nowrap align-top">
-              <span className="block text-ink">{fmtDate(r.startsAt, "MMM d, yyyy")}</span>
-              <span className="block text-xs text-ink-3">
-                {fmtDate(r.startsAt, "EEE")} · {fmtTime(r.startsAt)}
-              </span>
-            </TD>
-            <TD className="align-top">
-              <span className="font-medium text-ink">{r.title}</span>
-              {r.asMember === false ? <span className="ml-2 align-middle text-xs text-ink-3">as a guest</span> : null}
-              <div className="mt-1.5 text-sm md:hidden">
-                <ClubCell r={r} />
-              </div>
-              <div className="mt-1.5 sm:hidden">
-                <MethodBadge method={r.method} />
-              </div>
-            </TD>
-            <TD className="hidden max-w-[240px] md:table-cell">
-              <ClubCell r={r} />
-            </TD>
-            <TD className="hidden sm:table-cell">
-              <MethodBadge method={r.method} />
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
-  );
+/** The history table's row: plain data, rendered by the client component. */
+function historyRow(r: MyAttendanceRow): HistoryRow {
+  return { id: r.id, startsAt: r.startsAt, title: r.title, method: r.method, asGuest: r.asMember === false, club: r.club, cohosts: r.clubs.slice(1).map((c) => c.name) };
 }

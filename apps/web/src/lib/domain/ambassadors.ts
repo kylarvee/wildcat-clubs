@@ -123,7 +123,6 @@ export async function requestAmbassador(actor: Actor | null, input: unknown) {
     title: `${club.name} asked for a College Ambassador`,
     body: note ?? undefined,
     href,
-    email: false,
   });
   return task;
 }
@@ -235,7 +234,6 @@ export async function setAmbassadorAdvisor(actor: Actor | null, input: unknown) 
     title: `${person.name} is ${org.name}'s advisor`,
     body: "Your advisor runs the program's elections and leadership pipeline with the President.",
     href: `/clubs/${org.slug}/manage/org-chart`,
-    email: false,
   });
   return { assignmentId };
 }

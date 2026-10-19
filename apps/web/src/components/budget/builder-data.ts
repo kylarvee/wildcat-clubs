@@ -17,5 +17,9 @@ export function builderLines(budget: ClubTermBudget): BuilderLine[] {
     occurrences: l.occurrences,
     totalCents: l.totalCents,
     lockedBy: l.lockedBy ? { title: l.lockedBy.title, status: l.lockedBy.status } : null,
+    decisions: l.decisions.map((d) => ({ title: d.title, askedCents: d.askedCents, approvedCents: d.approvedCents })),
+    fundedCents: l.fundedCents,
+    openCents: l.openCents,
+    requestable: l.requestable,
   }));
 }

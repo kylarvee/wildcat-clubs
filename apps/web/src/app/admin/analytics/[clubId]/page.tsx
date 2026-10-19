@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getTerms } from "@/lib/terms";
 import { fmtDate, fmtLongDate, fmtMoney, fmtTime } from "@/lib/time";
-import { clubActivity, clubAttendanceByOccurrence, clubListMetrics, clubRetention, type ClubActivity, type RetentionPoint } from "@/lib/metrics";
+import { clubActivity, clubAttendanceByOccurrence, clubListMetrics, clubRetention, noRetentionText, type ClubActivity, type RetentionPoint } from "@/lib/metrics";
 import { RANGE_OPTIONS, resolveRange } from "@/lib/attendance/ranges";
 import { FUNDING_STATUS_LABEL, FUNDING_STATUS_TONE, sourceName } from "@/lib/funding/labels";
 import { clubConnections, connectionCounts } from "@/lib/analytics/network";
@@ -41,7 +41,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 }
 
 function toSeries(points: RetentionPoint[]): RetentionSeries {
-  return points.map((p) => ({ label: p.label, rate: p.rate, retained: p.retained, previousAttendees: p.previousAttendees, attendees: p.attendees }));
+  return points.map((p) => ({ label: p.label, previousLabel: p.previousLabel, rate: p.rate, retained: p.retained, previousAttendees: p.previousAttendees, attendees: p.attendees, inProgress: p.inProgress }));
 }
 
 /**
@@ -168,7 +168,7 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Registered members" value={fmt(registered)} hint={registered < cfg["activity.clubMinMembers"] ? `Below the ${cfg["activity.clubMinMembers"]} needed to count as active` : "Everyone who has joined"} />
           <Stat label="Attending members" value={fmt(active)} hint={registered ? `${pct(active / registered)} of registered came lately` : "Came to an event lately"} />
-          <Stat label="Retention" value={pct(m?.retentionRate)} hint="Last full month vs. the one before" />
+          <Stat label="Retention" value={pct(m?.retentionRate)} hint={m?.retention?.label ?? noRetentionText()} />
           <Stat label="Avg. attendance" value={pct(avgTerm)} hint={heldTerm ? `Of members, across ${heldTerm} ${heldTerm === 1 ? "event" : "events"} in ${termName}` : `No events with check-ins in ${termName}`} />
           <Stat label="Events held" value={fmt(activity.heldEventsCurrentTerm)} hint={`In ${termName} · ${cfg["activity.clubMinEvents"]} needed per term`} />
           <Stat label="Last term" value={fmt(activity.heldEventsPreviousTerm)} hint={`Events held in ${activity.previousTermName ?? "the term before"}`} />
@@ -417,7 +417,7 @@ function FundingCard({ funding, club }: { funding: FundingSummary; club: { colle
                     <li key={s.source} className="flex justify-between gap-3">
                       <span className="min-w-0 truncate text-ink-2">{sourceName(s.source, club)}</span>
                       <span className="shrink-0 tabular-nums text-ink">
-                        {fmtMoney(s.approvedCents)} <span className="text-ink-3">of {fmtMoney(s.requestedCents)}</span>
+                        {fmtMoney(s.approvedCents)} {s.requestedCents > 0 ? <span className="text-ink-3">of {fmtMoney(s.requestedCents)}</span> : <span className="text-ink-3">funded (not asked of this source)</span>}
                       </span>
                     </li>
                   ))}

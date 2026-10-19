@@ -1,5 +1,6 @@
 import type { ClubCategory, ClubScope, ClubType } from "@prisma/client";
 import { CLUB_CATEGORIES, CLUB_SCOPES, CLUB_TYPES, STANDING_LABEL } from "@/lib/labels/clubs";
+import { ACTIVITY_SCORE_LABEL } from "@/lib/metrics/pure";
 
 /**
  * The clubs list lives in the URL (?q=&type=&sort=…), so every view is a
@@ -16,7 +17,8 @@ export const SORT_LABEL: Record<ClubSort, string> = {
   rating: "Student rating",
   members: "Attending members",
   retention: "Retention",
-  activity: "Activity",
+  /** lib/metrics ACTIVITY SCORE: held events in the last 30 days. */
+  activity: ACTIVITY_SCORE_LABEL,
   college: "College",
   major: "Major or discipline",
   type: "Club type",

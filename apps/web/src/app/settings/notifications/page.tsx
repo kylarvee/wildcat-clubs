@@ -1,38 +1,54 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlarmClock, Bell, CalendarDays, CheckCircle2, Info, Mail, Smartphone } from "lucide-react";
+import { AlarmClock, Bell, CalendarDays, CheckCircle2, Inbox, Info, ListChecks, Mail, Smartphone } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { can } from "@/lib/authz";
+import { can, isAdmin } from "@/lib/authz";
 import { integrationLive } from "@/lib/config";
 import { db } from "@/lib/db";
 import { shouldPromptForApp } from "@/lib/clubs/queries";
 import { settingsUser } from "@/lib/profiles/queries";
+import { categoryAlways, categoryChoice, digestOn, kindsIn, NOTIFICATION_CATEGORIES, NOTIFICATION_REGISTRY, readPrefs, type KindRule } from "@/components/notifications/catalog";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmailToggle } from "@/components/profile/settings/EmailToggle";
+import { CategoryPreferences, type CategoryRow } from "./_components/CategoryPreferences";
+import { DigestToggle } from "./_components/DigestToggle";
 import { RemindersToggle } from "./_components/RemindersToggle";
 
 export const metadata: Metadata = { title: "Settings · Notifications & calendar" };
 
 /**
- * How Wildcat Clubs reaches you: email on or off, reminders before events,
- * push notifications on your phone and your calendar. The push line says push
- * reaches your phone only when it does: a phone is registered (PushToken) and
- * a sysadmin has switched push on (integrations.push); otherwise it says how
- * to get there. The calendar's subscriptions are managed on /calendar — its
- * one input tool — so this page only links there.
+ * How Wildcat Clubs reaches you: email on or off, which kinds of
+ * notification come by email and push (one row per category of the
+ * notification registry, components/notifications/catalog), WSUSA's daily
+ * digest for admins, reminders before events, push notifications on your
+ * phone and your calendar. The push line says push reaches your phone only
+ * when it does: a phone is registered (PushToken) and a sysadmin has switched
+ * push on (integrations.push); otherwise it says how to get there. The
+ * calendar's subscriptions are managed on /calendar — its one input tool — so
+ * this page only links there.
  */
 export default async function NotificationSettingsPage() {
   const actor = await requireUser("/settings/notifications");
   const [user, offerApp, prefs, pushLive] = await Promise.all([
     settingsUser(actor.id),
     shouldPromptForApp(actor.id, { ignoreSnooze: true }),
-    db.user.findUnique({ where: { id: actor.id }, select: { eventReminders: true, _count: { select: { pushTokens: true } } } }),
+    db.user.findUnique({ where: { id: actor.id }, select: { eventReminders: true, notificationPrefs: true, _count: { select: { pushTokens: true } } } }),
     integrationLive("push"),
   ]);
   if (!user || !prefs) notFound();
   const phones = prefs._count.pushTokens;
+  const admin = isAdmin(actor);
+  const choices = readPrefs(prefs.notificationPrefs);
+  const rows: CategoryRow[] = NOTIFICATION_CATEGORIES.map((c) => {
+    const always = categoryAlways(c.key);
+    const someAlways = !always && kindsIn(c.key).some((k) => (NOTIFICATION_REGISTRY[k] as KindRule).always);
+    const notes: string[] = [];
+    if (someAlways && "note" in c) notes.push(c.note);
+    if (admin && "adminHint" in c) notes.push(c.adminHint);
+    return { key: c.key, label: c.label, hint: c.hint, notes, always, email: categoryChoice(choices, c.key, "email", { admin }), push: categoryChoice(choices, c.key, "push", { admin }) };
+  });
 
   return (
     <div className="space-y-6">
@@ -51,6 +67,28 @@ export default async function NotificationSettingsPage() {
           at the top of the page, whatever you choose here. Advisor invitations are always emailed, since they can go to people who don&apos;t have an account yet.
         </p>
       </Card>
+
+      <Card className="p-5 sm:p-6">
+        <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
+          <ListChecks className="h-5 w-5 text-ink-3" aria-hidden /> What reaches you
+        </h2>
+        <p className="mt-1 text-sm text-ink-3">Everything shows on the bell. Choose which kinds also come by email and to your phone. On means the usual: email only for what needs you, like an approval or a last-minute cancellation.</p>
+        <div className="mt-4">
+          <CategoryPreferences rows={rows} emailOn={user.emailNotifications} />
+        </div>
+      </Card>
+
+      {admin ? (
+        <Card className="p-5 sm:p-6">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
+            <Inbox className="h-5 w-5 text-ink-3" aria-hidden /> WSUSA digest
+          </h2>
+          <div className="mt-4">
+            <DigestToggle initial={digestOn(choices)} emailOn={user.emailNotifications} />
+          </div>
+          <p className="mt-4 border-t border-line pt-4 text-sm text-ink-3">New reports, possible review bombing and clubs that lose a leader are still emailed as they happen.</p>
+        </Card>
+      ) : null}
 
       <Card className="p-5 sm:p-6">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">

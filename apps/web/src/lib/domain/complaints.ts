@@ -139,8 +139,6 @@ export async function submitComplaint(actor: Actor | null, input: unknown): Prom
       title: "We received your report",
       body: `Case ${complaint.caseCode}. WSUSA administrators will review it — follow its status under My reports.`,
       href: "/report",
-      email: false,
-      push: false,
     });
   }
   return { caseCode: complaint.caseCode, isAnonymous: v.anonymous };
@@ -333,8 +331,6 @@ export async function setComplaintStatus(actor: Actor | null, complaintId: strin
       title: `Your report ${c.caseCode} is now ${COMPLAINT_STATUS_LABEL[v.status].toLowerCase()}`,
       body: "See My reports for its status.",
       href: "/report",
-      email: false,
-      push: false,
       exceptUserId: actor.id,
     });
   }

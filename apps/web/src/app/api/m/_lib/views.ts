@@ -5,7 +5,7 @@ import { assertSignedIn, invalid } from "@/lib/domain/kit";
 import { appUrl, liveOccurrencesForUser } from "@/lib/domain/attendance";
 import { announcementFeed } from "@/lib/domain/announcements";
 import { unreadNotificationCount } from "@/lib/domain/notifications";
-import { countOpenTasks } from "@/lib/domain/tasks";
+import { countOpenTasks, countOpenTasksByKind } from "@/lib/domain/tasks";
 import { feedOccurrences, viewerContext } from "@/lib/events/feed";
 import { clubMetricsFor, viewerClubStates } from "@/lib/clubs/queries";
 import { memberClubSummaries, memberClubSummary } from "@/lib/metrics";
@@ -30,6 +30,8 @@ import {
   viewerState,
 } from "./serialize";
 import { loadClubForViewer } from "./club";
+import { leaderCheckinsForClub } from "./checkin-tools";
+import { pageOf } from "./paging";
 import type { MAttendance, MCalendar, MClubDetail, MHome, MMe, MMyClub } from "../_types";
 
 /**
@@ -66,17 +68,20 @@ export async function meView(actor: Actor | null): Promise<MMe> {
 
 const UPCOMING_DAYS = 14;
 const UPCOMING_LIMIT = 8;
+/** Announcements on Home; "See more" pages through the rest (GET /api/m/announcements). */
+const HOME_ANNOUNCEMENTS = 5;
 
 export async function homeView(actor: Actor | null): Promise<MHome> {
   assertSignedIn(actor);
   const now = new Date();
   const ctx = await viewerContext(actor);
-  const [live, states, seats, feed, announcements, required] = await Promise.all([
+  const [live, states, seats, feed, announcements, required, taskCounts] = await Promise.all([
     liveOccurrencesForUser(actor),
     viewerClubStates(actor.id),
     currentSeats(actor.id),
     feedOccurrences(ctx, { scope: "me" }, { start: now, end: new Date(now.getTime() + UPCOMING_DAYS * DAY_MS) }, { take: 60 }),
-    announcementFeed(actor.id, 5),
+    // One more than Home shows, to know whether "See more" has anything.
+    announcementFeed(actor.id, HOME_ANNOUNCEMENTS + 1),
     // Required tasks are always assigned to a person (requirements, WSUSA tests and forms).
     db.task.findMany({
       where: { assigneeType: "USER", assigneeId: actor.id, status: "OPEN", required: true },
@@ -84,9 +89,12 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
       take: 10,
       select: { id: true, title: true, dueAt: true, href: true, status: true, sourceType: true, sourceId: true, assigneeId: true },
     }),
+    // The same inbox as the Tasks screen (lib/domain/tasks), counted by kind.
+    countOpenTasksByKind(actor),
   ]);
   // A test handed in on time and waiting for a grader isn't overdue.
   const waiting = await tasksAwaitingGrade(required, now);
+  const firstAnnouncements = pageOf(announcements, 0, HOME_ANNOUNCEMENTS);
 
   // "My clubs": active member, pending request, or a current role — in approved clubs.
   const ids = [...states].filter(([, s]) => s.member || s.pending || s.leader).map(([id]) => id);
@@ -113,7 +121,9 @@ export async function homeView(actor: Actor | null): Promise<MHome> {
       .map((o) => feedToMEvent(o, now))
       .filter((e) => !e.cancelled)
       .slice(0, UPCOMING_LIMIT),
-    announcements: announcements.map(toMAnnouncement),
+    announcements: firstAnnouncements.items.map(toMAnnouncement),
+    announcementsCursor: firstAnnouncements.nextCursor,
+    tasks: { open: Object.values(taskCounts).reduce((a, b) => a + b, 0), approvals: taskCounts.APPROVAL },
     required: required.map((t) => {
       if (waiting.has(t.id)) return { id: t.id, title: t.title, dueLabel: AWAITING_GRADE_LABEL, overdue: false, path: t.href ?? "/tasks" };
       const due = dueInfo(t.dueAt, now);
@@ -131,7 +141,7 @@ export async function clubDetailView(actor: Actor | null, slug: string): Promise
   const now = new Date();
   const listed = club.status === "APPROVED" || club.status === "RETIRED";
 
-  const [metrics, viewer, feed, summary, live] = await Promise.all([
+  const [metrics, viewer, feed, summary, live, leaderCheckins] = await Promise.all([
     clubMetricsFor(club.id),
     viewerState(actor, club.id),
     listed
@@ -139,6 +149,7 @@ export async function clubDetailView(actor: Actor | null, slug: string): Promise
       : Promise.resolve([]),
     actor ? memberClubSummary(actor.id, club.id) : Promise.resolve(null),
     actor && club.status === "APPROVED" ? liveOccurrencesForUser(actor, { clubId: club.id }) : Promise.resolve([]),
+    club.status === "APPROVED" ? leaderCheckinsForClub(actor, club.id) : Promise.resolve([]),
   ]);
 
   // Like the web's attendance card: only for people connected to the club.
@@ -171,6 +182,7 @@ export async function clubDetailView(actor: Actor | null, slug: string): Promise
       .slice(0, CLUB_UPCOMING_LIMIT),
     attendance: summary && connected ? toAttendanceSummary(summary) : null,
     live: live.map(toMOccurrence),
+    leaderCheckins,
   };
 }
 

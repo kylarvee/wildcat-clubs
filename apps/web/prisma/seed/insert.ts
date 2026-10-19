@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { activitySubject } from "@/lib/lake/subject";
 import { seatsFor } from "@/lib/roles/defaults";
 import type { ClubM, Ctx } from "./ctx";
 import { allEvents } from "./steps/events";
@@ -193,6 +194,9 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
   await insertMany("Task", r.tasks, (d) => db.task.createMany({ data: d }), log);
   await insertMany("Notification", r.notifications, (d) => db.notification.createMany({ data: d }), log);
   await insertMany("OutboxMessage", r.outbox, (d) => db.outboxMessage.createMany({ data: d }), log);
-  const activity = [...r.activity].sort((a, b) => new Date(a.at as Date).getTime() - new Date(b.at as Date).getTime());
+  // Every step's rows get the person they're about, by the same rule as lib/lake logActivity.
+  const activity = [...r.activity]
+    .sort((a, b) => new Date(a.at as Date).getTime() - new Date(b.at as Date).getTime())
+    .map((a) => (a.subjectUserId === undefined ? { ...a, subjectUserId: activitySubject(a.data) } : a));
   await insertMany("ActivityLog", activity, (d) => db.activityLog.createMany({ data: d }), log);
 }

@@ -1,6 +1,6 @@
 import { Activity, Repeat, UserCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
-import { clubActivity, clubRetention, type RetentionPoint } from "@/lib/metrics";
+import { clubActivity, clubRetention, noRetentionText, type RetentionPoint } from "@/lib/metrics";
 import { getConfig } from "@/lib/config";
 import { clubMetricsFor } from "@/lib/clubs/queries";
 import { fmtLongDate } from "@/lib/time";
@@ -50,7 +50,7 @@ export async function ClubStats({ clubId, clubName, retired }: { clubId: string;
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile icon={<UserCheck />} label="Attending members" value={activity.activeMembers.toLocaleString("en-US")} hint={`Checked in within ${cfg["activity.studentWindowDays"]} days or at one of the last ${cfg["activity.studentRecentEvents"]} events`} />
         <Tile icon={<Users />} label="Registered members" value={activity.registeredMembers.toLocaleString("en-US")} hint="Students who've joined" />
-        <Tile icon={<Repeat />} label="Retention" value={pct(metrics.retentionRate)} hint="Last month's attendees who came back" />
+        <Tile icon={<Repeat />} label="Retention" value={pct(metrics.retentionRate)} hint={metrics.retention?.label ?? noRetentionText()} />
         <Tile icon={<Activity />} label="Activity standing" value={status.value} hint={status.hint} tone={status.tone} />
       </div>
       <div className="mt-5 border-t border-line pt-4">

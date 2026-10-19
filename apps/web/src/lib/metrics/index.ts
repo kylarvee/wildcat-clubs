@@ -18,6 +18,7 @@ import type {
   PlatformSummary,
   RetentionPeriod,
   RetentionPoint,
+  RetentionSummary,
 } from "./types";
 
 /**
@@ -53,13 +54,27 @@ import type {
  *   at the time of the event (joinedAt ≤ start, not ended before it). Everyone
  *   else who checked in (non-members, advisors) is counted as a guest.
  *
- * RETENTION (period P) — of the people who attended ≥1 club event in the
- *   period before P, the share who attended ≥1 in P. Periods: calendar month,
- *   calendar quarter, academic year (from Terms), calendar year.
- *   Individual retention = the share of periods since joining with ≥1 check-in.
+ * RETENTION — the share of one complete month's attendees who came back the
+ *   next complete month, for the most recent pair of complete months (within
+ *   the last 12) that both had attendees. The month still running never
+ *   counts. Every screen shows it the same way: "Sep → Oct: 62% came back"
+ *   (ClubListMetrics.retention; pure.latestRetention). The charts plot the
+ *   same comparison for every month, quarter, academic year or year (period
+ *   P vs. the one before), and quarter-and-longer figures use the same rule.
  *
- * ACTIVITY SCORE (clubs list "Activity") — scheduled occurrences in the last
- *   30 days plus the next 30 days.
+ * MONTHS ATTENDED (per person) — of the months since they got involved, how
+ *   many had ≥1 of their check-ins (the period in progress counts only once
+ *   they've come). Never called retention.
+ *
+ * ACTIVITY SCORE (clubs list "Events held lately") — HELD events (as below)
+ *   that started in the last 30 days, hosted or co-hosted. Scheduling dates
+ *   doesn't raise it; holding them does.
+ *
+ * AT RISK — an approved club that's inactive now; or in its pilot period
+ *   without yet meeting the bar it hands over to (events this term, members);
+ *   or active only on last term's record with too few events this term past
+ *   its halfway point, or exactly at the member minimum (pure.clubRisk). The
+ *   admin Overview and the assistant both read clubsAtRisk().
  *
  * INTERCONNECTION — for each check-in at an event whose participating clubs
  *   are P (host + approved co-hosts): a guest visit (none of the attendee's
@@ -76,7 +91,8 @@ import type {
  * - Event times are occurrence start times, so a leader's late manual add
  *   counts on the day of the event.
  * - Past occurrences of an event that was later cancelled still count when
- *   people checked in. Activity score counts only live (SCHEDULED) events.
+ *   people checked in, in every number (activity score included: it counts
+ *   what was held).
  * - "Members at the time" = joined at or before the start, not ended by then,
  *   any status except a pending or declined request.
  * - "Current term" is the term containing now, or the latest one between
@@ -96,8 +112,16 @@ export {
   pilotPeriodEnd,
   attendanceRate,
   retentionRate,
+  latestRetention,
+  noRetentionText,
+  RETENTION_HINT,
   checkinLines,
+  ACTIVITY_SCORE_DAYS,
+  ACTIVITY_SCORE_HINT,
+  ACTIVITY_SCORE_LABEL,
   type ActivityRule,
+  type AtRiskKind,
+  type ClubRisk,
   type Standing,
 } from "./pure";
 
@@ -120,22 +144,21 @@ function inClubs(col: Prisma.Sql, scope?: ClubScope) {
 
 /**
  * Rows (occurrence_id, starts_at, club_id): one per club taking part in a
- * scheduled occurrence — the host and every approved co-host. `liveOnly`
- * drops cancelled events (for calendar counts).
+ * scheduled occurrence — the host and every approved co-host. Past dates of
+ * an event cancelled later stay in (held events count when people came).
  */
-function clubOccurrences(o: { clubs?: ClubScope; from?: Date; to?: Date; liveOnly?: boolean }): Prisma.Sql {
-  const ev = o.liveOnly ? Prisma.sql`AND e.status = 'SCHEDULED'` : Prisma.empty;
+function clubOccurrences(o: { clubs?: ClubScope; from?: Date; to?: Date }): Prisma.Sql {
   const from = o.from ? Prisma.sql`AND o."startsAt" >= ${ts(o.from)}` : Prisma.empty;
   const to = o.to ? Prisma.sql`AND o."startsAt" <= ${ts(o.to)}` : Prisma.empty;
   return Prisma.sql`
     SELECT o.id AS occurrence_id, o."startsAt" AS starts_at, e."clubId" AS club_id
       FROM "EventOccurrence" o JOIN "Event" e ON e.id = o."eventId"
-     WHERE o.status = 'SCHEDULED' ${ev} AND e."clubId" IS NOT NULL ${inClubs(Prisma.sql`e."clubId"`, o.clubs)} ${from} ${to}
+     WHERE o.status = 'SCHEDULED' AND e."clubId" IS NOT NULL ${inClubs(Prisma.sql`e."clubId"`, o.clubs)} ${from} ${to}
     UNION
     SELECT o.id, o."startsAt", c."clubId"
       FROM "EventOccurrence" o JOIN "Event" e ON e.id = o."eventId"
       JOIN "EventCohost" c ON c."eventId" = e.id AND c.status = 'APPROVED'
-     WHERE o.status = 'SCHEDULED' ${ev} ${inClubs(Prisma.sql`c."clubId"`, o.clubs)} ${from} ${to}`;
+     WHERE o.status = 'SCHEDULED' ${inClubs(Prisma.sql`c."clubId"`, o.clubs)} ${from} ${to}`;
 }
 
 /** Same rule as P.wasMemberAt, for a Membership alias at a timestamp expression. */
@@ -361,38 +384,69 @@ export async function clubActivityMany(clubIds?: string[], at?: Date): Promise<M
   return clubActivityMap(idsKey(clubIds), nowOr(at).getTime());
 }
 
+// ─── At risk ─────────────────────────────────────────────────────────────────
+
+export type AtRiskClub = P.ClubRisk & { id: string; name: string; slug: string; activity: ClubActivity };
+
+/**
+ * AT RISK clubs (pure.clubRisk), most urgent first: the one list behind the
+ * admin Overview's "At risk" card and the assistant's club_health. Omit ids
+ * for every approved club; clubs that aren't approved are never listed.
+ */
+export async function clubsAtRisk(opts: { clubIds?: string[]; at?: Date } = {}): Promise<AtRiskClub[]> {
+  const at = nowOr(opts.at);
+  if (opts.clubIds && opts.clubIds.length === 0) return [];
+  const [activity, cfg, terms, clubs] = await Promise.all([
+    clubActivityMap(idsKey(opts.clubIds), at.getTime()),
+    getConfig(),
+    getTerms(),
+    db.club.findMany({ where: { status: "APPROVED", ...(opts.clubIds ? { id: { in: opts.clubIds } } : {}) }, select: { id: true, name: true, slug: true, status: true } }),
+  ]);
+  const term = currentOrLastTerm(terms, at);
+  const rule = { minEvents: cfg["activity.clubMinEvents"], minMembers: cfg["activity.clubMinMembers"] };
+  const out: AtRiskClub[] = [];
+  for (const c of clubs) {
+    const a = activity.get(c.id);
+    const risk = a ? P.clubRisk({ status: c.status, activity: a, at, term, rule }) : null;
+    if (risk && a) out.push({ id: c.id, name: c.name, slug: c.slug, ...risk, activity: a });
+  }
+  return out.sort(P.compareRisk);
+}
+
 // ─── Retention ───────────────────────────────────────────────────────────────
 
 /** How many points each period shows by default. */
 export const DEFAULT_RETENTION_COUNT: Record<RetentionPeriod, number> = { month: 12, quarter: 8, academicYear: 4, year: 4 };
 
 /**
- * Distinct (person, bucket index) pairs for check-ins at a club's held events
- * inside the buckets. Bucketing happens in SQL (width_bucket over the period
- * starts), so only one row per person per period comes back.
+ * Distinct (club, person, bucket index) rows for check-ins at the clubs' held
+ * events inside the buckets. Bucketing happens in SQL (width_bucket over the
+ * period starts), so only one row per person per club per period comes back.
  */
-async function bucketedAttendance(clubId: string, buckets: P.PeriodBucket[], at: Date, userId?: string): Promise<{ userId: string; bucket: number }[]> {
-  if (buckets.length === 0) return [];
+async function bucketedAttendance(clubs: ClubScope, buckets: P.PeriodBucket[], at: Date, userId?: string): Promise<{ clubId: string; userId: string; bucket: number }[]> {
+  if (buckets.length === 0 || (Array.isArray(clubs) && clubs.length === 0)) return [];
   const lastEnd = new Date(buckets[buckets.length - 1].end.getTime() - 1);
   const to = lastEnd < at ? lastEnd : at;
   const starts = buckets.map((b) => b.start.toISOString());
   const user = userId ? Prisma.sql`AND a."userId" = ${userId}` : Prisma.empty;
-  const rows = await db.$queryRaw<{ user_id: string; bucket: number }[]>`
-    WITH co AS (${clubOccurrences({ clubs: [clubId], from: buckets[0].start, to })}),
+  const rows = await db.$queryRaw<{ club_id: string; user_id: string; bucket: number }[]>`
+    WITH co AS (${clubOccurrences({ clubs, from: buckets[0].start, to })}),
     bounds AS (
       SELECT ARRAY(SELECT b.t AT TIME ZONE 'UTC' FROM unnest(${starts}::timestamptz[]) WITH ORDINALITY AS b(t, i) ORDER BY b.i) AS starts
     )
-    SELECT DISTINCT a."userId" AS user_id, (width_bucket(co.starts_at, bounds.starts) - 1)::int AS bucket
+    SELECT DISTINCT co.club_id, a."userId" AS user_id, (width_bucket(co.starts_at, bounds.starts) - 1)::int AS bucket
       FROM co CROSS JOIN bounds
       JOIN "Attendance" a ON a."occurrenceId" = co.occurrence_id
      WHERE TRUE ${user}`;
-  return rows.map((r) => ({ userId: r.user_id, bucket: r.bucket }));
+  return rows.map((r) => ({ clubId: r.club_id, userId: r.user_id, bucket: r.bucket }));
 }
 
 /**
  * Club retention by period, oldest first, ending with the period that
  * contains `at` (marked inProgress). Each point compares with the period
- * before it; rate is null when that period had no attendees.
+ * before it; rate is null when that period had no attendees. For the one
+ * figure to quote, run the series through latestRetention (with the default
+ * month count it's exactly ClubListMetrics.retention).
  */
 export async function clubRetention(clubId: string, period: RetentionPeriod, opts: { count?: number; at?: Date } = {}): Promise<RetentionPoint[]> {
   const at = nowOr(opts.at);
@@ -401,13 +455,32 @@ export async function clubRetention(clubId: string, period: RetentionPeriod, opt
   // One extra period in front, so the first point has a "before".
   const buckets = P.lastBuckets(period, at, count + 1, terms);
   if (buckets.length === 0) return [];
-  const pairs = await bucketedAttendance(clubId, buckets, at);
+  const pairs = await bucketedAttendance([clubId], buckets, at);
   const series = P.retentionSeries(buckets, pairs, at);
   return buckets.length > count ? series.slice(1) : series;
 }
 
-/** Retention for one person in one club (periods since joining with ≥1 check-in ÷ periods since joining). */
-export async function memberRetention(userId: string, clubId: string, period: RetentionPeriod): Promise<{ periods: number; attendedPeriods: number; rate: number | null }> {
+/**
+ * Month RETENTION for many clubs in one query: the clubs list's buckets are
+ * exactly clubRetention(id, "month")'s (DEFAULT_RETENTION_COUNT.month points,
+ * plus the one in front), run through the same latestRetention.
+ */
+async function monthRetentionMany(clubIds: string[], at: Date): Promise<Map<string, RetentionSummary | null>> {
+  const buckets = P.lastBuckets("month", at, DEFAULT_RETENTION_COUNT.month + 1);
+  const rows = await bucketedAttendance(clubIds, buckets, at);
+  const byClub = new Map<string, { userId: string; bucket: number }[]>();
+  for (const r of rows) {
+    const list = byClub.get(r.clubId);
+    if (list) list.push(r);
+    else byClub.set(r.clubId, [r]);
+  }
+  const out = new Map<string, RetentionSummary | null>();
+  for (const [clubId, pairs] of byClub) out.set(clubId, P.latestRetention(P.retentionSeries(buckets, pairs, at).slice(1)));
+  return out;
+}
+
+/** MONTHS ATTENDED and the like for one person in one club: of the periods since they got involved, how many had a check-in of theirs. */
+export async function memberPeriodsAttended(userId: string, clubId: string, period: RetentionPeriod): Promise<{ periods: number; attendedPeriods: number; rate: number | null }> {
   const at = requestNow();
   const [membership, standings, terms] = await Promise.all([
     db.membership.findUnique({ where: { userId_clubId: { userId, clubId } }, select: { status: true, joinedAt: true, endedAt: true } }),
@@ -418,8 +491,8 @@ export async function memberRetention(userId: string, clubId: string, period: Re
   if (!window) return { periods: 0, attendedPeriods: 0, rate: null };
   const buckets = P.bucketsBetween(period, window.start, window.end, terms);
   if (buckets.length === 0) return { periods: 0, attendedPeriods: 0, rate: null };
-  const pairs = await bucketedAttendance(clubId, buckets, at, userId);
-  return P.individualRetention(buckets, pairs.map((p) => p.bucket), at);
+  const pairs = await bucketedAttendance([clubId], buckets, at, userId);
+  return P.periodsAttended(buckets, pairs.map((p) => p.bucket), at);
 }
 
 // ─── Attendance ──────────────────────────────────────────────────────────────
@@ -463,6 +536,48 @@ export async function clubAttendanceByOccurrence(clubId: string, opts: { from?: 
       held: r.attendees > 0,
     };
   });
+}
+
+/**
+ * Mean member ATTENDANCE RATE over each club's held events in a window — the
+ * Attendance Tracker's "Avg. attendance" (lib/analytics averageRate over
+ * clubAttendanceByOccurrence), for many clubs in one query. Clubs without a
+ * held event with members on the roll get null.
+ */
+export async function clubAverageAttendance(clubIds: string[], opts: { from?: Date; to?: Date } = {}): Promise<Map<string, number | null>> {
+  if (clubIds.length === 0) return new Map();
+  const to = opts.to ?? requestNow();
+  // Per held event: members at the time (the same rule as clubAttendanceByOccurrence: student
+  // memberships, memberAtSql) and how many of them checked in, each as one join + count, so a
+  // few hundred clubs' terms take a handful of index scans instead of a query per club.
+  const memberAt = memberAtSql("sm", Prisma.sql`h.starts_at`);
+  const rows = await db.$queryRaw<{ club_id: string; rate: number | null }[]>`
+    WITH co AS (${clubOccurrences({ clubs: clubIds, from: opts.from, to })}),
+    held AS MATERIALIZED (SELECT co.* FROM co WHERE ${HAS_CHECKIN(Prisma.sql`co.occurrence_id`)}),
+    sm AS MATERIALIZED (
+      SELECT m."clubId", m."userId", m."joinedAt", m."endedAt", m.status
+        FROM "Membership" m
+       WHERE m."clubId" = ANY(${clubIds}::text[]) AND EXISTS (SELECT 1 FROM "User" u WHERE u.id = m."userId" AND u.kind = 'STUDENT')
+    ),
+    roll AS (
+      SELECT h.club_id, h.occurrence_id, count(*)::float8 AS n
+        FROM held h JOIN sm ON sm."clubId" = h.club_id AND ${memberAt}
+       GROUP BY 1, 2
+    ),
+    came AS (
+      SELECT h.club_id, h.occurrence_id, count(*)::float8 AS n
+        FROM held h
+        JOIN "Attendance" a ON a."occurrenceId" = h.occurrence_id
+        JOIN sm ON sm."clubId" = h.club_id AND sm."userId" = a."userId" AND ${memberAt}
+       GROUP BY 1, 2
+    )
+    SELECT roll.club_id, avg(LEAST(1, coalesce(came.n, 0) / roll.n)) AS rate
+      FROM roll LEFT JOIN came USING (club_id, occurrence_id)
+     GROUP BY roll.club_id`;
+  // A held event with nobody on the roll has no rate (attendanceRate), so it has no roll row.
+  const out = new Map<string, number | null>(clubIds.map((id) => [id, null]));
+  for (const r of rows) out.set(r.club_id, r.rate === null ? null : Number(r.rate));
+  return out;
 }
 
 /**
@@ -635,52 +750,35 @@ const clubListMap = cache(async (key: string, atMs: number): Promise<Map<string,
   const out = new Map<string, ClubListMetrics>();
   if (ids.length === 0) return out;
 
-  // Month retention for the list: the last complete month vs. the one before. Clubs
-  // rarely meet over summer or breaks, so when that earlier month had nobody, fall
-  // back to the current month vs. last month, then to the pair before.
-  const buckets = P.lastBuckets("month", at, 4); // [m-3, m-2, m-1, current]
-  const [reviews, attendRows, scores] = await Promise.all([
+  const [reviews, retentionBy, recent] = await Promise.all([
     db.review.groupBy({ by: ["clubId"], where: { clubId: { in: ids }, hiddenAt: null }, _avg: { rating: true }, _count: { _all: true } }),
-    db.$queryRaw<{ club_id: string; user_id: string; starts_at: Date }[]>`
-      SELECT DISTINCT co.club_id, a."userId" AS user_id, co.starts_at
-        FROM (${clubOccurrences({ clubs: ids, from: buckets[0].start, to: at })}) co
-        JOIN "Attendance" a ON a."occurrenceId" = co.occurrence_id`,
-    db.$queryRaw<{ club_id: string; n: number }[]>`
-      SELECT co.club_id, count(*)::int AS n
-        FROM (${clubOccurrences({ clubs: ids, from: new Date(atMs - 30 * DAY_MS), to: new Date(atMs + 30 * DAY_MS), liveOnly: true })}) co
-       GROUP BY co.club_id`,
+    monthRetentionMany(ids, at),
+    // The ACTIVITY SCORE's facts: every occurrence in its window, and whether anyone checked in.
+    db.$queryRaw<{ club_id: string; starts_at: Date; has_checkin: boolean }[]>`
+      SELECT co.club_id, co.starts_at, ${HAS_CHECKIN(Prisma.sql`co.occurrence_id`)} AS has_checkin
+        FROM (${clubOccurrences({ clubs: ids, from: new Date(atMs - P.ACTIVITY_SCORE_DAYS * DAY_MS), to: at })}) co`,
   ]);
   const reviewBy = new Map(reviews.map((r) => [r.clubId, r]));
-  const attendeesBy = new Map<string, Set<string>[]>();
-  for (const row of attendRows) {
-    const i = buckets.findIndex((b) => row.starts_at >= b.start && row.starts_at < b.end);
-    if (i < 0) continue;
-    const sets = attendeesBy.get(row.club_id) ?? buckets.map(() => new Set<string>());
-    sets[i].add(row.user_id);
-    attendeesBy.set(row.club_id, sets);
+  const factsBy = new Map<string, P.OccurrenceFact[]>();
+  for (const r of recent) {
+    const fact = { startsAt: r.starts_at, hasCheckin: r.has_checkin };
+    const list = factsBy.get(r.club_id);
+    if (list) list.push(fact);
+    else factsBy.set(r.club_id, [fact]);
   }
-  const retentionBy = new Map<string, { previous: number; retained: number }>();
-  for (const [clubId, sets] of attendeesBy) {
-    // Preference order of [previous, later] month pairs.
-    for (const [p, l] of [[1, 2], [2, 3], [0, 1]] as const) {
-      if (sets[p].size === 0) continue;
-      retentionBy.set(clubId, { previous: sets[p].size, retained: [...sets[p]].filter((u) => sets[l].has(u)).length });
-      break;
-    }
-  }
-  const scoreBy = new Map(scores.map((r) => [r.club_id, r.n]));
 
   for (const [id, a] of activity) {
     const r = reviewBy.get(id);
-    const ret = retentionBy.get(id);
+    const retention = retentionBy.get(id) ?? null;
     out.set(id, {
       clubId: id,
       registeredMembers: a.registeredMembers,
       activeMembers: a.activeMembers,
-      retentionRate: ret ? P.retentionRate(ret.retained, ret.previous) : null,
+      retention,
+      retentionRate: retention?.rate ?? null,
       avgRating: r?._count._all ? (r._avg.rating ?? null) : null,
       reviewCount: r?._count._all ?? 0,
-      activityScore: scoreBy.get(id) ?? 0,
+      activityScore: P.activityScore(factsBy.get(id) ?? [], at),
       isActive: a.active,
       inPilot: a.inPilot,
     });
@@ -951,10 +1049,29 @@ const platformCached = cache(async (atMs: number): Promise<PlatformSummary> => {
   };
 });
 
+/** How long the landing page's platform numbers are shared between visitors before they're rebuilt. */
+const SHARED_PLATFORM_MS = 10 * 60_000;
+
+// The landing page shows the same campus-wide numbers to everyone, and they
+// barely move minute to minute, so one build serves every visitor for ten
+// minutes, the way networkData shares the default canvas.
+let sharedPlatform: { expires: number; data: Promise<PlatformSummary> } | null = null;
+
 /**
- * Platform-wide numbers for admin analytics. "This term" is the current term
- * (or the last one, between terms) up to `at`; events = held events.
+ * Platform-wide numbers. "This term" is the current term (or the last one,
+ * between terms) up to `at`; events = held events. With no `at` (the public
+ * landing page) one build is shared between visitors for ten minutes; pass
+ * `at` (the admin Overview does) for numbers as of that instant.
  */
 export async function platformSummary(at?: Date): Promise<PlatformSummary> {
-  return platformCached(nowOr(at).getTime());
+  if (at) return platformCached(at.getTime());
+  const now = Date.now();
+  if (!sharedPlatform || sharedPlatform.expires <= now) {
+    const data = platformCached(now);
+    sharedPlatform = { expires: now + SHARED_PLATFORM_MS, data };
+    data.catch(() => {
+      if (sharedPlatform?.data === data) sharedPlatform = null;
+    });
+  }
+  return sharedPlatform.data;
 }

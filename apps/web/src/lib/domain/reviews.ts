@@ -158,7 +158,7 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
         source: { type: "reviewFlag", id: reviewId },
         createdById: actor.id,
       });
-      await notifyAdmins({ kind: "review.flagged", title: `A review on ${review.club.name} was flagged`, body: `${flags} people flagged it.`, href, exceptUserId: actor.id, email: false });
+      await notifyAdmins({ kind: "review.flagged", title: `A review on ${review.club.name} was flagged`, body: `${flags} people flagged it.`, href, exceptUserId: actor.id });
     }
   }
 }
@@ -186,7 +186,6 @@ export async function hideReview(actor: Actor | null, reviewId: string, input: u
     title: `Your review of ${review.club.name} was hidden`,
     body: `WSUSA admins hid it: ${reason}`,
     href: `/clubs/${review.club.slug}#reviews`,
-    push: false,
   });
 }
 

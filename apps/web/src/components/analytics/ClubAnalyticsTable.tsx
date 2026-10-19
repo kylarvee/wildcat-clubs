@@ -78,7 +78,7 @@ export function ClubAnalyticsTable({
     { key: "stage", label: "Status" },
     { key: "registered", label: "Members", sub: "registered", numeric: true },
     { key: "active", label: "Attending", sub: "members lately", numeric: true },
-    { key: "retention", label: "Retention", sub: "last month", numeric: true },
+    { key: "retention", label: "Retention", sub: "latest full months", numeric: true },
     { key: "attendance", label: "Attendance", sub: "avg. this term", numeric: true },
     { key: "events", label: "Events", sub: "this term", numeric: true },
     { key: "rating", label: "Rating", sub: "of 5", numeric: true },
@@ -231,7 +231,10 @@ export function ClubAnalyticsTable({
                     </td>
                     <Num>{fmt(r.registered)}</Num>
                     <Num>{live ? fmt(r.active) : NONE}</Num>
-                    <Num>{pct(r.retention) ?? NONE}</Num>
+                    <Num title={r.retentionSummary?.label}>
+                      {pct(r.retention) ?? NONE}
+                      {r.retentionSummary ? <span className="block text-xs text-ink-3">{r.retentionSummary.months}</span> : null}
+                    </Num>
                     <Num>{pct(r.avgAttendance) ?? NONE}</Num>
                     <Num>{live ? fmt(r.heldEvents) : NONE}</Num>
                     <Num>
@@ -262,7 +265,7 @@ export function ClubAnalyticsTable({
         </div>
       )}
       <p className="text-xs leading-relaxed text-ink-3">
-        This term is {term}. Attending members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention compares the last full month with the one before.
+        This term is {term}. Attending members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention is the share of one full month&rsquo;s attendees who came back the next full month, for the latest two months in a row with check-ins (&ldquo;Sep → Oct: 62% came back&rdquo;).
         Attendance is the average share of members at each event with check-ins. Connections count members of one club checking in at another&rsquo;s events.
         No President and No advisor list approved clubs with nobody in a President seat, or without a faculty or staff advisor, right now.
       </p>
@@ -277,8 +280,12 @@ function sortPhrase(f: TableFilters) {
   return asc ? "lowest first" : "highest first";
 }
 
-function Num({ children }: { children: React.ReactNode }) {
-  return <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-ink">{children}</td>;
+function Num({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-ink" title={title}>
+      {children}
+    </td>
+  );
 }
 
 function FilterSelect({ id, label, value, onChange, children }: { id: string; label: string; value: string; onChange: (v: string) => void; children: React.ReactNode }) {

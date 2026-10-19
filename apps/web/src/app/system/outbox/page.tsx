@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { OutboxChannel, OutboxStatus, Prisma } from "@prisma/client";
-import { Inbox } from "lucide-react";
+import { Clock, Inbox } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { integrationLive } from "@/lib/config";
 import { db } from "@/lib/db";
+import { QUEUE_OVER } from "@/lib/domain/notify";
+import { QUEUE_BATCH } from "@/lib/jobs/notifications";
 import { fmtDate, fmtLongDate, fmtTime } from "@/lib/time";
 import { Callout, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -18,13 +20,15 @@ export const metadata: Metadata = { title: "Outbox" };
 
 const PAGE_SIZE = 50;
 const CHANNELS: OutboxChannel[] = ["EMAIL", "PUSH"];
-const STATUSES: OutboxStatus[] = ["MOCKED", "SENT", "FAILED"];
+const STATUSES: OutboxStatus[] = ["QUEUED", "MOCKED", "SENT", "FAILED"];
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
 /**
  * The outbox (system.config): every email and push the platform sent or, in
- * mock mode, would have sent. This is where testers read "emails".
+ * mock mode, would have sent, and the ones waiting to go out (QUEUED: a big
+ * send's messages, which the "Send queued messages" job sends in batches,
+ * lib/jobs/notifications). This is where testers read "emails".
  */
 export default async function OutboxPage({ searchParams }: { searchParams: SP }) {
   const user = await requireUser("/system/outbox");
@@ -81,7 +85,10 @@ export default async function OutboxPage({ searchParams }: { searchParams: SP })
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Outbox" description="Every email and push notification Wildcat Clubs sent — or, in mock mode, would have sent. Open one to read it the way the person would." />
+      <PageHeader
+        title="Outbox"
+        description="Every email and push notification Wildcat Clubs sent — or, in mock mode, would have sent — and the ones waiting to go out. Open one to read it the way the person would."
+      />
 
       {!emailLive || !pushLive ? (
         <Callout tone="info" icon={<Inbox />} title="Mock mode is on">
@@ -93,7 +100,18 @@ export default async function OutboxPage({ searchParams }: { searchParams: SP })
         </Callout>
       ) : null}
 
-      <div className="grid grid-cols-3 gap-3">
+      {count("QUEUED") ? (
+        <Callout tone="info" icon={<Clock />} title={`${count("QUEUED").toLocaleString()} ${count("QUEUED") === 1 ? "message is" : "messages are"} waiting to send`}>
+          A notification for more than {QUEUE_OVER} people at once shows on everyone&apos;s bell right away, and its emails and pushes wait here. The <span className="font-medium">Send queued messages</span> job sends about {QUEUE_BATCH} each run, oldest first.{" "}
+          <Link href="/system/jobs" className="font-medium underline underline-offset-2">
+            Run the jobs now
+          </Link>{" "}
+          to send the next batch.
+        </Callout>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Waiting to send" value={count("QUEUED").toLocaleString()} hint="sent in batches" />
         <Stat label="Recorded" value={count("MOCKED").toLocaleString()} hint="mock mode" />
         <Stat label="Sent" value={count("SENT").toLocaleString()} />
         <Stat label="Failed" value={count("FAILED").toLocaleString()} />

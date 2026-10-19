@@ -5,13 +5,14 @@ import { CheckCircle2, ExternalLink, Info } from "lucide-react";
 import { db } from "@/lib/db";
 import { ALL_CAPABILITIES, CAPABILITIES, ROLE_LABEL } from "@/lib/authz";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { electionResults, eligibleVoterIds, keyHolders, nextInLineOutcome, syncElection } from "@/lib/domain/elections";
+import { electionResults, keyHolders, nextInLineOutcome, runoffFor, syncElection, voteOutcome, voterRoll } from "@/lib/domain/elections";
 import { candidateSource, electionCandidates, resultRows } from "@/lib/roles/election-queries";
 import { activeStudentMembers } from "@/lib/roles/queries";
 import { selectionSetup } from "@/lib/roles/selection-setup";
-import { confirmersFor, isKeyHolder, leadersBelow, organizersAddCandidates, usesBallots } from "@/lib/roles/pipeline";
+import { confirmersFor, earliestVotingOpen, isKeyHolder, leadersBelow, organizersAddCandidates, readSelectionRules, usesBallots } from "@/lib/roles/pipeline";
 import { SUCCESSION_NAME, SUCCESSION_STEPS } from "@/lib/roles/labels";
 import { ElectionResultsView, ElectionStatusBadge, ElectionTimeline, fmtWhen, MethodBadge } from "@/components/elections/ElectionBits";
+import { MemberVoteRules, VoterRollCard } from "@/components/elections/VoteRules";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
   OpenVotingButton,
   ProposePanel,
   RemoveCandidateButton,
+  RunoffButton,
   WithdrawProposalButton,
 } from "../_components/ElectionControls";
 
@@ -59,13 +61,45 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
     selectionSetup(club.id),
     db.roleAssignment.findMany({ where: { positionId: e.position.id, endedAt: null }, include: { user: { select: { id: true, name: true } } } }),
   ]);
-  const [voters, results, outcome, keys, members] = await Promise.all([
-    usesBallots(e.method) ? eligibleVoterIds(e.clubId, e.method) : Promise.resolve([] as string[]),
+  const [roll, results, outcome, keys, members] = await Promise.all([
+    usesBallots(e.method) ? voterRoll(e) : Promise.resolve(null),
     electionResults(e.id),
     e.method === "NEXT_IN_LINE" ? nextInLineOutcome(e.id) : Promise.resolve(null),
     e.method === "ADVISOR_PRESIDENT" ? keyHolders(club.id) : Promise.resolve(null),
     e.status === "NOMINATING" && organizersAddCandidates(e.method) ? activeStudentMembers(club.id) : Promise.resolve([]),
   ]);
+  const voters = roll?.eligibleIds ?? [];
+
+  // ─── The bylaw rules a member vote froze: who votes and why, quorum, ties, notice ───
+  const memberVote = e.method === "MEMBER_VOTE";
+  const rules = readSelectionRules(e.rules);
+  const [rollPeople, runoffParent, runoffChild, vote] = await Promise.all([
+    roll?.basis === "attendance" ? db.user.findMany({ where: { id: { in: roll.rows.map((r) => r.userId) } }, select: { id: true, name: true, handle: true, avatarUrl: true, avatarColor: true } }) : Promise.resolve([]),
+    rules.runoffOf ? db.election.findUnique({ where: { id: rules.runoffOf }, select: { id: true, title: true } }) : Promise.resolve(null),
+    memberVote && e.status === "CANCELLED" ? runoffFor(e.id) : Promise.resolve(null),
+    results && e.status === "CLOSED" ? voteOutcome(e, results, candidates) : Promise.resolve(null),
+  ]);
+  const personById = new Map(rollPeople.map((p) => [p.id, p]));
+  const rollRows = (roll?.rows ?? []).flatMap((r) => {
+    const p = personById.get(r.userId);
+    return p ? [{ ...r, name: p.name, handle: p.handle, avatarUrl: p.avatarUrl, avatarColor: p.avatarColor }] : [];
+  });
+  const opensFrom = memberVote ? earliestVotingOpen(e.createdAt, rules.noticeDays) : null;
+  const noticeUntil = opensFrom && opensFrom > new Date() ? opensFrom : null;
+  // A tie the bylaws settle by choosing: only the people they name (or an administrator) choose.
+  const tie = vote?.kind === "tie" ? vote : null;
+  const choosers = tie?.resolution.kind === "choose" ? tie.resolution : null;
+  const chooserNames = choosers?.userIds.length ? (await db.user.findMany({ where: { id: { in: choosers.userIds } }, select: { name: true } })).map((u) => u.name) : [];
+  const mayChoose = !tie || (choosers ? (choosers.by === "organizer" ? true : access.viaPlatform !== null || choosers.userIds.includes(user.id)) : false);
+  const tieNote = !choosers
+    ? undefined
+    : choosers.by === "advisor"
+      ? `${rules.runoffOf ? "The runoff tied too, so under" : "Under"} your bylaws the advisor casts the deciding vote: choose who takes the seat`
+      : choosers.by === "president"
+        ? "Under your bylaws the President casts the deciding vote: choose who takes the seat"
+        : choosers.by === "wsusa"
+          ? "Nobody in the club can settle it under its bylaws, so as a WSUSA administrator, choose who takes the seat"
+          : undefined;
 
   const canApply = access.assignableRoles.includes(e.position.role);
   const admin = access.viaPlatform !== null;
@@ -143,7 +177,7 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
         }
         actions={
           <>
-            <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} />
+            <ElectionStatusBadge status={e.status} method={e.method} proposedCandidateId={e.proposedCandidateId} wentToRunoff={Boolean(runoffChild)} />
             <ButtonLink href={`/clubs/${club.slug}/elections/${e.id}`} variant="outline" size="sm">
               Member view <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </ButtonLink>
@@ -152,6 +186,26 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
       />
 
       <ElectionTimeline status={e.status} method={e.method} createdAt={e.createdAt} votingOpensAt={e.votingOpensAt} votingClosesAt={e.votingClosesAt} appliedAt={e.appliedAt} proposedAt={e.proposedAt} />
+
+      {/* ─── Member vote: the bylaw rules it runs under, and who can vote ─── */}
+      {memberVote && roll ? (
+        <MemberVoteRules
+          rules={rules}
+          basis={roll.basis}
+          eligible={results ? results.eligibleVoters : voters.length}
+          members={roll.basis === "attendance" ? roll.rows.length : null}
+          termName={roll.termName}
+          final={roll.final}
+          votingOpensAt={e.votingOpensAt}
+          votes={e.status === "NOMINATING" ? null : e._count.votes}
+          closed={e.status !== "NOMINATING" && e.status !== "VOTING"}
+          opensFrom={opensFrom}
+          runoffOf={runoffParent ? { href: `/clubs/${club.slug}/manage/elections/${runoffParent.id}`, title: runoffParent.title } : null}
+        />
+      ) : null}
+      {memberVote && roll?.basis === "attendance" && roll.minEvents && e.status !== "CANCELLED" ? (
+        <VoterRollCard people={rollRows} minEvents={roll.minEvents} final={roll.final} showCounts={access.capabilities.has("attendance")} />
+      ) : null}
 
       {/* ─── Advisor & President ─── */}
       {e.method === "ADVISOR_PRESIDENT" && e.status === "NOMINATING" ? (
@@ -282,10 +336,13 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
       {/* ─── Ballots ─── */}
       {usesBallots(e.method) && e.status === "NOMINATING" ? (
         <Card>
-          <CardHeader title={e.method === "MEMBER_VOTE" ? "Nominations are open" : "Gathering candidates"} description={`Voting opens automatically ${fmtWhen(e.votingOpensAt)}, or now if you're ready.`} />
+          <CardHeader
+            title={e.method === "MEMBER_VOTE" ? "Nominations are open" : "Gathering candidates"}
+            description={noticeUntil ? `Voting opens automatically ${fmtWhen(e.votingOpensAt)}. Your bylaws give members ${rules.noticeDays} days' notice, so it can't open before ${fmtWhen(noticeUntil)}.` : `Voting opens automatically ${fmtWhen(e.votingOpensAt)}, or now if you're ready.`}
+          />
           <CardBody className="flex flex-wrap items-center gap-3">
-            <OpenVotingButton slug={club.slug} electionId={e.id} disabled={candidates.length === 0} />
-            {candidates.length === 0 ? <span className="text-sm text-ink-3">Add at least one candidate first.</span> : null}
+            <OpenVotingButton slug={club.slug} electionId={e.id} disabled={candidates.length === 0 || Boolean(noticeUntil)} />
+            {candidates.length === 0 ? <span className="text-sm text-ink-3">Add at least one candidate first.</span> : noticeUntil ? <span className="text-sm text-ink-3">You can open it early from {fmtWhen(noticeUntil)}.</span> : null}
             <div className="ml-auto">
               <CancelElectionButton slug={club.slug} electionId={e.id} />
             </div>
@@ -314,12 +371,12 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
         </Card>
       ) : null}
 
-      {results && (e.status === "CLOSED" || e.status === "APPLIED") ? (
+      {results && (e.status === "CLOSED" || e.status === "APPLIED" || e.status === "CANCELLED") ? (
         <Card>
           <CardHeader title="Results" />
           <CardBody className="space-y-6">
             {rows.length ? (
-              <ElectionResultsView rows={rows} totalVotes={results.totalVotes} eligibleVoters={results.eligibleVoters} turnout={results.turnout} />
+              <ElectionResultsView rows={rows} totalVotes={results.totalVotes} eligibleVoters={results.eligibleVoters} turnout={results.turnout} quorum={results.quorum} />
             ) : (
               <p className="text-sm text-ink-3">No one ran in this election.</p>
             )}
@@ -329,6 +386,34 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
                   <p className="text-sm text-ink-2">There&apos;s nothing to apply.</p>
                   {restart("Start again", e.method)}
                   <CancelElectionButton slug={club.slug} electionId={e.id} />
+                </div>
+              ) : vote?.kind === "noQuorum" ? (
+                <div className="space-y-3 border-t border-line pt-4">
+                  <Callout tone="warning" title="No quorum">
+                    Only {results.totalVotes} of the {results.eligibleVoters} eligible voters voted, and your bylaws need {vote.quorum.needed} ({vote.quorum.percent}%) for the result to count, so nobody takes {e.position.name} from this vote. Start again, or fill the seat another way.
+                  </Callout>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {restart("Start again", "MEMBER_VOTE", "primary")}
+                    {restart("Use another way", otherMode)}
+                  </div>
+                </div>
+              ) : tie?.resolution.kind === "runoff" ? (
+                <div className="space-y-3 border-t border-line pt-4">
+                  <Callout tone="info" title="It's a tie, and your bylaws call for a runoff">
+                    {names(leadersRows.map((r) => r.name))} tied at {leadersRows[0]?.votes ?? 0} vote{leadersRows[0]?.votes === 1 ? "" : "s"}. A runoff puts just them on a new ballot that opens right away, under the same rules.
+                  </Callout>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <RunoffButton slug={club.slug} electionId={e.id} tied={leadersRows.map((r) => r.name)} defaultCloses={setup.defaults.runoffCloses ?? setup.defaults.closes} />
+                    {restart("Use another way", otherMode)}
+                  </div>
+                </div>
+              ) : tie && !mayChoose ? (
+                <div className="space-y-3 border-t border-line pt-4">
+                  <Callout tone="info" icon={<Info />} title="It's a tie">
+                    {choosers?.by === "wsusa"
+                      ? "Nobody in the club can settle it under its bylaws, so a WSUSA administrator chooses who takes the seat."
+                      : `Under your bylaws, ${chooserNames.length ? names(chooserNames) : `the ${choosers?.by === "president" ? "President" : "advisor"}`} ${chooserNames.length === 1 || !chooserNames.length ? "casts" : "cast"} the deciding vote. They choose who takes ${e.position.name} from this page.`}
+                  </Callout>
                 </div>
               ) : e.method === "SELF_SELECT" && !unanimous ? (
                 <div className="space-y-3 border-t border-line pt-4">
@@ -353,6 +438,7 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
                     sittingIds={sittingIds}
                     movingFrom={movingFrom}
                     kind={e.method === "SELF_SELECT" ? "unanimous" : "vote"}
+                    tieNote={tieNote}
                   />
                 </div>
               ) : (
@@ -383,7 +469,19 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
         </Callout>
       ) : null}
 
-      {e.status === "CANCELLED" ? <Callout tone="info">This was called off. Nobody took the seat from it.</Callout> : null}
+      {e.status === "CANCELLED" ? (
+        runoffChild ? (
+          <Callout tone="info" title="This vote tied, so it went to a runoff">
+            The tied candidates are on a new ballot:{" "}
+            <Link href={`/clubs/${club.slug}/manage/elections/${runoffChild.id}`} className="underline">
+              {runoffChild.title}
+            </Link>
+            .
+          </Callout>
+        ) : (
+          <Callout tone="info">This was called off. Nobody took the seat from it.</Callout>
+        )
+      ) : null}
 
       <Card>
         <CardHeader

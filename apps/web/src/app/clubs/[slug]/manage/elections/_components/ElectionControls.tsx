@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, CheckCircle2, Loader2, Lock, Play, Send, Trophy, Undo2, UserPlus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Ban, CheckCircle2, Loader2, Lock, Play, Repeat, Send, Trophy, Undo2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/components/ui/cn";
 import { ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Field, Input } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { PermissionChecklist, type CapabilityOption } from "@/components/roles/PermissionChecklist";
 import { PersonPicker, type PickerPerson } from "@/components/roles/PersonPicker";
 import { useRunAction } from "@/components/roles/useRunAction";
-import { applyResult, cancel, closeVotingNow, confirmProposal, nominateMember, openVotingNow, propose, removeCandidate, withdrawProposal } from "../actions";
+import { applyResult, cancel, closeVotingNow, confirmProposal, nominateMember, openVotingNow, propose, removeCandidate, runoff, withdrawProposal } from "../actions";
 
 export function OpenVotingButton({ slug, electionId, disabled }: { slug: string; electionId: string; disabled?: boolean }) {
   const { pending, run } = useRunAction();
@@ -50,6 +52,61 @@ export function CloseVotingButton({ slug, electionId, answers }: { slug: string;
         void run(() => closeVotingNow(slug, electionId), { success: answers ? "Answers are closed." : "Voting closed. Results are in.", toastError: true });
       }}
     />
+  );
+}
+
+/**
+ * A tied member vote whose bylaws call for a runoff: the tied candidates go
+ * on a new ballot that opens now. Organizers choose when it closes (the
+ * bylaws' voting window by default).
+ */
+export function RunoffButton({ slug, electionId, tied, defaultCloses }: { slug: string; electionId: string; tied: string[]; defaultCloses: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [closes, setCloses] = useState(defaultCloses);
+  const { pending, error, setError, run } = useRunAction();
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setError(null);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button>
+          <Repeat className="h-4 w-4" aria-hidden /> Start the runoff
+        </Button>
+      </DialogTrigger>
+      <DialogContent title="Start the runoff" description={`${tied.join(" and ")} go on a new ballot that opens right away. Every eligible voter is told, and if it ties again, the advisor decides.`}>
+        <Field label="Runoff closes" required hint="Campus time. Voting opens as soon as you start it.">
+          {(id) => <Input id={id} type="datetime-local" value={closes} onChange={(e) => setCloses(e.target.value)} required />}
+        </Field>
+        {error ? (
+          <Callout tone="danger" className="mt-4">
+            {error}
+          </Callout>
+        ) : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            disabled={pending || !closes}
+            onClick={async () => {
+              const r = await run(() => runoff(slug, electionId, closes), { success: "The runoff is open." });
+              if (r.ok) {
+                setOpen(false);
+                router.push(`/clubs/${slug}/manage/elections/${r.data.id}`);
+              }
+            }}
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            Open the runoff
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -180,6 +237,7 @@ export function ApplyResultPanel({
   sittingIds,
   movingFrom,
   kind = "vote",
+  tieNote,
 }: {
   slug: string;
   electionId: string;
@@ -193,6 +251,8 @@ export function ApplyResultPanel({
   /** The seat the winner moves up from, by candidate id. */
   movingFrom: Record<string, string>;
   kind?: "vote" | "unanimous" | "nextInLine";
+  /** Who settles a tie under the bylaws, said to the person settling it. */
+  tieNote?: string;
 }) {
   const [choice, setChoice] = useState<string | null>(winner?.id ?? null);
   const [confirming, setConfirming] = useState(false);
@@ -223,7 +283,7 @@ export function ApplyResultPanel({
       ) : (
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-ink">
-            It&apos;s a tie at {tied[0]?.votes ?? 0} vote{tied[0]?.votes === 1 ? "" : "s"}. Per your bylaws, choose who takes the seat — your choice is recorded.
+            It&apos;s a tie at {tied[0]?.votes ?? 0} vote{tied[0]?.votes === 1 ? "" : "s"}. {tieNote ?? "Choose who takes the seat"} — your choice is recorded.
           </legend>
           <div className="grid gap-2 sm:grid-cols-2">
             {tied.map((t) => (

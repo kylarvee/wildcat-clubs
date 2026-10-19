@@ -37,8 +37,9 @@ type Row = {
 
 /** Things the person did themself. */
 const SELF_ACTIONS: PublicAction[] = ["membership.joined", "review.created", "attendance.checkin"];
-/** Things that happened to them (data.userId is the person), whoever did them. */
+/** Things that happened to them (ActivityLog.subjectUserId is the person — data.userId), whoever did them. */
 const ABOUT_ACTIONS: PublicAction[] = ["role.assigned", "role.ended", "project.added", "user.graduated"];
+/** An election they won (its subject is the winner). */
 const WON: PublicAction = "election.applied";
 const APPROVED: PublicAction = "membership.approved";
 const LISTED = new Set(["APPROVED", "RETIRED"]);
@@ -69,10 +70,10 @@ export async function profileActivity(
   const rows: Row[] = await db.activityLog.findMany({
     where: {
       isPublic: true,
+      // Indexed: (actorId, at) for what they did, (subjectUserId, at) for what happened to them.
       OR: [
         { actorId: person.id, action: { in: SELF_ACTIONS } },
-        ...ABOUT_ACTIONS.map((action) => ({ action, data: { path: ["userId"], equals: person.id } })),
-        { action: WON, data: { path: ["winnerId"], equals: person.id } },
+        { subjectUserId: person.id, action: { in: [...ABOUT_ACTIONS, WON] } },
         ...(memberships.length ? [{ action: APPROVED, entityId: { in: memberships.map((m) => m.id) } }] : []),
       ],
     },

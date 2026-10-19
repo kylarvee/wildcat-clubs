@@ -6,8 +6,8 @@ import { getCurrentUser, requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 
 import { fmtLongDate, fmtMoney } from "@/lib/time";
-import { loadClubTermBudget, loadFundingRequest, priorRequests } from "@/lib/domain/funding";
-import { plural, sourceName } from "@/lib/funding/labels";
+import { invoiceDueDates, loadClubTermBudget, loadFundingRequest, priorRequests } from "@/lib/domain/funding";
+import { plural, sourceName, sourceNames } from "@/lib/funding/labels";
 import { requestTimeline } from "@/lib/funding/timeline";
 import { TYPE_LABEL } from "@/components/founding/copy";
 import { ClubLogo } from "@/components/ui/avatar";
@@ -15,12 +15,12 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Callout, PageHeader } from "@/components/ui/layout";
 import { FundingStatusBadge } from "@/components/budget/StatusBadge";
 import { RequestTimeline } from "@/components/budget/RequestTimeline";
-import { RequestItemsTable } from "@/components/budget/RequestItemsTable";
+import { RequestItemsTable, lineMathText } from "@/components/budget/RequestItemsTable";
 import { DecisionCallout, RequestFactsCard } from "@/components/budget/RequestDetail";
 import { InvoicePanel } from "@/components/budget/InvoicePanel";
 import { SourceBreakdown } from "@/components/budget/BudgetSummary";
 import { DecisionPanel } from "@/components/budget/admin/DecisionPanel";
-import { CreateInvoiceButton, MarkProcessedButton } from "@/components/budget/admin/InvoiceActions";
+import { MarkProcessedButton } from "@/components/budget/admin/InvoiceActions";
 
 type Params = Promise<{ id: string }>;
 
@@ -34,7 +34,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 /**
  * One funding request for WSUSA: the club, the lines it asked for (as
  * submitted), the club's budget for that semester, its earlier requests, the
- * decision, and the invoice.
+ * decision (line by line, with the source that funds it), and the invoice the
+ * approval created.
  */
 export default async function AdminFundingRequestPage({ params }: { params: Params }) {
   const user = await requireUser("/admin/funding");
@@ -44,11 +45,13 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
   // Drafts are the club's own work until they submit.
   if (!request || request.status === "DRAFT") notFound();
 
-  const [budget, prior] = await Promise.all([loadClubTermBudget(request.clubId, request.termId), priorRequests(request.clubId, request.id)]);
+  const invoice = request.invoices[0] ?? null;
+  const [budget, prior, due] = await Promise.all([loadClubTermBudget(request.clubId, request.termId), priorRequests(request.clubId, request.id), invoiceDueDates(invoice ? [invoice.id] : [])]);
   const club = request.club;
   const source = sourceName(request.fundingSource, club);
-  const invoice = request.invoices[0] ?? null;
   const approved = request.status === "APPROVED" || request.status === "PARTIALLY_APPROVED";
+  const fundedBy = approved ? sourceName(request.fundedSource ?? request.fundingSource, club) : null;
+  const reducedLines = approved ? request.items.filter((i) => i.approvedCents != null && i.approvedCents < i.totalCents).length : 0;
   const steps = requestTimeline({
     status: request.status,
     createdAt: request.createdAt,
@@ -56,6 +59,7 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
     submittedBy: request.submittedBy?.name,
     decidedAt: request.decidedAt,
     decidedBy: request.decidedBy?.name,
+    fundedBy,
     invoice,
   });
   const clubLine = [TYPE_LABEL[club.type], club.department?.name, club.college?.name].filter(Boolean).join(" · ");
@@ -70,7 +74,7 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
             {request.title} <FundingStatusBadge status={request.status} />
           </span>
         }
-        description={`${club.name} · ${request.term.name} · ${source}`}
+        description={`${club.name} · ${request.term.name} · ${fundedBy ? `Funded by ${fundedBy}` : `Expected from ${source}`}`}
         className="mb-0"
       />
 
@@ -82,13 +86,24 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-6">
-          <DecisionCallout request={request} audience="admin" />
+          <DecisionCallout request={request} audience="admin" fundedLabel={fundedBy} reducedLines={reducedLines} />
 
           {request.status === "SUBMITTED" ? (
             <Card>
-              <CardHeader title="Decide" description={`${club.name} asked ${source} for ${fmtMoney(request.amountRequestedCents)}.`} />
+              <CardHeader
+                title="Decide"
+                description={`${club.name} asked for ${fmtMoney(request.amountRequestedCents)} and expects it from ${source}. Approve every line, set what each line gets, or don't approve it.`}
+              />
               <CardBody>
-                <DecisionPanel requestId={request.id} clubName={club.name} title={request.title} requestedCents={request.amountRequestedCents} sourceLabel={source} />
+                <DecisionPanel
+                  requestId={request.id}
+                  clubName={club.name}
+                  title={request.title}
+                  requestedCents={request.amountRequestedCents}
+                  lines={request.items.map((i) => ({ id: i.id, description: i.description, eventTitle: i.eventTitle, totalCents: i.totalCents, math: lineMathText(i) }))}
+                  expectedSource={request.fundingSource}
+                  sourceNames={sourceNames(club)}
+                />
               </CardBody>
             </Card>
           ) : null}
@@ -97,21 +112,25 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
             <Card>
               <CardHeader
                 title="Invoice"
-                description={invoice ? "Attach the PDF to the transfer in the university finance system, then mark it processed." : "Create the invoice to start moving the approved money through the university finance system."}
+                description={
+                  invoice
+                    ? invoice.status === "OPEN"
+                      ? "Created with the approval. Attach the PDF to the transfer in the university finance system, then mark it processed."
+                      : "Processed in the university finance system."
+                    : "This request was approved before approvals created invoices, so it has none."
+                }
               />
-              <CardBody>
-                {invoice ? (
-                  <InvoicePanel invoice={invoice} defaultOpen={invoice.status === "OPEN"}>
+              {invoice ? (
+                <CardBody>
+                  <InvoicePanel invoice={invoice} defaultOpen={invoice.status === "OPEN"} dueAt={due.get(invoice.id) ?? null}>
                     {invoice.status === "OPEN" ? <MarkProcessedButton invoiceId={invoice.id} number={invoice.number} amountCents={invoice.amountCents} /> : null}
                   </InvoicePanel>
-                ) : (
-                  <CreateInvoiceButton requestId={request.id} amountCents={request.amountApprovedCents ?? 0} clubName={club.name} />
-                )}
-              </CardBody>
+                </CardBody>
+              ) : null}
             </Card>
           ) : null}
 
-          <RequestFactsCard request={request} sourceLabel={source} />
+          <RequestFactsCard request={request} sourceLabel={source} fundedLabel={fundedBy} />
 
           <section className="space-y-2" aria-labelledby="items-heading">
             <h2 id="items-heading" className="text-base font-semibold text-ink">
@@ -121,7 +140,7 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
               {plural(request.items.length, "line")}
               {eventLines ? `, ${eventLines} from events` : ""}, as submitted. Per-meeting event costs are multiplied by the meetings scheduled in {request.term.name}.
             </p>
-            <RequestItemsTable items={request.items} requestedCents={request.amountRequestedCents} approvedCents={request.amountApprovedCents} caption={`Lines in ${request.title}`} />
+            <RequestItemsTable items={request.items} requestedCents={request.amountRequestedCents} approvedCents={request.amountApprovedCents} showApproved={approved} caption={`Lines in ${request.title}`} />
           </section>
         </div>
 

@@ -72,7 +72,7 @@ export const SUCCESSION_STEPS: Record<SuccessionMethod, string> = {
   ADVISOR_PRESIDENT: "The President or an advisor proposes one candidate and the other confirms. No ballots.",
   NEXT_IN_LINE: "The people in the seats just below are asked whether they'll move up. The first in line who says yes does. No ballots.",
   SELF_SELECT: "The club's current leaders vote by secret ballot. It counts only if it's unanimous, and no one votes for themselves.",
-  MEMBER_VOTE: "Active members vote by secret ballot. The most votes wins.",
+  MEMBER_VOTE: "Members vote by secret ballot under the club's voting rules (who can vote, quorum, ties). The most votes wins.",
 };
 
 /** A selection's status in its own mode's words (the stored statuses are shared by all four). */

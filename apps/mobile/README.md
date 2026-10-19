@@ -13,9 +13,16 @@ It keeps to what people need on the go:
   them), grouped by day.
 - **Notifications** — your notifications, and push notifications on the phone
   (join approvals, announcements, event changes, reminders before events).
-- **Me** — attendance in every club, your roles, settings and sign-out.
+- **Tasks** (from Home and Me) — everything waiting on you, what WSUSA requires
+  first. Approve or decline join requests and co-host invitations right there,
+  check off to-dos; tests, forms and the rest open where they're done.
+- **Running check-in** — while a meeting's check-in is open, people with the
+  Attendance permission in the host club get **Show check-in QR** (the
+  rotating QR, full screen, with the event code under it) and **Add someone**
+  (recorded as "Added by a leader") on the event and club screens.
+- **Me** — attendance in every club, your roles, Tasks, settings and sign-out.
 
-Everything else (leader tools, budgets, tests, messages, reviews) opens the web
+Everything else (most leader tools, budgets, tests, messages, reviews) opens the web
 app. Built with Expo SDK 58 and expo-router; it talks only to the web app's
 mobile API (`apps/web/src/app/api/m`), which calls the same domain functions as
 the web — the app never has its own rules.
@@ -96,15 +103,16 @@ session, `npm run db:seed` in `apps/web`; the seed prints the codes):
 
 | Code | Event | Good for |
 |---|---|---|
-| `HERE26` | Service & Volunteer Club — Care Kit Assembly (live when seeded, self check-in on) | A new student checking in (Sam): open club → becomes a member |
-| `BUILD8` | Wildcat Robotics — Open Build Night (live, members only) | Approval-gated club → join request sent |
-| `LATER7` | Psychology Club — Grad School Q&A (about 3 hours after seeding) | Maya's "check in?" pop-up and Home banner once it opens |
+| `HERE26` | Wildcat Service Club — Care Kit Assembly for the Weber Cares Pantry (live when seeded) | A new student checking in (Sam): open club → becomes a member |
+| `BUILD8` | RC Wrecker Bots Club — Open Build Night (extra session) (live, members only) | Approval-gated club → join request sent; Priya runs its check-in |
+| `LATER7` | Psi Chi Honors Club / Psi Cho (Psychology Club) — Grad School Q&A with Psychology Faculty (about 3 hours after seeding) | Maya's "check in?" pop-up and Home banner once it opens |
 
-- **Real QR:** sign in on the web as a leader of the hosting club (Priya for
-  Wildcat Robotics) and open the live check-in screen from the Attendance tool
-  (`/checkin/live/<occurrenceId>`), then scan it with the **Scan** tab. The QR
-  changes every 30 seconds; the app trades a fresh scan for a 10-minute pass, so
-  you can sign in after scanning.
+- **Real QR:** sign in as a leader of the hosting club (Priya for RC Wrecker
+  Bots Club). In the app: open the club or the Open Build Night event →
+  **Show check-in QR**. On the web: the live check-in screen from the
+  Attendance tool (`/checkin/live/<occurrenceId>`). Scan it from another
+  device with the **Scan** tab. The QR changes every 30 seconds; the app
+  trades a fresh scan for a 10-minute pass, so you can sign in after scanning.
 - **No camera:** Scan → **Enter code**, type the code.
 - **Deep link:** `wildcatclubs://c/HERE26` opens the check-in screen (it waits
   for you to tap **Check in** — a link alone never checks anyone in).
@@ -161,7 +169,8 @@ register; the Notifications tab works either way.
 Then use a development or store build (Expo Go on Android can't receive
 pushes; iOS and Android each need their push credentials, below), sign in and
 allow notifications. Settings → Notifications on the web then says push
-notifications reach your phone.
+notifications reach your phone, and so does the app's Me tab (the server's
+answer to `POST /api/m/push-token` carries `delivering`).
 
 **Android also needs Firebase (FCM)** — without it Android builds get no push
 token (Me → Settings shows the Firebase error):
@@ -210,8 +219,11 @@ src/app/              screens (expo-router)
   (tabs)/             Home, Scan, Clubs, Calendar, Notifications (inbox.tsx), Me
   welcome.tsx         sign in (Google / test personas)
   c/[code].tsx        the check-in flow (scan, typed code, pop-up, deep link)
-  club/[slug].tsx     a club: Register / Subscribe, events, your attendance, pop-up
+  club/[slug].tsx     a club: Register / Follow, events, your attendance, pop-up
   event/[id].tsx      one meeting
+  tasks.tsx           Tasks: approvals, what WSUSA requires, to-dos
+  live/[id].tsx       leaders: the rotating check-in QR, full screen (keeps the screen awake)
+  live/add/[id].tsx   leaders: add someone by hand
 src/api/              typed client; types.ts mirrors apps/web/src/app/api/m/_types.ts
 src/auth/session.tsx  sign-in state, secure token storage, push registration
 src/components/       shared UI (buttons, cards, rows, states, result views)

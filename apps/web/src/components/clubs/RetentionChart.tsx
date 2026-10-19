@@ -18,9 +18,9 @@ function toData(points: RetentionPointView[]): ColumnDatum[] {
     partial: p.inProgress,
     detail:
       p.rate == null
-        ? p.previousAttendees === 0
-          ? `Nobody to compare against yet · ${p.attendees} attended`
-          : `${p.attendees} attended`
+        ? p.attendees === 0
+          ? "Nobody checked in"
+          : `Nobody to compare against yet · ${p.attendees} attended`
         : `${p.retained} of ${p.previousAttendees} came back · ${p.attendees} attended`,
   }));
 }

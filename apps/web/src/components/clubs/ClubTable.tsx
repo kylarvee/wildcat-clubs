@@ -8,6 +8,7 @@ import { ClubStatusBadge, RatingInline } from "@/components/clubs/ClubCard";
 import { RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
 import { FoundIn } from "@/components/search/FoundIn";
 import { Reasons } from "@/components/search/Reasons";
+import { ACTIVITY_SCORE_HINT, noRetentionText, RETENTION_HINT } from "@/lib/metrics/pure";
 
 /** List view of the clubs list: one row per club, for comparing numbers side by side. */
 export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; states: Map<string, ViewerClubState>; signedIn: boolean }) {
@@ -15,7 +16,7 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
   return (
     // `relative` keeps the visually-hidden labels inside the horizontal scroller on phones.
     <Table className="relative">
-      <caption className="sr-only">Clubs, one per row, with attending members, rating, retention and activity</caption>
+      <caption className="sr-only">Clubs, one per row, with attending members, rating, retention and events held lately</caption>
       <THead>
         <tr>
           <TH scope="col">Club</TH>
@@ -24,8 +25,8 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
             Attending
           </TH>
           <TH scope="col" className="hidden sm:table-cell">Rating</TH>
-          <TH scope="col" className="hidden text-right lg:table-cell">Retention</TH>
-          <TH scope="col" className="hidden text-right xl:table-cell" title="Events in the last 30 days and the next 30 days">Events</TH>
+          <TH scope="col" className="hidden text-right lg:table-cell" title={RETENTION_HINT}>Retention</TH>
+          <TH scope="col" className="hidden text-right xl:table-cell" title={ACTIVITY_SCORE_HINT}>Events held</TH>
           {actions ? <TH scope="col"><span className="sr-only">Actions</span></TH> : null}
         </tr>
       </THead>
@@ -63,7 +64,10 @@ export function ClubTable({ clubs, states, signedIn }: { clubs: ClubListItem[]; 
               <TD className="hidden whitespace-nowrap text-sm sm:table-cell">
                 <RatingInline avg={c.metrics.avgRating} count={c.metrics.reviewCount} size={13} />
               </TD>
-              <TD className="hidden text-right tabular-nums lg:table-cell">{pct(c.metrics.retentionRate)}</TD>
+              <TD className="hidden text-right tabular-nums lg:table-cell" title={c.metrics.retention?.label ?? noRetentionText()}>
+                {pct(c.metrics.retentionRate)}
+                {c.metrics.retention ? <span className="block text-xs text-ink-3">{c.metrics.retention.months}</span> : null}
+              </TD>
               <TD className="hidden text-right tabular-nums xl:table-cell">{c.metrics.activityScore}</TD>
               {actions ? (
                 <TD>

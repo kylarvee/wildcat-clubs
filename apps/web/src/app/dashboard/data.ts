@@ -85,19 +85,28 @@ async function myClubs(user: Actor, ctx: ViewerContext, now: Date): Promise<Dash
   const clubs = [...map.values()].map((c) => ({ ...c, roles: c.roles.length ? c.roles : c.topRole === "MEMBER" ? ["Member"] : [] }));
 
   // Next meeting per approved club: the next date of any repeating event it hosts (a weekly
-  // meeting, a practice…), filtered by lib/authz/events like every calendar.
+  // meeting, a practice…), filtered by lib/authz/events like every calendar. Two queries for
+  // every club at once: each repeating event's next date, then which club hosts it.
   const visible = eventVisibilityWhere({ signedIn: true, admin: ctx.admin, memberClubIds: ctx.memberClubIds });
   const approved = clubs.filter((c) => c.status === "APPROVED" && !c.pending);
-  const next = await Promise.all(
-    approved.map((c) =>
-      db.eventOccurrence.findFirst({
-        where: { startsAt: { gt: now }, status: "SCHEDULED", event: { AND: [{ clubId: c.id, recurrence: { not: "NONE" }, status: "SCHEDULED" }, visible] } },
-        orderBy: { startsAt: "asc" },
-        select: { startsAt: true },
-      }),
-    ),
-  );
-  approved.forEach((c, i) => (c.nextMeeting = next[i]?.startsAt ?? null));
+  if (approved.length) {
+    const firsts = await db.eventOccurrence.groupBy({
+      by: ["eventId"],
+      where: { startsAt: { gt: now }, status: "SCHEDULED", event: { AND: [{ clubId: { in: approved.map((c) => c.id) }, recurrence: { not: "NONE" }, status: "SCHEDULED" }, visible] } },
+      _min: { startsAt: true },
+    });
+    const hosts = firsts.length ? await db.event.findMany({ where: { id: { in: firsts.map((f) => f.eventId) } }, select: { id: true, clubId: true } }) : [];
+    const hostOf = new Map(hosts.map((e) => [e.id, e.clubId]));
+    const next = new Map<string, Date>();
+    for (const f of firsts) {
+      const clubId = hostOf.get(f.eventId);
+      const at = f._min.startsAt;
+      if (!clubId || !at) continue;
+      const soonest = next.get(clubId);
+      if (!soonest || at < soonest) next.set(clubId, at);
+    }
+    for (const c of approved) c.nextMeeting = next.get(c.id) ?? null;
+  }
 
   return clubs.sort((a, b) => Number(b.leads) - Number(a.leads) || Number(a.pending) - Number(b.pending) || a.name.localeCompare(b.name));
 }

@@ -85,8 +85,8 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
     sourceNames: names,
   };
   const generalTotal = budget.general.reduce((s, l) => s + l.totalCents, 0);
-  // Something left to ask for: a line no submitted or approved request covers yet.
-  const canRequest = budget.lines.some((l) => !l.lockedBy);
+  // Something left to ask for: a line no request holds, including what WSUSA didn't fund (lib/funding/locks).
+  const canRequest = budget.lines.some((l) => l.requestable);
 
   return (
     <div className="space-y-8">
@@ -111,7 +111,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
           <Callout tone="brand" icon={<Wallet />} title={`Funding for ${focusEvent.title}`}>
             <p>
               Its costs are highlighted below: <strong>{fmtMoney(focusGroup.totalCents)}</strong> in {term.name}.{" "}
-              {focusGroup.lines.some((l) => !l.lockedBy) ? (
+              {focusGroup.lines.some((l) => l.requestable) ? (
                 <Link href={newRequest(focusEvent.id)} className="font-medium underline">
                   Start a request with these lines
                 </Link>
@@ -141,7 +141,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
 
       {budget.lines.length || budget.requests.length ? (
         <Card>
-          <CardHeader title="Where the money comes from" description="Planned costs by the source they're expected from, next to what's been requested and approved." />
+          <CardHeader title="Where the money comes from" description="Planned and requested money by the source you expect; approved money by the source WSUSA says funded it." />
           <CardBody>
             <SourceBreakdown planned={budget.planned} money={budget.money} club={club} />
           </CardBody>
@@ -164,7 +164,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                 sourceNames={names}
                 canEditEvents={canEditEvents}
                 highlighted={g.event.id === focusEvent?.id}
-                requestHref={g.lines.some((l) => !l.lockedBy) ? newRequest(g.event.id) : null}
+                requestHref={g.lines.some((l) => l.requestable) ? newRequest(g.event.id) : null}
               />
             ))}
             <p className="text-right text-sm text-ink-2">
@@ -199,9 +199,9 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                   sourceNames={names}
                   actions={
                     l.lockedBy ? (
-                      <span className="flex h-8 w-8 items-center justify-center text-ink-3" title="Locked while it's part of a request">
+                      <span className="flex h-8 w-8 items-center justify-center text-ink-3" title="Locked while a request covers it: in review, or funded in full">
                         <Lock className="h-4 w-4" aria-hidden />
-                        <span className="sr-only">Locked while it&apos;s part of a request</span>
+                        <span className="sr-only">Locked while a request covers it: in review, or funded in full</span>
                       </span>
                     ) : (
                       <CostRowActions ctx={ctx} item={{ id: l.id, description: l.description, category: l.category, quantity: l.quantity, unitCostCents: l.unitCostCents, fundingSource: l.fundingSource, termId: l.termId }} />
@@ -224,7 +224,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
 
       <Section
         title="Funding requests"
-        description={`Requests for ${term.name}. Each asks one source for money and lists the lines it covers.`}
+        description={`Requests for ${term.name}. Each lists the lines it covers and the source you expect; WSUSA reviews every request and may fund it from another source.`}
         action={
           <Link href={`${base}/requests`} className="shrink-0 text-sm font-medium text-brand-600 hover:underline">
             All requests

@@ -9,12 +9,18 @@ import { buildWorld } from "@/test/requirements/world";
 
 const state = vi.hoisted(() => ({ db: null as unknown as import("@/test/requirements/fake-db").FakeDb, failSweep: false }));
 vi.mock("@/lib/db", async () => ({ db: (await import("@/test/requirements/fake-db")).fakeClient(() => state.db) }));
-vi.mock("@/lib/domain/notify", async (original) => ({
-  ...(await original<object>()),
-  notify: async (input: { userIds: string[]; kind: string; title: string; body?: string; href?: string }) => {
+vi.mock("@/lib/domain/notify", async (original) => {
+  const bell = async (input: { userIds: string[]; kind: string; title: string; body?: string; href?: string }) => {
     await state.db.delegate("notification").createMany({ data: input.userIds.map((userId) => ({ userId, kind: input.kind, title: input.title, body: input.body ?? null, href: input.href ?? null })) });
-  },
-}));
+  };
+  return {
+    ...(await original<object>()),
+    notify: bell,
+    notifyEach: async (input: { kind: string; notices: { userIds: string[]; title: string; body?: string; href?: string }[] }) => {
+      for (const n of input.notices) await bell({ ...n, kind: input.kind });
+    },
+  };
+});
 vi.mock("@/lib/domain/requirements", async (original) => {
   const real = await original<typeof import("@/lib/domain/requirements")>();
   return { ...real, syncAllRequirementHolders: (opts: Parameters<typeof real.syncAllRequirementHolders>[0]) => (state.failSweep ? Promise.reject(new Error("database went away")) : real.syncAllRequirementHolders(opts)) };

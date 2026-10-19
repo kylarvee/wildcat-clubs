@@ -13,7 +13,12 @@ import { JOIN_OPTIONS, SUCCESSION_OPTIONS } from "@/lib/constitution/templates";
 import { withdrawCustomDocumentAction } from "@/app/clubs/[slug]/manage/constitution/actions";
 import { useFormSubmit } from "@/components/founding/useFormSubmit";
 
-/** Upload a custom constitution or bylaws for WSUSA approval, stating the rules it sets. */
+/**
+ * Upload a custom constitution or bylaws for WSUSA approval, stating the one
+ * setting that document governs: a constitution says how students join,
+ * bylaws say the primary way leaders are chosen. Nothing changes until WSUSA
+ * approves it.
+ */
 export function CustomUploadForm({ clubId, joinPolicy, successionMethod, pendingKinds }: { clubId: string; joinPolicy: JoinPolicy; successionMethod: SuccessionMethod; pendingKinds: ("CONSTITUTION" | "BYLAWS")[] }) {
   const router = useRouter();
   const [kind, setKind] = useState<"CONSTITUTION" | "BYLAWS">(pendingKinds.includes("CONSTITUTION") ? "BYLAWS" : "CONSTITUTION");
@@ -59,19 +64,25 @@ export function CustomUploadForm({ clubId, joinPolicy, successionMethod, pending
               {(id) => <input id={id} name="file" type="file" accept=".pdf,.doc,.docx" className="block w-full pt-1.5 text-sm text-ink-2 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand hover:file:bg-brand-100" />}
             </Field>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Its primary way of choosing leaders" required hint="Wildcat Clubs starts every selection with it once WSUSA approves. The President and advisor can still use the others for a particular seat.">
-              {(id) => (
-                <Select id={id} name="successionMethod" defaultValue={successionMethod}>
-                  {SUCCESSION_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
-            <Field label="How do students join?" required hint="Applied to your Register button on approval.">
+          {kind === "BYLAWS" ? (
+            <div className="space-y-2">
+              <Field label="Your bylaws' primary way of choosing leaders" required hint="Wildcat Clubs starts every selection with it once WSUSA approves. The President and advisor can still use the others for a particular seat." className="sm:max-w-md">
+                {(id) => (
+                  <Select id={id} name="successionMethod" defaultValue={successionMethod}>
+                    {SUCCESSION_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+              <p className="text-xs text-ink-3">
+                Wildcat Clubs reads only this from custom bylaws. Once they&apos;re in effect, member votes follow its standard rules (active members vote, any turnout counts, and whoever applies a tied result chooses), and WSUSA&apos;s follow-up on an empty President seat has no set date. Who can join stays as it is.
+              </p>
+            </div>
+          ) : (
+            <Field label="How do students join under your constitution?" required hint="Applied to your Register button when WSUSA approves it. Until then, joining stays as it is." className="sm:max-w-md">
               {(id) => (
                 <Select id={id} name="joinPolicy" defaultValue={joinPolicy}>
                   {JOIN_OPTIONS.map((o) => (
@@ -82,7 +93,7 @@ export function CustomUploadForm({ clubId, joinPolicy, successionMethod, pending
                 </Select>
               )}
             </Field>
-          </div>
+          )}
           <Field label="Note to WSUSA (optional)" hint="What changed and why — it helps reviewers move faster.">
             {(id) => <Textarea id={id} name="note" rows={2} maxLength={2000} />}
           </Field>

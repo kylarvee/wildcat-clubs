@@ -9,7 +9,10 @@ export type RequestListItem = {
   id: string;
   title: string;
   status: FundingStatus;
+  /** The source the club expects. */
   fundingSource: FundingSource;
+  /** The source that funded it (approvals). */
+  fundedSource: FundingSource | null;
   amountRequestedCents: number;
   amountApprovedCents: number | null;
   createdAt: Date;
@@ -49,7 +52,7 @@ export function RequestList({ requests, base, sourceNames, showTerm }: { request
                 </div>
                 <p className="mt-0.5 text-sm text-ink-3">
                   {showTerm && r.term ? `${r.term.name} · ` : ""}
-                  {sourceNames[r.fundingSource]} · {when(r)}
+                  {r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED" ? `Funded by ${sourceNames[r.fundedSource ?? r.fundingSource]}` : `Expects ${sourceNames[r.fundingSource]}`} · {when(r)}
                 </p>
                 {r.staleLines ? <p className="mt-0.5 text-xs text-warning">{plural(r.staleLines, "line")} removed from the budget since this draft was saved</p> : null}
               </div>

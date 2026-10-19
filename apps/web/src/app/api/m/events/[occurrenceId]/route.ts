@@ -8,6 +8,7 @@ import { describeSchedule } from "@/lib/events/summary";
 import { richToText } from "@/lib/rich/sanitize";
 import { mobile, mobileActor, preflight } from "../../_lib/http";
 import { feedToMEvent } from "../../_lib/serialize";
+import { leaderCheckinFor } from "../../_lib/checkin-tools";
 import type { MEventDetail } from "../../_types";
 
 /**
@@ -25,7 +26,9 @@ async function findOccurrence(id: string) {
  * GET /api/m/events/[occurrenceId] → MEventDetail: one meeting with its
  * description, links and where to go (an event id works too: its next
  * meeting). Visibility comes from lib/authz/events (eventAccess):
- * members-only events stay hidden from everyone else.
+ * members-only events stay hidden from everyone else. `leaderCheckin` (the
+ * QR and "Add someone") is there only while check-in is open, for people
+ * who can run it (lib/domain/attendance canManageOccurrence).
  */
 export async function GET(req: Request, { params }: { params: Promise<{ occurrenceId: string }> }) {
   const { occurrenceId } = await params;
@@ -47,6 +50,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ occurren
       throw notFound("Event");
     }
     const { body, links } = splitEventLinks(e.descriptionHtml);
+    const leaderCheckin = await leaderCheckinFor(actor, o.id);
     return {
       ...feedToMEvent(o),
       description: richToText(body, 4000),
@@ -66,6 +70,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ occurren
               allDay: e.allDay,
             }),
       webPath: `/events/${e.id}?o=${o.id}`,
+      leaderCheckin,
     };
   });
 }

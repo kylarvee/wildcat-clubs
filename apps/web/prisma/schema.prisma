@@ -136,6 +136,9 @@ model User {
   calendarToken        String           @unique @default(uuid()) // private feed link: 122 random bits
   subscribeUniversity  Boolean          @default(true) // university-wide events on my calendar
   emailNotifications   Boolean          @default(true)
+  /// Per-category choices from Settings → Notifications: { [category]: { email?: boolean, push?: boolean } }.
+  /// Categories and defaults live in components/notifications/catalog (the notification registry).
+  notificationPrefs    Json             @default("{}")
   appPromptDismissedAt DateTime?
   hasMobileApp         Boolean          @default(false)
   /// "Remind me before events" (Settings → Notifications): event reminders from the scheduled jobs.
@@ -474,6 +477,9 @@ model ClubDocument {
   /// What a club says its custom document sets; applied when WSUSA approves it.
   statedSuccessionMethod SuccessionMethod?
   statedJoinPolicy       JoinPolicy?
+  /// The builder answers this document was made from, kept with it so any later
+  /// leader can amend what's in effect (lib/constitution).
+  builderAnswers         Json?
   note                   String?
   fileId                 String?
   file                   FileItem?          @relation(fields: [fileId], references: [id])
@@ -919,7 +925,10 @@ model FundingRequest {
   term                 Term                 @relation(fields: [termId], references: [id])
   title                String
   justification        String?
+  /// The source the club expects ("Expected source"); WSUSA decides every request.
   fundingSource        FundingSource
+  /// The source that actually funded it, recorded by WSUSA when it approves.
+  fundedSource         FundingSource?
   amountRequestedCents Int                  @default(0)
   amountApprovedCents  Int?
   status               FundingStatus        @default(DRAFT)
@@ -948,6 +957,9 @@ model FundingRequestItem {
   unitCostCents Int
   occurrences   Int            @default(1)
   totalCents    Int
+  /// WSUSA's decision on this line: null until decided, 0 = not funded. A line not
+  /// (fully) funded no longer locks its budget item, so the club can ask elsewhere.
+  approvedCents Int?
 }
 
 enum InvoiceStatus {
@@ -1315,6 +1327,8 @@ model Election {
   confirmedAt         DateTime?
   votingOpensAt       DateTime
   votingClosesAt      DateTime
+  /// The club's bylaw rules frozen when the selection starts: { minEvents, quorumPercent, tieBreak, noticeDays }.
+  rules               Json                @default("{}")
   winnerId            String?
   createdById         String
   createdBy           User                @relation(fields: [createdById], references: [id])
@@ -1485,6 +1499,7 @@ enum OutboxChannel {
 }
 
 enum OutboxStatus {
+  QUEUED // waiting for the scheduled job (large sends go out in batches)
   SENT
   MOCKED // integration off: recorded here instead of sent
   FAILED
@@ -1500,7 +1515,12 @@ model OutboxMessage {
   href      String?
   status    OutboxStatus
   error     String?
+  /// The notification kind that produced it (the registry's key), when there is one.
+  kind      String?
   createdAt DateTime      @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1558,10 +1578,13 @@ model ActivityLog {
   data       Json?
   /// true only for actions safe to show on a profile or club feed
   isPublic   Boolean  @default(false)
+  /// The person the row is about (data.userId, or an election's winner), for profile feeds.
+  subjectUserId String?
 
   @@index([clubId, at])
   @@index([actorId, at])
   @@index([action, at])
+  @@index([subjectUserId, at])
 }
 
 // ─── Member details ──────────────────────────────────────────────────────────

@@ -51,6 +51,10 @@ const ICONS = {
   qr: { ios: 'qrcode', android: 'qr_code_2' },
   readAll: { ios: 'checkmark.circle', android: 'done_all' },
   arrow: { ios: 'arrow.right', android: 'arrow_forward' },
+  tasks: { ios: 'checklist', android: 'checklist' },
+  box: { ios: 'square', android: 'check_box_outline_blank' },
+  boxChecked: { ios: 'checkmark.square.fill', android: 'check_box' },
+  refresh: { ios: 'arrow.clockwise', android: 'refresh' },
 } satisfies Record<string, { ios: SFSymbol; android: Material }>;
 
 export type IconName = keyof typeof ICONS;

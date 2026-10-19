@@ -76,6 +76,18 @@ export async function cancel(slug: string, electionId: string) {
   return r;
 }
 
+/** A tied member vote whose bylaws call for a runoff: the tied candidates on a new ballot that opens now and closes then (campus time). */
+export async function runoff(slug: string, electionId: string, votingClosesAt: string) {
+  const r = await act(async (actor) => {
+    const closes = parseCampusLocal(votingClosesAt);
+    if (!closes) throw invalid("Choose when the runoff closes.");
+    const e = await elections.startRunoff(actor, electionId, { votingClosesAt: closes });
+    return { id: e.id };
+  });
+  refresh(slug);
+  return r;
+}
+
 /** `permissions`: what the winner may do in an officer / ambassador seat (omit to use the seat's defaults). */
 export async function applyResult(slug: string, electionId: string, winnerCandidateId: string | null, permissions?: string[]) {
   const r = await act(async (actor) => {

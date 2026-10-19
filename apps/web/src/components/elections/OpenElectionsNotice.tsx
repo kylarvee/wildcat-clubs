@@ -3,7 +3,8 @@ import { ArrowRight, ArrowUpCircle, Vote } from "lucide-react";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getClubAccess } from "@/lib/authz";
-import { canSeeElections, currentLeaderIds, syncClubElections } from "@/lib/domain/elections";
+import { canSeeElections, currentLeaderIds, syncClubElections, voterRoll, voterStatusIn } from "@/lib/domain/elections";
+import { readSelectionRules } from "@/lib/roles/pipeline";
 import { fmtWhen } from "@/components/elections/ElectionBits";
 import { cn } from "@/components/ui/cn";
 
@@ -33,6 +34,13 @@ export async function OpenElectionsNotice({ clubId, className }: { clubId: strin
   });
   if (open.length === 0) return null;
   const leader = open.some((e) => e.method === "SELF_SELECT") ? (await currentLeaderIds(clubId)).includes(viewer.id) : false;
+  // A member vote under the bylaws' attendance rule: members who can't vote hear why instead of "Vote now".
+  const cannotVote = new Map<string, string>();
+  for (const e of open) {
+    if (e.method !== "MEMBER_VOTE" || e.status !== "VOTING" || e.votes.length || !readSelectionRules(e.rules).minEvents) continue;
+    const s = voterStatusIn(await voterRoll(e), viewer.id);
+    if (!s.eligible) cannotVote.set(e.id, s.reason ?? "You can't vote in this one.");
+  }
 
   const items = open.flatMap((e) => {
     const voted = e.votes.length > 0;
@@ -47,6 +55,8 @@ export async function OpenElectionsNotice({ clubId, className }: { clubId: strin
       return [{ e, icon: Vote, title: asked ? `You're a candidate: ${e.title}` : `Coming up: ${e.title}`, body: `The leaders vote from ${fmtWhen(e.votingOpensAt)}.` }];
     }
     const voting = e.status === "VOTING";
+    const why = cannotVote.get(e.id);
+    if (why) return [{ e, icon: Vote, title: `Voting is open: ${e.title}`, body: why }];
     return [{ e, icon: Vote, title: voting ? (voted ? `You voted: ${e.title}` : `Vote now: ${e.title}`) : `Nominations open: ${e.title}`, body: voting ? `Voting for ${e.position.name} closes ${fmtWhen(e.votingClosesAt)}.` : `Run for ${e.position.name} before voting opens ${fmtWhen(e.votingOpensAt)}.` }];
   });
   if (items.length === 0) return null;

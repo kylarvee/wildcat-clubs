@@ -6,7 +6,7 @@ import { fmtLongDate, fmtMoney } from "@/lib/time";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { TYPE_LABEL } from "@/components/founding/copy";
 
-import { lineCents } from "@/lib/funding/math";
+import { earlierFundedCents, lineCents } from "@/lib/funding/math";
 
 /**
  * Funding invoice PDFs (@react-pdf/renderer). Built-in PDF fonts only
@@ -48,6 +48,7 @@ const s = StyleSheet.create({
   cMath: { width: 128, textAlign: "right" },
   cTimes: { width: 48, textAlign: "right" },
   cTotal: { width: 72, textAlign: "right" },
+  cApproved: { width: 72, textAlign: "right" },
   totals: { marginTop: 10, marginLeft: "auto", width: 230 },
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
   grand: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, marginTop: 3, borderTopWidth: 1.25, borderTopColor: INK },
@@ -107,7 +108,10 @@ export type InvoicePdfData = {
     title: string;
     justification: string | null;
     status: FundingStatus;
+    /** The source the club expected. */
     fundingSource: FundingSource;
+    /** The source that funded it (WSUSA records it on approval). */
+    fundedSource: FundingSource | null;
     amountRequestedCents: number;
     amountApprovedCents: number | null;
     submittedAt: Date | null;
@@ -116,7 +120,8 @@ export type InvoicePdfData = {
     submittedBy: { name: string } | null;
     decidedBy: { name: string } | null;
     term: { name: string };
-    items: { id: string; description: string; eventTitle: string | null; quantity: number; unitCostCents: number; occurrences: number; totalCents: number }[];
+    /** approvedCents: WSUSA's decision on the line (null on approvals recorded before line-by-line decisions: funded in full). */
+    items: { id: string; description: string; eventTitle: string | null; quantity: number; unitCostCents: number; occurrences: number; totalCents: number; approvedCents: number | null }[];
     club: { name: string; type: ClubType; contactEmail: string | null; department: { name: string } | null; college: { name: string } | null };
   };
 };
@@ -127,7 +132,9 @@ function InvoicePdf({ inv }: { inv: InvoicePdfData }) {
   const partial = r.status === "PARTIALLY_APPROVED";
   const processed = inv.status === "PROCESSED";
   const clubLine = [TYPE_LABEL[club.type], club.department?.name, club.college?.name].filter(Boolean).join(" · ");
-  const [sourceHead, sourceDetail] = sourceLines(r.fundingSource, club);
+  const funded = r.fundedSource ?? r.fundingSource;
+  const [sourceHead, sourceDetail] = sourceLines(funded, club);
+  const expectedOther = funded !== r.fundingSource ? sourceLines(r.fundingSource, club)[0] : null;
   return (
     <Document
       title={`Invoice ${inv.number}`}
@@ -163,9 +170,10 @@ function InvoicePdf({ inv }: { inv: InvoicePdfData }) {
             {club.contactEmail ? <Txt style={s.small}>{t(club.contactEmail)}</Txt> : null}
           </View>
           <View style={s.col}>
-            <Txt style={s.label}>FUNDING FROM</Txt>
+            <Txt style={s.label}>FUNDED BY</Txt>
             <Txt style={s.strong}>{sourceHead}</Txt>
             <Txt style={s.small}>{t(sourceDetail)}</Txt>
+            {expectedOther ? <Txt style={s.small}>{`The club expected: ${expectedOther}`}</Txt> : null}
             <Txt style={s.small}>{`Semester: ${t(r.term.name)}`}</Txt>
           </View>
           <View style={s.col}>
@@ -181,19 +189,26 @@ function InvoicePdf({ inv }: { inv: InvoicePdfData }) {
             <Txt style={[s.th, s.cItem]}>ITEM</Txt>
             <Txt style={[s.th, s.cMath]}>QTY × UNIT COST</Txt>
             <Txt style={[s.th, s.cTimes]}>TIMES</Txt>
-            <Txt style={[s.th, s.cTotal]}>TOTAL</Txt>
+            <Txt style={[s.th, s.cTotal]}>{partial ? "ASKED" : "TOTAL"}</Txt>
+            {partial ? <Txt style={[s.th, s.cApproved]}>APPROVED</Txt> : null}
           </View>
-          {r.items.map((i) => (
-            <View key={i.id} style={s.tr} wrap={false}>
-              <View style={[s.td, s.cItem]}>
-                <Txt>{t(i.description)}</Txt>
-                <Txt style={s.small}>{i.eventTitle ? `Event: ${t(i.eventTitle)}` : "General cost"}</Txt>
+          {r.items.map((i) => {
+            const earlier = earlierFundedCents(i);
+            const got = i.approvedCents ?? i.totalCents;
+            return (
+              <View key={i.id} style={s.tr} wrap={false}>
+                <View style={[s.td, s.cItem]}>
+                  <Txt>{t(i.description)}</Txt>
+                  <Txt style={s.small}>{i.eventTitle ? `Event: ${t(i.eventTitle)}` : "General cost"}</Txt>
+                  {earlier ? <Txt style={s.small}>{`The rest of the line: ${fmtMoney(earlier)} was funded earlier`}</Txt> : null}
+                </View>
+                <Txt style={[s.td, s.cMath]}>{`${qty(i.quantity)} × ${fmtMoney(i.unitCostCents)}${i.occurrences > 1 ? ` = ${fmtMoney(lineCents(i.quantity, i.unitCostCents))}` : ""}`}</Txt>
+                <Txt style={[s.td, s.cTimes]}>{i.occurrences > 1 ? `× ${i.occurrences}` : "once"}</Txt>
+                <Txt style={[s.td, s.cTotal]}>{fmtMoney(i.totalCents)}</Txt>
+                {partial ? <Txt style={[s.td, s.cApproved]}>{got === 0 ? "Not funded" : fmtMoney(got)}</Txt> : null}
               </View>
-              <Txt style={[s.td, s.cMath]}>{`${qty(i.quantity)} × ${fmtMoney(i.unitCostCents)}${i.occurrences > 1 ? ` = ${fmtMoney(lineCents(i.quantity, i.unitCostCents))}` : ""}`}</Txt>
-              <Txt style={[s.td, s.cTimes]}>{i.occurrences > 1 ? `× ${i.occurrences}` : "once"}</Txt>
-              <Txt style={[s.td, s.cTotal]}>{fmtMoney(i.totalCents)}</Txt>
-            </View>
-          ))}
+            );
+          })}
           {r.items.length === 0 ? (
             <View style={s.tr}>
               <Txt style={[s.td, s.small]}>No line items were recorded with this request.</Txt>

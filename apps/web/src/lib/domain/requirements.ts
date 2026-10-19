@@ -9,7 +9,7 @@ import { seatDueAt, type RequirementState } from "@/lib/authz/requirement-rules"
 import { missingDetails } from "@/lib/details/rules";
 import { logActivity } from "@/lib/lake/activity";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
-import { notify, type NotifyInput } from "@/lib/domain/notify";
+import { notifyEach, type NotifyInput } from "@/lib/domain/notify";
 import { fmtDate } from "@/lib/time";
 import { renewalCycle } from "@/lib/tests/cycles";
 
@@ -357,7 +357,8 @@ async function applySync(plan: SyncPlan, now: Date) {
   for (const rows of chunks(plan.assignmentCreates)) writes.push(db.testAssignment.createMany({ data: rows, skipDuplicates: true }));
   for (const [data, all] of grouped(plan.assignmentUpdates)) for (const ids of chunks(all)) writes.push(db.testAssignment.updateMany({ where: { id: { in: ids } }, data }));
   if (writes.length) await db.$transaction(writes);
-  for (const n of plan.notices) await notify(n);
+  // Together, so a requirement every member owes queues its emails instead of sending hundreds at once (lib/domain/notify).
+  await notifyEach({ kind: "requirement.assigned", notices: plan.notices });
 }
 
 /**
@@ -465,16 +466,15 @@ export async function notifyOverdueRequirements(now: Date = new Date()): Promise
   ]);
   const toldBy = new Map<string, { href: string | null; createdAt: Date }[]>();
   for (const n of told) toldBy.set(n.userId, [...(toldBy.get(n.userId) ?? []), n]);
-  let notified = 0;
+  const notices: Omit<NotifyInput, "kind">[] = [];
   for (const t of late) {
     const from = t.dueAt ?? t.createdAt;
     const mine = toldBy.get(t.assigneeId!) ?? [];
     if (mine.some((n) => n.href === t.href && n.createdAt >= from)) continue;
     const name = t.title.replace(ACTION_PREFIX, "");
     const gates = gating.has(`${t.sourceId?.split(":")[0] ?? ""}:${t.assigneeId}`);
-    await notify({
+    notices.push({
       userIds: [t.assigneeId!],
-      kind: "requirement.overdue",
       title: gates ? `Permissions paused${t.club ? ` in ${t.club.name}` : ""}` : "A WSUSA requirement is overdue",
       body: gates ? `${name} is overdue. Your title stays, and your permissions come back as soon as it's done.` : `${name} was due ${fmtDate(t.dueAt ?? now, "MMM d")}. WSUSA requires it, so please finish it as soon as you can.`,
       href: t.href ?? "/tasks",
@@ -482,9 +482,10 @@ export async function notifyOverdueRequirements(now: Date = new Date()): Promise
     // Later tasks in this run see it, as they would have in the database.
     mine.push({ href: t.href ?? "/tasks", createdAt: new Date() });
     toldBy.set(t.assigneeId!, mine);
-    notified++;
   }
-  return { notified };
+  // Together, so a deadline every member shares queues its emails instead of sending hundreds at once.
+  await notifyEach({ kind: "requirement.overdue", notices });
+  return { notified: notices.length };
 }
 
 // ─── Admin: Requirements (/admin/requirements) ───────────────────────────────

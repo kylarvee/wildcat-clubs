@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { Card, SectionHeader } from '@/components/Card';
 import { ClubLogo } from '@/components/ClubLogo';
 import { Icon, type IconName } from '@/components/Icon';
+import { LeaderCheckinCard } from '@/components/LeaderCheckinCard';
 import { ScrollScreen } from '@/components/Screen';
 import { SignInPrompt } from '@/components/SignInPrompt';
 import { ErrorView, InlineNotice, LoadingView } from '@/components/States';
@@ -45,6 +46,9 @@ export default function EventScreen() {
         {e.happeningNow && !e.cancelled ? <Badge label="Happening now" tone="live" /> : null}
         <Badge label={e.visibility === 'PUBLIC' ? 'Open to everyone' : e.visibility === 'UNIVERSITY' ? 'Weber State only' : 'Members only'} tone="neutral" />
       </View>
+
+      {/* Leaders who can run check-in, while it's open (the server decides). */}
+      {e.leaderCheckin ? <LeaderCheckinCard item={e.leaderCheckin} showTitle={false} /> : null}
 
       <Card style={styles.facts}>
         <Fact icon="time" title={`${e.dayLabel} · ${e.timeLabel}`} detail={e.scheduleLabel ?? undefined} />

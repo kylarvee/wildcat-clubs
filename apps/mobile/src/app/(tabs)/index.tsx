@@ -1,8 +1,9 @@
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
+import { errorMessage } from '@/api/client';
 import { Api } from '@/api/endpoints';
-import type { MOccurrence } from '@/api/types';
+import type { MAnnouncement, MOccurrence } from '@/api/types';
 import { useSession } from '@/auth/session';
 import { AnnouncementCard } from '@/components/AnnouncementCard';
 import { Badge } from '@/components/Badge';
@@ -15,6 +16,7 @@ import { ScrollScreen } from '@/components/Screen';
 import { EmptyView, ErrorView, InlineNotice, LoadingView } from '@/components/States';
 import { Icon } from '@/components/Icon';
 import { Text } from '@/components/Text';
+import { plural } from '@/lib/format';
 import { openWeb } from '@/lib/links';
 import { dismissLive, useLiveDismissals } from '@/lib/live-dismissals';
 import { useApi } from '@/lib/use-api';
@@ -65,6 +67,9 @@ function SignedInHome({ userId }: { userId: string }) {
   const { data, error, loading, refreshing, refresh, reload } = useApi(`home:${userId}`, Api.home, { staleMs: 20_000 });
   const dismissed = useLiveDismissals();
   const c = useColors();
+  // "See more": older announcements loaded on this visit (dropped on pull to refresh).
+  const [older, setOlder] = useState<{ items: MAnnouncement[]; cursor: string | null; error: string | null } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   if (loading && !data) return <LoadingView label="Loading your clubs" />;
   if (!data) return <ErrorView error={error} onRetry={reload} />;
@@ -72,8 +77,38 @@ function SignedInHome({ userId }: { userId: string }) {
   const live = data.live.filter((o) => !dismissed.has(o.id));
   const checkIn = (o: MOccurrence) => router.push({ pathname: '/c/[code]', params: { code: o.code, auto: '1', via: 'mobile-popup' } });
 
+  // A post can shift onto the next page when a new one arrives; show it once.
+  const seen = new Set<string>();
+  const announcements: MAnnouncement[] = [];
+  for (const a of [...data.announcements, ...(older?.items ?? [])]) {
+    if (!seen.has(a.id)) {
+      seen.add(a.id);
+      announcements.push(a);
+    }
+  }
+  const moreCursor = older ? older.cursor : data.announcementsCursor;
+  const loadMore = async (cursor: string) => {
+    setLoadingMore(true);
+    try {
+      const page = await Api.announcements(cursor);
+      setOlder((o) => ({ items: [...(o?.items ?? []), ...page.items], cursor: page.nextCursor, error: null }));
+    } catch (e) {
+      setOlder((o) => ({ items: o?.items ?? [], cursor, error: errorMessage(e) }));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const { open, approvals } = data.tasks;
+  const tasksLine = approvals ? `${plural(approvals, 'approval')} waiting for you · ${plural(open, 'open task')} in all` : plural(open, 'open task');
+
   return (
-    <ScrollScreen refreshing={refreshing} onRefresh={refresh}>
+    <ScrollScreen
+      refreshing={refreshing}
+      onRefresh={() => {
+        setOlder(null);
+        void refresh();
+      }}>
       {error ? <InlineNotice error={error} /> : null}
       <Text variant="display" accessibilityRole="header">
         Hi, {data.firstName}
@@ -114,6 +149,20 @@ function SignedInHome({ userId }: { userId: string }) {
         </Card>
       ) : null}
 
+      {open > 0 ? (
+        <Card onPress={() => router.push('/tasks')} style={styles.tasks} accessibilityLabel={`Tasks: ${tasksLine}`} accessibilityHint="Approve requests, check off to-dos and see what WSUSA requires">
+          <Icon name="tasks" size={22} color={c.brandText} />
+          <View style={styles.flex}>
+            <Text variant="label">Tasks</Text>
+            <Text variant="small" tone="ink2">
+              {tasksLine}
+            </Text>
+          </View>
+          {approvals ? <Badge label={String(approvals)} tone="warning" /> : null}
+          <Icon name="chevron" size={16} color={c.ink3} />
+        </Card>
+      ) : null}
+
       <SectionHeader title="Your clubs" action="Browse all" onAction={() => router.push('/clubs')} />
       {data.clubs.length ? (
         <Card style={styles.flush}>
@@ -151,8 +200,8 @@ function SignedInHome({ userId }: { userId: string }) {
       )}
 
       <SectionHeader title="Announcements" />
-      {data.announcements.length ? (
-        data.announcements.map((a) => (
+      {announcements.length ? (
+        announcements.map((a) => (
           <AnnouncementCard key={a.id} item={a} onPress={a.club ? () => router.push({ pathname: '/club/[slug]', params: { slug: a.club!.slug } }) : undefined} />
         ))
       ) : (
@@ -160,6 +209,14 @@ function SignedInHome({ userId }: { userId: string }) {
           No announcements right now.
         </Text>
       )}
+      {older?.error ? <InlineNotice tone="danger">{older.error}</InlineNotice> : null}
+      {moreCursor ? (
+        <Button title="See more" variant="ghost" onPress={() => void loadMore(moreCursor)} loading={loadingMore} accessibilityHint="Loads older announcements" />
+      ) : older ? (
+        <Text variant="small" tone="ink3" style={styles.quiet}>
+          No more announcements to show.
+        </Text>
+      ) : null}
     </ScrollScreen>
   );
 }
@@ -172,6 +229,7 @@ const styles = StyleSheet.create({
   lede: { marginTop: 2, marginBottom: space.lg },
   flush: { padding: 0, overflow: 'hidden' },
   required: { borderWidth: 1, marginBottom: space.lg },
+  tasks: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   requiredHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
   flex: { flex: 1, gap: 2 },
   quiet: { paddingVertical: space.md },

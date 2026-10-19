@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
-import { CalendarPlus, ListChecks } from "lucide-react";
+import { CalendarPlus, ListChecks, Wallet } from "lucide-react";
 import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getTerms } from "@/lib/terms";
+import { fmtMoney } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
-import { budgetTermForEvent, budgetTermOptions, loadClubTermBudget } from "@/lib/domain/funding";
+import { budgetTermForEvent, budgetTermOptions, loadClubTermBudget, loadFundingRequest } from "@/lib/domain/funding";
 import { defaultFundingSource } from "@/lib/funding/defaults";
-import { sourceNames } from "@/lib/funding/labels";
+import { plural, sourceName, sourceNames } from "@/lib/funding/labels";
 import { MIN_JUSTIFICATION } from "@/lib/funding/math";
 import { ButtonLink } from "@/components/ui/button";
-import { EmptyState, PageHeader } from "@/components/ui/layout";
+import { Callout, EmptyState, PageHeader } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
 import { PolicyNotices } from "@/components/policies/PolicyNotices";
 import { RequestBuilder } from "@/components/budget/RequestBuilder";
@@ -20,7 +21,12 @@ export const metadata: Metadata = { title: "New funding request" };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-/** Start a funding request for one semester (?term=), optionally with an event's lines picked (?event=). */
+/**
+ * Start a funding request for one semester (?term=), optionally with an
+ * event's lines picked (?event=), or with the lines an approved request
+ * funded for less than they asked (?from=<requestId>), to ask another source
+ * for the rest.
+ */
 export default async function NewRequestPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: SearchParams }) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -38,13 +44,20 @@ export default async function NewRequestPage({ params, searchParams }: { params:
     return <EmptyState icon={<CalendarPlus />} title="The academic calendar isn't set up yet" description="Requests are made per semester. Ask a system administrator to add Weber State's terms." />;
   }
   const focusEvent = str("event") ? await db.event.findFirst({ where: { id: str("event"), clubId: club.id }, select: { id: true } }) : null;
-  let termId = terms.find((t) => t.id === str("term"))?.id;
+  const fromId = str("from");
+  const fromRequest = fromId ? await loadFundingRequest(fromId) : null;
+  const from = fromRequest && fromRequest.clubId === club.id && (fromRequest.status === "APPROVED" || fromRequest.status === "PARTIALLY_APPROVED") ? fromRequest : null;
+  let termId = from?.termId ?? terms.find((t) => t.id === str("term"))?.id;
   if (!termId && focusEvent) termId = (await budgetTermForEvent(focusEvent.id, now)) ?? undefined;
   termId ??= current?.id ?? terms.at(-1)!.id;
   const termOptions = terms.some((t) => t.id === termId) ? terms : [...terms, ...(await getTerms()).filter((t) => t.id === termId)].sort((a, b) => a.startsOn.getTime() - b.startsOn.getTime());
 
   const [budget, cfg] = await Promise.all([loadClubTermBudget(club.id, termId), getConfig()]);
   const lines = builderLines(budget);
+  // ?from: the lines that request funded for less than they asked and that are still free to ask for.
+  const open = new Map(lines.filter((l) => l.requestable).map((l) => [l.id, l]));
+  const rest = from ? from.items.filter((i) => i.budgetItemId && i.approvedCents != null && i.approvedCents < i.totalCents && open.has(i.budgetItemId)).map((i) => open.get(i.budgetItemId!)!) : [];
+  const preselect = from && rest.length ? { lineIds: rest.map((l) => l.id), title: `${from.title}: the rest` } : null;
 
   return (
     <div className="space-y-6">
@@ -52,13 +65,25 @@ export default async function NewRequestPage({ params, searchParams }: { params:
         breadcrumbs={[{ href: `${base}?term=${termId}`, label: "Budget & funding" }, { label: "New request" }]}
         title="New funding request"
         description="Pick the costs you need money for and tell WSUSA why. Save a draft any time; nothing is sent until you submit."
-        actions={<TermSelect terms={termOptions.map((t) => ({ id: t.id, name: t.name }))} value={termId} currentId={current?.id} basePath={`${base}/requests/new`} keep={{ event: focusEvent?.id }} />}
+        actions={from ? undefined : <TermSelect terms={termOptions.map((t) => ({ id: t.id, name: t.name }))} value={termId} currentId={current?.id} basePath={`${base}/requests/new`} keep={{ event: focusEvent?.id }} />}
         className="mb-0"
       />
+      {from ? (
+        preselect ? (
+          <Callout tone="brand" icon={<Wallet />} title={`Asking again for what “${from.title}” didn't fund`}>
+            WSUSA funded it from {sourceName(from.fundedSource ?? from.fundingSource, club)}. The {plural(rest.length, "line")} that got less than asked {rest.length === 1 ? "is" : "are"} picked below (
+            {fmtMoney(rest.reduce((s, l) => s + l.openCents, 0))} left). Choose the source you expect to cover {rest.length === 1 ? "it" : "them"} now.
+          </Callout>
+        ) : (
+          <Callout tone="info" title={`Nothing left to ask for from “${from.title}”`}>
+            Every line it funded for less is already in another request or funded since.
+          </Callout>
+        )
+      ) : null}
       {lines.length ? (
         <RequestBuilder
           // A new semester starts a fresh form (its lines are different).
-          key={`${budget.term.id}:${focusEvent?.id ?? ""}`}
+          key={`${budget.term.id}:${focusEvent?.id ?? ""}:${from?.id ?? ""}`}
           slug={club.slug}
           clubId={club.id}
           term={{ id: budget.term.id, name: budget.term.name }}
@@ -66,6 +91,7 @@ export default async function NewRequestPage({ params, searchParams }: { params:
           sourceNames={sourceNames(club)}
           defaultSource={defaultFundingSource(club)}
           preselectEventId={focusEvent?.id ?? null}
+          preselect={preselect}
           reviewDays={cfg["wsusa.office"].reviewDays}
           minJustification={MIN_JUSTIFICATION}
         />

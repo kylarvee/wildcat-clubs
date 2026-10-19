@@ -198,7 +198,8 @@ export async function loadClubMatrix(clubId: string, range: { from: Date; to: Da
           select: { id: true, occurrenceId: true, userId: true, method: true, checkedInAt: true, recordedById: true, recordedBy: { select: { id: true, name: true } } },
         })
       : Promise.resolve([]),
-    db.membership.findMany({ where: { clubId }, select: { userId: true, status: true, joinedAt: true, endedAt: true, internalTitle: true } }),
+    // Students only, like every attendance rate: advisors hold a membership but aren't counted as members here.
+    db.membership.findMany({ where: { clubId, user: { kind: "STUDENT" } }, select: { userId: true, status: true, joinedAt: true, endedAt: true, internalTitle: true } }),
     db.roleAssignment.findMany({ where: { clubId, endedAt: null }, select: { userId: true, role: true } }),
     // Who was already coming before the range (their rate counts the whole range).
     db.attendance.findMany({ where: { occurrence: { ...clubOccurrencesWhere(clubId), startsAt: { lt: range.from } } }, distinct: ["userId"], select: { userId: true } }),

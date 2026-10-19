@@ -141,7 +141,7 @@ function tellIfReviewUnlocked(userId: string, occ: OccurrenceRow) {
       const claimed = await db.reminderLog.createMany({ data: [{ key: reminderKeys.reviewUnlocked(userId, club.id) }], skipDuplicates: true });
       if (!claimed.count) continue;
       const copy = reviewUnlockedNotice({ clubName: club.name, attended: r.required, opensAt });
-      await notify({ userIds: [userId], kind: "review.unlocked", title: copy.title, body: copy.body, href: `/clubs/${club.slug}#reviews`, email: false });
+      await notify({ userIds: [userId], kind: "review.unlocked", title: copy.title, body: copy.body, href: `/clubs/${club.slug}#reviews` });
     }
   };
   const safe = () => run().catch((e) => console.error("[attendance] review-unlocked notice failed", e));
@@ -417,7 +417,6 @@ export async function addManual(actor: Actor | null, occurrenceId: string, userI
     title: `You're checked in to ${occ.event.title}`,
     body: `${leader.name} added you to the attendance${occurrence.club ? ` for ${occurrence.club.name}` : ""}.${requirementsMet.length ? ` This counts toward ${requirementsMet.join(", ")}.` : ""}`,
     href: "/me/attendance",
-    email: false,
   });
   tellIfReviewUnlocked(person.id, occ);
   return { attendanceId: attendance.id, name: person.name, requirementsMet };

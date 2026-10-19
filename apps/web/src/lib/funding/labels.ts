@@ -1,10 +1,10 @@
 import type { FundingSource, FundingStatus, InvoiceStatus } from "@prisma/client";
-import { FUNDING_LABEL } from "@/lib/events/labels";
+import { FUNDING_LABEL, FUNDING_SOURCES } from "@/lib/events/labels";
 
 /** Words people see for funding enums. Client-safe. */
 
-/** The order sources appear in summaries (ARCHITECTURE.md §6: one list). */
-export const SOURCE_ORDER: FundingSource[] = ["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"];
+/** The order sources appear in, everywhere (ARCHITECTURE.md §6: one list): University, WSUSA, College, Department. */
+export const SOURCE_ORDER: FundingSource[] = FUNDING_SOURCES;
 
 export const FUNDING_STATUS_LABEL: Record<FundingStatus, string> = {
   DRAFT: "Draft",

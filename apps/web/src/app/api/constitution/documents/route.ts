@@ -8,7 +8,9 @@ import { submitCustomDocument } from "@/lib/domain/constitution";
  * POST multipart — club document uploads (route handler, so files aren't
  * capped by the server-action body limit).
  *   kind=OTHER                 clubId, title, visibility (PUBLIC|MEMBERS), file → profile "Additional documents"
- *   kind=CONSTITUTION|BYLAWS   clubId, title?, successionMethod, joinPolicy, note?, file → custom upload for WSUSA approval
+ *   kind=CONSTITUTION          clubId, title?, joinPolicy, note?, file → custom upload for WSUSA approval
+ *   kind=BYLAWS                clubId, title?, successionMethod, note?, file → custom upload for WSUSA approval
+ *   (each kind states only the setting it governs; the other field is ignored)
  */
 export async function POST(req: Request) {
   return apiRoute(async () => {

@@ -4,15 +4,24 @@
  */
 import { PrismaClient, type ClubRole, type Prisma } from "@prisma/client";
 import { PERSONAS } from "@/lib/auth/personas";
+import { normalizeDraftData } from "@/lib/constitution/templates";
+import { rulesFromAnswers } from "@/lib/constitution/rules";
+import { quorumOf, readSelectionRules } from "@/lib/roles/pipeline";
 import { awaitingGrade, requirementState as ruleState } from "@/lib/authz/requirement-rules";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
 import { unanimousChoice } from "@/lib/roles/pipeline";
 import { loadRenewalStates } from "@/lib/renewals/facts";
 import { isRequiredCheck, readSnapshot, RENEWAL_SOURCE, renewalSourceId, renewalTaskTitle, renewalTerm, renewalWindow } from "@/lib/renewals/rules";
 import { fmtLongDate } from "@/lib/time";
+import { COST_CATEGORIES } from "@/lib/events/labels";
+import { holdsLock, lineStanding } from "@/lib/funding/locks";
+import { lineCents } from "@/lib/funding/math";
+import { followUpKeys, INVOICE_DUE_DAYS, pastReviewTime } from "@/lib/funding/review";
 import { ORPHAN_REQUEST_DAYS, ORPHAN_REQUESTS_SOURCE, parseStaffingSourceId, seatApproves, STAFFING_SOURCE } from "@/lib/staffing/rules";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
-import { NOTIFICATION_KINDS } from "@/components/notifications/catalog";
+import { DIGEST_KINDS, digestOn, NOTIFICATION_KINDS, readPrefs, resolveDelivery } from "@/components/notifications/catalog";
+import { fmtDate } from "@/lib/time";
+import { QUEUED_ANNOUNCEMENT_TITLE } from "./steps/inbox";
 
 const db = new PrismaClient();
 // Must match the seed run (SEED_NOW pins both).
@@ -427,6 +436,24 @@ async function renewalChecks() {
  * is about a date that really changed, and nothing has been reminded or pushed
  * yet (no phone is registered, and the Reminders job runs after seeding).
  */
+/** ActivityLog.subjectUserId: the person a row is about (lib/lake/subject), which profile feeds read through an index. */
+async function activityChecks() {
+  const [{ total, about, wrong }] = await db.$queryRaw<{ total: number; about: number; wrong: number }[]>`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE "subjectUserId" IS NOT NULL)::int AS about,
+           count(*) FILTER (WHERE "subjectUserId" IS DISTINCT FROM COALESCE(NULLIF(data->>'userId', ''), NULLIF(data->>'winnerId', '')))::int AS wrong
+      FROM "ActivityLog"`;
+  check(wrong === 0 && about > 0, "Every activity row names the person it's about (data.userId, or an election's winner)", `${about} of ${total} rows are about someone; ${wrong} disagree`);
+  const priya = await user("priya");
+  const [roles, feedRoles] = await Promise.all([
+    db.activityLog.count({ where: { action: "role.assigned", isPublic: true, data: { path: ["userId"], equals: priya.id } } }),
+    db.activityLog.count({ where: { action: "role.assigned", isPublic: true, subjectUserId: priya.id } }),
+  ]);
+  check(roles > 0 && feedRoles === roles, "Priya's profile feed finds her roles by subject, the same rows the JSON filter did", `${feedRoles} of ${roles}`);
+  const won = await db.activityLog.findFirst({ where: { action: "election.applied" }, select: { subjectUserId: true, data: true } });
+  check(Boolean(won?.subjectUserId) && won?.subjectUserId === (won?.data as { winnerId?: string } | null)?.winnerId, "An applied election's row is about its winner");
+}
+
 async function notificationChecks() {
   const sendable = new Set<string>(NOTIFICATION_KINDS);
   const seeded = await db.notification.groupBy({ by: ["kind"], _count: { _all: true }, orderBy: { kind: "asc" } });
@@ -451,8 +478,174 @@ async function notificationChecks() {
   );
 
   check((await db.pushToken.count()) === 0, "No phone is registered for push, so Settings → Notifications says how to get push notifications");
-  check((await db.reminderLog.count({ where: { OR: ["event:", "due:", "review:"].map((p) => ({ key: { startsWith: p } })) } })) === 0, "Nothing has been reminded yet (the Reminders job runs after seeding)");
+  // The scheduled jobs may already have run since seeding (System → Run now), so only the key shapes are checked.
+  const reminderKeys = await db.reminderLog.findMany({ select: { key: true } });
+  const knownPrefixes = ["event:", "due:", "review:", "job:", "digest:", "funding:"];
+  check(reminderKeys.every((r) => knownPrefixes.some((p) => r.key.startsWith(p))), "Every sent reminder has a known key (event, due, review, job, digest, funding)", `${reminderKeys.length} keys`);
   check((await db.user.count({ where: { eventReminders: false } })) === 0, "Everyone starts with “Remind me before events” on");
+}
+
+/**
+ * Email and push against the notification registry
+ * (components/notifications/catalog, lib/domain/notify): people's stored
+ * choices read back cleanly, the outbox only holds kinds the app sends that
+ * way, the RC Wrecker Bots announcement's emails were queued for exactly the
+ * people the registry would email, WSUSA's routine notices go into the digest
+ * (one by one only for an admin who turned it off), and staffing gaps, which
+ * always send, were emailed to everyone told. These hold before and after a
+ * "Send queued messages" run.
+ */
+async function deliveryChecks() {
+  const kinds = new Set<string>(NOTIFICATION_KINDS);
+  const chosen = await db.user.findMany({ where: { NOT: { notificationPrefs: { equals: {} } } }, select: { email: true, notificationPrefs: true } });
+  const odd = chosen.filter((u) => JSON.stringify(readPrefs(u.notificationPrefs)) !== JSON.stringify(u.notificationPrefs));
+  check(odd.length === 0, "Every stored notification choice is a known category with on/off values", odd.map((u) => u.email).join(", "));
+  const prefsOf = async (key: string) => readPrefs((await user(key)).notificationPrefs);
+  const [priya, elena, sydney, maya] = await Promise.all(["priya", "elena", "sydney", "maya"].map(prefsOf));
+  check(
+    priya.events?.email === false && elena.announcements?.email === false && !digestOn(sydney) && Object.keys(maya).length === 0 && chosen.length === 3,
+    "Priya turned Events & reminders email off, Dr. Alvarez Announcements email, and Sydney the WSUSA digest; Maya and everyone else keep the defaults",
+  );
+
+  const [unsent, early, odder] = await Promise.all([
+    db.outboxMessage.count({ where: { status: { not: "QUEUED" }, sentAt: null } }),
+    db.outboxMessage.count({ where: { status: "QUEUED", sentAt: { not: null } } }),
+    db.outboxMessage.groupBy({ by: ["kind"], where: { kind: { not: null } }, _count: { _all: true } }),
+  ]);
+  check(unsent === 0 && early === 0, "Every message that went out has a sent time, and none waiting to send has one", `${unsent} sent without a time, ${early} waiting with one`);
+  const unknown = odder.filter((k) => !kinds.has(k.kind!));
+  check(unknown.length === 0, "Every outbox message with a kind uses a notification kind the app sends", unknown.map((k) => k.kind).join(", "));
+
+  // The big send: every bell has it, and exactly the people the registry emails were queued (QUEUED until a run sends them).
+  const robotics = await club("robotics");
+  const theNotice = { kind: "announcement.new", title: `New announcement in ${robotics.name}`, body: { startsWith: QUEUED_ANNOUNCEMENT_TITLE } };
+  const bells = await db.notification.findMany({ where: theNotice, select: { user: { select: { email: true, emailNotifications: true, notificationPrefs: true, platformRole: true } } } });
+  const emails = await db.outboxMessage.findMany({ where: { channel: "EMAIL", kind: theNotice.kind, subject: theNotice.title, body: theNotice.body }, select: { to: true, status: true } });
+  const owed = bells
+    .filter(({ user: u }) => resolveDelivery("announcement.new", { emailOn: u.emailNotifications, admin: u.platformRole !== "USER", prefs: readPrefs(u.notificationPrefs) }).email === "now")
+    .map(({ user: u }) => u.email)
+    .sort();
+  const sent = emails.map((m) => m.to).sort();
+  const waiting = emails.filter((m) => m.status === "QUEUED").length;
+  check(
+    bells.length > 50 && JSON.stringify(owed) === JSON.stringify(sent),
+    `Priya's RC Wrecker Bots announcement is on ${bells.length} bells, and its ${sent.length} emails were queued for exactly the people the registry emails`,
+    `${waiting} still waiting to send`,
+  );
+  const elenaEmail = (await user("elena")).email;
+  check(bells.some((b) => b.user.email === elenaEmail) && !sent.includes(elenaEmail), "…Dr. Alvarez has the bell but no email (Announcements email off)");
+
+  // WSUSA's routine notices: in the digest, not one by one, except for an admin who turned the digest off.
+  const admins = await db.user.findMany({ where: { platformRole: { in: ["ADMIN", "SYSADMIN"] } }, select: { email: true, notificationPrefs: true } });
+  const digested = admins.filter((a) => digestOn(readPrefs(a.notificationPrefs))).map((a) => a.email);
+  const oneByOne = await db.outboxMessage.findMany({ where: { kind: { in: DIGEST_KINDS }, to: { in: admins.map((a) => a.email) } }, select: { to: true } });
+  check(
+    oneByOne.length > 0 && oneByOne.every((m) => !digested.includes(m.to)),
+    "No admin with the digest on was emailed a routine WSUSA notice one by one; Sydney (digest off) was",
+    `${oneByOne.length} one-by-one`,
+  );
+  // Today's digest (once a day, from the first "Send queued messages" run after 7 AM): at most one each, only for admins who keep it on.
+  const today = await db.outboxMessage.findMany({ where: { OR: [{ subject: { startsWith: "Waiting on WSUSA:" } }, { subject: { startsWith: "WSUSA digest" } }], subject: { endsWith: ` · ${fmtDate(NOW, "EEE, MMM d")}` } }, select: { to: true } });
+  const twice = today.filter((m, i) => today.findIndex((x) => x.to === m.to) !== i);
+  check(
+    twice.length === 0 && today.every((m) => digested.includes(m.to)),
+    "Today's WSUSA digest went at most once to each admin who keeps it on, and not to Sydney (digest off)",
+    today.length ? `sent to ${today.length}` : "not sent yet",
+  );
+
+  // Staffing gaps always send: everyone told was emailed too.
+  const gaps = await db.notification.findMany({ where: { kind: "staffing.gap" }, select: { user: { select: { email: true } } } });
+  const mailed = new Set((await db.outboxMessage.findMany({ where: { kind: "staffing.gap", channel: "EMAIL" }, select: { to: true } })).map((m) => m.to));
+  check(gaps.length > 0 && gaps.every((g) => mailed.has(g.user.email)), "Everyone told about a club losing its President (leaders and WSUSA) was emailed too, since staffing gaps always send", `${gaps.length} told`);
+}
+
+/**
+ * Funding (lib/domain/funding, steps/money): cost categories come from the
+ * pickers' list; WSUSA decides line by line (an approval's amount is the sum
+ * of its lines); every approval recorded the source that funded it and made
+ * its invoice and INVOICE task in the same step; lines funded for less let go
+ * (lib/funding/locks), so Oscar asked another source for the booth's banner;
+ * and the request past review time and the invoice past due are urgent in the
+ * WSUSA queue, each reminded at most once (lib/jobs/funding).
+ */
+async function fundingChecks() {
+  const cats = new Set<string>(COST_CATEGORIES);
+  const used = await db.budgetItem.groupBy({ by: ["category"], _count: { _all: true } });
+  const off = used.filter((c) => !cats.has(c.category));
+  check(off.length === 0, "Every cost line's category is one the cost pickers offer", off.map((c) => `${c.category} ×${c._count._all}`).join(", "));
+
+  const requests = await db.fundingRequest.findMany({ where: { status: { not: "DRAFT" } }, include: { items: true, invoices: true, club: { select: { name: true } } } });
+  const approvals = requests.filter((r) => r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED");
+  const lineSum = (r: (typeof requests)[number]) => r.items.reduce((s, i) => s + (i.approvedCents ?? 0), 0);
+  const badLines = requests.filter(
+    (r) =>
+      (r.status === "APPROVED" && !r.items.every((i) => i.approvedCents === i.totalCents)) ||
+      (r.status === "PARTIALLY_APPROVED" && !r.items.some((i) => i.approvedCents !== null && i.approvedCents < i.totalCents)) ||
+      (r.status === "DENIED" && !r.items.every((i) => i.approvedCents === 0)) ||
+      ((r.status === "SUBMITTED" || r.status === "WITHDRAWN") && !r.items.every((i) => i.approvedCents === null)) ||
+      (r.status !== "DENIED" && r.amountApprovedCents !== null && r.amountApprovedCents !== lineSum(r)),
+  );
+  check(badLines.length === 0, "WSUSA's decisions are line by line: an approval's amount is the sum of its lines, and a partial approval has a line that got less", badLines.map((r) => r.title).join(", "));
+  const badSources = requests.filter((r) => (r.fundedSource !== null) !== (r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED"));
+  check(badSources.length === 0 && approvals.some((r) => r.fundedSource !== r.fundingSource), "Every approval records the source that funded it (some differ from what the club expected)", badSources.map((r) => r.title).join(", "));
+
+  const invoiceTasks = await db.task.findMany({ where: { sourceType: "invoice" }, select: { sourceId: true, dueAt: true, status: true, createdAt: true } });
+  const taskOf = new Map(invoiceTasks.map((t) => [t.sourceId, t]));
+  const badInvoices = approvals.filter((r) => {
+    const inv = r.invoices[0];
+    const task = inv ? taskOf.get(inv.id) : undefined;
+    return (
+      r.invoices.length !== 1 ||
+      inv.createdAt.getTime() !== r.decidedAt?.getTime() ||
+      inv.createdById !== r.decidedById ||
+      inv.amountCents !== r.amountApprovedCents ||
+      !task?.dueAt ||
+      task.dueAt.getTime() !== inv.createdAt.getTime() + INVOICE_DUE_DAYS * DAY ||
+      (task.status === "OPEN") !== (inv.status === "OPEN")
+    );
+  });
+  check(badInvoices.length === 0, `Every approval made its invoice in the same step, with an INVOICE task due ${INVOICE_DUE_DAYS} days later`, badInvoices.map((r) => r.title).join(", "));
+  check(requests.every((r) => r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED" || r.invoices.length === 0), "Only approvals have invoices");
+
+  // Oscar's story: the booth's banner wasn't funded, so it's free, and he asked the college for it.
+  const booth = requests.find((r) => r.title === "Involvement Fair booth");
+  const bannerLine = booth?.items.find((i) => i.approvedCents === 0);
+  const bannerRequests = bannerLine?.budgetItemId ? requests.filter((r) => r.items.some((i) => i.budgetItemId === bannerLine.budgetItemId)) : [];
+  const askAgain = bannerRequests.find((r) => r.title === "Club banner");
+  check(
+    Boolean(booth && bannerLine && booth.items.filter((i) => i.approvedCents === i.totalCents).length === booth.items.length - 1 && !holdsLock({ status: booth.status, totalCents: bannerLine.totalCents, approvedCents: bannerLine.approvedCents })),
+    "Involvement Fair booth: partly approved with one line (the banner) not funded, and that line no longer locks its cost line",
+    booth ? `${booth.amountApprovedCents} of ${booth.amountRequestedCents} cents, funded by ${booth.fundedSource}` : "missing",
+  );
+  check(
+    askAgain?.status === "SUBMITTED" && askAgain.fundingSource === "COLLEGE" && askAgain.submittedById === (await user("oscar")).id && askAgain.items.length === 1 && askAgain.items[0].budgetItemId === bannerLine?.budgetItemId,
+    "…and Oscar asked the college for the banner in “Club banner” (in WSUSA review)",
+  );
+  const mcat = requests.find((r) => r.title === "MCAT prep books for the lending library");
+  const mcatLine = mcat?.items[0];
+  const mcatStanding = mcatLine ? lineStanding(lineCents(mcatLine.quantity, mcatLine.unitCostCents) * mcatLine.occurrences, [{ status: mcat!.status, totalCents: mcatLine.totalCents, approvedCents: mcatLine.approvedCents }]) : null;
+  check(Boolean(mcatStanding && !mcatStanding.lockedBy && mcatStanding.fundedCents > 0 && mcatStanding.openCents > 0), "Pre-Med's MCAT books line was funded in part: unlocked, with the rest open to ask another source for", mcatStanding ? `${mcatStanding.fundedCents} funded, ${mcatStanding.openCents} open` : "");
+
+  // Late work: urgent rows in the WSUSA queue, by lib/funding/review's rule (10 business days unless a sysadmin changed it).
+  const office = (await db.systemConfig.findUnique({ where: { key: "wsusa.office" } }))?.value as { reviewDays?: number } | null;
+  const reviewDays = Number(office?.reviewDays) || 10;
+  const late = requests.filter((r) => r.status === "SUBMITTED" && r.submittedAt && pastReviewTime(r.submittedAt, NOW, reviewDays));
+  const lateTasks = await db.task.findMany({ where: { sourceType: "funding", status: "OPEN", assigneeType: "ADMINS" }, select: { sourceId: true, createdAt: true } });
+  const lateByTask = lateTasks.filter((t) => pastReviewTime(t.createdAt, NOW, reviewDays)).map((t) => t.sourceId);
+  check(
+    late.some((r) => r.title === "Avalanche awareness course") && late.length === lateByTask.length && late.every((r) => lateByTask.includes(r.id)),
+    `The Hiking and Outdoors Club's request is past WSUSA's review time (${reviewDays} business days): an urgent row in the WSUSA queue`,
+    late.map((r) => `${r.club.name}: ${r.title}`).join("; "),
+  );
+  const lateInvoices = await db.invoice.findMany({ where: { status: "OPEN" }, select: { id: true, number: true, request: { select: { title: true } } } });
+  const pastDue = lateInvoices.filter((i) => (taskOf.get(i.id)?.dueAt ?? NOW) < NOW);
+  check(pastDue.some((i) => i.request.title === "Unity Week catering"), "BSU's Unity Week invoice is past due: an urgent row in the WSUSA queue", pastDue.map((i) => i.number).join(", "));
+
+  // Reminded at most once each (ReminderLog keys; one in-app notice per admin), before and after the job runs.
+  const keys = await db.reminderLog.findMany({ where: { key: { startsWith: "funding:" } }, select: { key: true } });
+  const knownKeys = new Set([...requests.map((r) => followUpKeys.review(r.id)), ...lateInvoices.map((i) => followUpKeys.invoice(i.id)), ...(await db.invoice.findMany({ select: { id: true } })).map((i) => followUpKeys.invoice(i.id))]);
+  const notices = await db.notification.groupBy({ by: ["userId", "kind", "href"], where: { kind: { in: ["funding.overdue", "invoice.overdue"] } }, _count: { _all: true } });
+  check(keys.every((k) => knownKeys.has(k.key)) && notices.every((n) => n._count._all === 1), "Funding follow-ups remind each admin at most once per late request or invoice", `${keys.length} sent so far`);
 }
 
 async function main() {
@@ -520,7 +713,13 @@ async function main() {
     (await db.task.count({ where: { assigneeId: oscar.id, kind: "APPROVAL", status: "OPEN", sourceType: "electionAnswer", sourceId: nilWaiting[0]?.id ?? "" } })) === 1,
     "…with Oscar's open \"Move up to Vice President?\" task",
   );
-  check((await db.fundingRequest.count({ where: { clubId: fic.id, status: "DRAFT" } })) >= 1 && (await db.fundingRequest.count({ where: { clubId: fic.id, status: "SUBMITTED", submittedById: oscar.id } })) === 1, "FIC has a DRAFT and Oscar's SUBMITTED funding request");
+  const ficRequests = await db.fundingRequest.findMany({ where: { clubId: fic.id }, select: { title: true, status: true, submittedById: true } });
+  check(
+    ficRequests.some((r) => r.status === "DRAFT") &&
+      ficRequests.some((r) => r.title === "Fall speaker series" && r.status === "SUBMITTED" && r.submittedById === oscar.id) &&
+      ficRequests.some((r) => r.title === "Involvement Fair booth" && r.status === "PARTIALLY_APPROVED" && r.submittedById === oscar.id),
+    "FIC has a DRAFT, Oscar's Fall speaker series in WSUSA review, and his Involvement Fair booth partly approved (more under Funding)",
+  );
 
   const vanessa = await user("vanessa");
   const swe = await club("swe");
@@ -694,6 +893,9 @@ async function main() {
   check((await db.policy.count({ where: { slug: { in: slugs } } })) === slugs.length, "All nine policy slugs exist");
   check((await db.policy.count({ where: { documentFileId: { not: null }, bodyHtml: null } })) === 1 && (await db.policy.count({ where: { status: "DRAFT" } })) === 1, "One PDF-only policy and one draft");
 
+  console.log("Funding");
+  await fundingChecks();
+
   console.log("Tasks");
   await taskChecks();
 
@@ -708,10 +910,77 @@ async function main() {
 
   console.log("Notifications");
   await notificationChecks();
+  await deliveryChecks();
+
+  console.log("Activity log");
+  await activityChecks();
+
+  console.log("Constitutions and bylaw rules");
+  await constitutionChecks();
 
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();
   if (failures) process.exit(1);
+}
+
+/**
+ * Constitutions and the bylaw rules Wildcat Clubs enforces (lib/constitution/
+ * rules): every adopted builder document keeps its answers; Psi Chi's bylaws
+ * ask for 2 club events this semester to vote and a 25% quorum, its running
+ * President vote froze them, opened after the notice, and holds only
+ * eligible members' ballots, short of quorum so far; Maya can vote and some
+ * members can't; Maya's bell has the change notice; and pending custom
+ * documents state only the setting they govern.
+ */
+async function constitutionChecks() {
+  const builderActive = await db.clubDocument.findMany({ where: { status: "ACTIVE", source: "BUILDER" }, select: { builderAnswers: true } });
+  const bare = builderActive.filter((d) => d.builderAnswers === null).length;
+  check(builderActive.length > 500 && bare === 0, "Every builder document in effect keeps the answers it was made from (so any leader can start from the current version)", `${bare} of ${builderActive.length} without`);
+
+  const psych = await club("psych");
+  const maya = await user("maya");
+  const docs = await db.clubDocument.findMany({ where: { clubId: psych.id, status: "ACTIVE", kind: { in: ["CONSTITUTION", "BYLAWS"] } }, select: { kind: true, source: true, version: true, builderAnswers: true } });
+  const answers = (kind: "CONSTITUTION" | "BYLAWS") => {
+    const d = docs.find((x) => x.kind === kind);
+    return d?.source === "BUILDER" && d.builderAnswers ? normalizeDraftData(d.builderAnswers) : null;
+  };
+  const rules = rulesFromAnswers({ constitution: answers("CONSTITUTION"), bylaws: answers("BYLAWS") });
+  check(rules.voteMinEvents === 2 && rules.quorumPercent === 25 && psych.successionMethod === "MEMBER_VOTE", `${psych.name}'s bylaws in effect: member votes, 2 club events this semester to vote, a 25% quorum`, JSON.stringify(rules));
+  check(docs.length === 2 && docs.every((d) => d.version >= 2), "…adopted as new versions (the ones before named Advisor & President)", docs.map((d) => `${d.kind} v${d.version}`).join(", "));
+
+  const election = await db.election.findFirst({ where: { clubId: psych.id, status: "VOTING", method: "MEMBER_VOTE" } });
+  const frozen = readSelectionRules(election?.rules);
+  check(Boolean(election) && frozen.minEvents === 2 && frozen.quorumPercent === 25 && frozen.noticeDays === 7, "…and its President vote froze those rules when it started", JSON.stringify(election?.rules ?? null));
+  if (election) {
+    check(election.votingOpensAt.getTime() - election.createdAt.getTime() >= 7 * DAY, "…voting opened at least 7 days after the vote was announced (its notice)");
+    // Who can vote: registered members who'd been to 2 of the club's events (hosted or co-hosted) this semester when voting opened, as lib/metrics counts them.
+    const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+    const term = terms.find((t) => t.startsOn <= election.votingOpensAt && election.votingOpensAt <= t.endsOn) ?? [...terms].reverse().find((t) => t.startsOn <= election.votingOpensAt)!;
+    const occurrences = await db.eventOccurrence.findMany({
+      where: { status: "SCHEDULED", startsAt: { gte: term.startsOn, lte: election.votingOpensAt }, event: { OR: [{ clubId: psych.id }, { cohosts: { some: { clubId: psych.id, status: "APPROVED" } } }] } },
+      select: { id: true },
+    });
+    const grouped = await db.attendance.groupBy({ by: ["userId"], where: { occurrenceId: { in: occurrences.map((o) => o.id) } }, _count: { _all: true } });
+    const attended = new Map(grouped.map((g) => [g.userId, g._count._all]));
+    const members = await db.membership.findMany({ where: { clubId: psych.id, status: "ACTIVE", user: { status: "ACTIVE", kind: "STUDENT" } }, select: { userId: true } });
+    const eligible = new Set(members.filter((m) => (attended.get(m.userId) ?? 0) >= 2).map((m) => m.userId));
+    const ballots = await db.vote.findMany({ where: { electionId: election.id }, select: { voterId: true } });
+    check(ballots.length > 0 && ballots.every((b) => eligible.has(b.voterId)), "…every ballot so far is from a member who can vote", `${ballots.length} ballots`);
+    check(eligible.has(maya.id), "…Maya can vote: she'd been to enough club events this semester", `${attended.get(maya.id) ?? 0} events`);
+    check(members.length > eligible.size, "…and some members can't (fewer than 2 events), so the roll shows who and why", `${eligible.size} of ${members.length} can vote`);
+    const q = quorumOf({ quorumPercent: 25, eligibleVoters: eligible.size, votes: ballots.length });
+    check(Boolean(q && !q.met), "…turnout is short of the quorum so far", q ? `${ballots.length} voted, ${q.needed} needed` : "");
+  }
+  const notice = await db.notification.findFirst({ where: { userId: maya.id, kind: "constitution.settings_changed" } });
+  check(notice?.title === `${psych.name} now uses Member vote to fill seats`, "Maya's bell has the change notice: Psi Chi now uses Member vote to fill seats", notice?.title ?? "none");
+
+  const pending = await db.clubDocument.findMany({ where: { status: "PENDING_APPROVAL", kind: { in: ["CONSTITUTION", "BYLAWS"] } }, select: { kind: true, statedJoinPolicy: true, statedSuccessionMethod: true } });
+  const stray = pending.filter((d) => (d.kind === "BYLAWS" ? d.statedJoinPolicy !== null || !d.statedSuccessionMethod : d.statedSuccessionMethod !== null || !d.statedJoinPolicy));
+  check(pending.length > 0 && stray.length === 0, "Pending custom documents state only what they govern (bylaws: succession; a constitution: joining), so a pending bylaws upload never changes who can join");
+
+  const running = await db.election.findMany({ where: { status: { in: ["NOMINATING", "VOTING", "CLOSED"] } }, select: { title: true, rules: true } });
+  const loose = running.filter((e) => !e.rules || typeof e.rules !== "object" || Object.keys(e.rules).length === 0);
+  check(loose.length === 0, "Every selection under way froze its club's bylaw rules", loose.map((e) => e.title).join(", "));
 }
 
 main().catch(async (e) => {

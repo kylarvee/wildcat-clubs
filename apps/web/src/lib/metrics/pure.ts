@@ -1,6 +1,7 @@
 import { TZDate } from "@date-fns/tz";
 import { DAY_MS, TZ, campusDate, fmtLongDate } from "@/lib/time";
-import type { ClubActivity, NetworkEdge, RetentionPeriod, RetentionPoint } from "./types";
+import { STANDING_LABEL } from "@/lib/labels/clubs";
+import type { ClubActivity, NetworkEdge, RetentionPeriod, RetentionPoint, RetentionSummary } from "./types";
 
 /**
  * The metric rules as plain functions — no database, no server imports — so
@@ -166,6 +167,77 @@ export function evaluateClubActivity(i: ClubActivityInput): ClubActivity {
   return { ...base, active: eventsOk && membersOk, inPilot: false, pilotEndsAt, reasons };
 }
 
+// ─── At risk ─────────────────────────────────────────────────────────────────
+
+export type AtRiskKind = "inactive" | "pilot" | "slipping";
+
+export type ClubRisk = {
+  kind: AtRiskKind;
+  /** Badge text: "Inactive", "Pilot period ends Dec 12, 2026", "At the line". */
+  tag: string;
+  /** Plain-language reasons, one per problem. */
+  reasons: string[];
+  /** A pilot period that ends with the current term (the most urgent pilots). */
+  endsThisTerm: boolean;
+};
+
+export type ClubRiskInput = {
+  status: string;
+  activity: ClubActivity;
+  at: Date;
+  /** The current term (or the last one, between terms) — the one clubActivity counts as current. */
+  term: Pick<TermLike, "startsOn" | "endsOn"> | null;
+  rule: ClubRule;
+};
+
+const eventsPhrase = (n: number) => `${n === 0 ? "No" : `Only ${n}`} ${n === 1 ? "event" : "events"} with check-ins`;
+
+/**
+ * AT RISK — an approved club that's inactive now or will be soon. The one
+ * rule behind every "at risk" list (the admin Overview, the assistant's
+ * club_health):
+ *   inactive — below the active-club bar today (reasons from evaluateClubActivity);
+ *   pilot    — in its pilot period but not yet meeting the bar the pilot hands
+ *              over to: fewer than minEvents held events this term, or fewer
+ *              than minMembers registered members. endsThisTerm when the pilot
+ *              ends with the current term;
+ *   slipping — active only on the previous term's record, with fewer than
+ *              minEvents held this term once half the term has passed; or
+ *              sitting exactly at the member minimum.
+ * Null when the club is fine, or isn't approved (it has no standing to lose).
+ */
+export function clubRisk(i: ClubRiskInput): ClubRisk | null {
+  if (i.status !== "APPROVED") return null;
+  const a = i.activity;
+  const { minEvents, minMembers } = i.rule;
+  const termName = a.currentTermName ?? "this term";
+  if (!a.active) return { kind: "inactive", tag: STANDING_LABEL.inactive, reasons: a.reasons, endsThisTerm: false };
+
+  if (a.inPilot) {
+    const reasons: string[] = [];
+    if (a.heldEventsCurrentTerm < minEvents) reasons.push(`${eventsPhrase(a.heldEventsCurrentTerm)} in ${termName} (needs ${minEvents} in one term).`);
+    if (a.registeredMembers < minMembers) reasons.push(`${a.registeredMembers === 0 ? "No registered members yet" : `Only ${plural(a.registeredMembers, "registered member")}`} (needs ${minMembers}).`);
+    if (!reasons.length) return null;
+    const endsThisTerm = Boolean(a.pilotEndsAt && i.term && a.pilotEndsAt.getTime() <= termEnd(i.term).getTime());
+    return { kind: "pilot", tag: a.pilotEndsAt ? `Pilot period ends ${fmtLongDate(a.pilotEndsAt)}` : STANDING_LABEL.pilot, reasons, endsThisTerm };
+  }
+
+  const reasons: string[] = [];
+  const pastHalf = i.term ? i.at.getTime() >= i.term.startsOn.getTime() + (i.term.endsOn.getTime() - i.term.startsOn.getTime()) / 2 : false;
+  if (pastHalf && a.heldEventsCurrentTerm < minEvents) {
+    reasons.push(`${eventsPhrase(a.heldEventsCurrentTerm)} in ${termName} so far; active on ${a.previousTermName ?? "last term"}'s record (needs ${minEvents} in one term).`);
+  }
+  if (a.registeredMembers === minMembers) reasons.push(`Exactly ${minMembers} registered members, the minimum — one departure makes it inactive.`);
+  return reasons.length ? { kind: "slipping", tag: "At the line", reasons, endsThisTerm: false } : null;
+}
+
+const RISK_RANK: Record<AtRiskKind, number> = { inactive: 0, pilot: 1, slipping: 2 };
+
+/** At-risk lists read most urgent first: inactive, then pilots (those ending this term first), then slipping; ties by name. */
+export function compareRisk(x: ClubRisk & { name: string }, y: ClubRisk & { name: string }): number {
+  return RISK_RANK[x.kind] - RISK_RANK[y.kind] || Number(y.endsThisTerm) - Number(x.endsThisTerm) || x.name.localeCompare(y.name);
+}
+
 // ─── Periods (campus time) ───────────────────────────────────────────────────
 
 /** One retention period. `end` is exclusive (the next period's start). */
@@ -262,9 +334,13 @@ export function retentionRate(retained: number, previousAttendees: number): numb
 
 /**
  * RETENTION per period: of the people who attended in the period before, the
- * share who attended in this one. Takes (person, bucket index) check-in facts
+ * share who attended in this one — the same rule as the headline figure, so
+ * a pair only has a rate when both periods had attendees (a month the club
+ * didn't meet is a gap, not 0%). Takes (person, bucket index) check-in facts
  * and returns one point per bucket; the first bucket has no "before" inside
  * the range, so callers fetch one extra bucket and drop the first point.
+ * These points draw the charts; the one figure screens quote is
+ * latestRetention below.
  */
 export function retentionSeries(buckets: PeriodBucket[], attendance: Array<{ userId: string; bucket: number }>, at: Date): RetentionPoint[] {
   const sets = buckets.map(() => new Set<string>());
@@ -275,23 +351,78 @@ export function retentionSeries(buckets: PeriodBucket[], attendance: Array<{ use
     for (const u of prev) if (sets[i].has(u)) retained++;
     return {
       label: b.label,
+      previousLabel: i > 0 ? buckets[i - 1].label : null,
       start: b.start,
       end: new Date(b.end.getTime() - 1),
       attendees: sets[i].size,
       retained,
       previousAttendees: prev.size,
-      rate: retentionRate(retained, prev.size),
+      rate: sets[i].size > 0 ? retentionRate(retained, prev.size) : null,
       inProgress: b.start.getTime() <= at.getTime() && at.getTime() < b.end.getTime(),
     };
   });
 }
 
+/** "Sep 2026" → "Sep", "Q3 2026" → "Q3"; academic years ("2025-2026") and years stay whole. */
+export function shortPeriodLabel(label: string): string {
+  const m = /^([A-Z][a-z]{2}|Q[1-4]) \d{4}$/.exec(label);
+  return m ? m[1] : label;
+}
+
+/** The year of a month or quarter label ("Sep 2026" → "2026"); null for academic years and years. */
+function labelYear(label: string): string | null {
+  return /^(?:[A-Z][a-z]{2}|Q[1-4]) (\d{4})$/.exec(label)?.[1] ?? null;
+}
+
+/** What retention means, in one line (column headers, footnotes, the assistant). */
+export const RETENTION_HINT = "Share of one full month's attendees who came back the next full month (the latest two months in a row with check-ins)";
+
+/** What a screen says when there's no retention figure yet. */
+export function noRetentionText(noun: string = "month"): string {
+  return `Shows once two full ${noun}s in a row have check-ins`;
+}
+
+/** The parts of a retention point the headline rule reads (RetentionPoint and the charts' rows satisfy it). */
+export type RetentionPairInput = Pick<RetentionPoint, "label" | "previousLabel" | "attendees" | "retained" | "previousAttendees" | "inProgress">;
+
 /**
- * Individual retention: the share of periods since joining with ≥1 check-in.
- * A period still in progress only counts once they've attended in it — it
- * isn't a miss until it's over.
+ * RETENTION, the one figure every screen quotes: the share of one complete
+ * period's attendees who came back the next complete period, for the most
+ * recent pair of complete periods that both had attendees. Takes a series as
+ * retentionSeries returns it (oldest first, ending with the period that
+ * contains `at`). The period still running never counts, so the figure
+ * doesn't sag mid-month; a pair where either period had nobody is skipped, so
+ * a club that doesn't meet over the summer keeps its spring figure instead of
+ * showing 0%. Null when the series has no such pair.
+ *
+ * label is how every screen shows it: "Sep → Oct: 62% came back". A pair
+ * from an earlier year than the period running now names its year ("Oct →
+ * Nov 2025"), so last year's October is never read as this one.
  */
-export function individualRetention(buckets: PeriodBucket[], attendedBuckets: Iterable<number>, at: Date): { periods: number; attendedPeriods: number; rate: number | null } {
+export function latestRetention(points: readonly RetentionPairInput[]): RetentionSummary | null {
+  const current = points.find((p) => p.inProgress) ?? points[points.length - 1];
+  const thisYear = current ? labelYear(current.label) : null;
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i];
+    if (p.inProgress || p.previousLabel === null) continue;
+    if (p.previousAttendees > 0 && p.attendees > 0) {
+      const rate = p.retained / p.previousAttendees;
+      const year = labelYear(p.label);
+      const months = `${shortPeriodLabel(p.previousLabel)} → ${shortPeriodLabel(p.label)}${year && thisYear && year !== thisYear ? ` ${year}` : ""}`;
+      return { from: p.previousLabel, to: p.label, rate, retained: p.retained, previousAttendees: p.previousAttendees, months, label: `${months}: ${Math.round(rate * 100)}% came back` };
+    }
+  }
+  return null;
+}
+
+/**
+ * PERIODS ATTENDED (per person; "Months attended" on screens): of the periods
+ * since they got involved, how many had ≥1 of their check-ins. It's not
+ * retention — that word is for the club figure above. A period still in
+ * progress only counts once they've attended in it — it isn't a miss until
+ * it's over.
+ */
+export function periodsAttended(buckets: PeriodBucket[], attendedBuckets: Iterable<number>, at: Date): { periods: number; attendedPeriods: number; rate: number | null } {
   const attended = new Set(attendedBuckets);
   let periods = 0;
   let attendedPeriods = 0;
@@ -303,6 +434,40 @@ export function individualRetention(buckets: PeriodBucket[], attendedBuckets: It
     }
   });
   return { periods, attendedPeriods, rate: periods > 0 ? attendedPeriods / periods : null };
+}
+
+// ─── Activity score ──────────────────────────────────────────────────────────
+
+/** The ACTIVITY SCORE counts held events in this many days up to now. */
+export const ACTIVITY_SCORE_DAYS = 30;
+
+/**
+ * What the activity score is called on every screen: the clubs list sort and
+ * table column, the card, the assistant. It counts HELD events (started, ≥1
+ * check-in) in the last ACTIVITY_SCORE_DAYS, so scheduling dates can't raise it.
+ */
+export const ACTIVITY_SCORE_LABEL = "Events held lately";
+export const ACTIVITY_SCORE_HINT = `Events held in the last ${ACTIVITY_SCORE_DAYS} days (started, with at least one check-in)`;
+
+/** "Held 9 events in the last 30 days" — a search reason, so it gives the count. */
+export function heldLatelyText(n: number): string {
+  return `Held ${plural(n, "event")} in the last ${ACTIVITY_SCORE_DAYS} days`;
+}
+
+/** One of a club's scheduled occurrences (host or approved co-host), reduced to what HELD needs. */
+export type OccurrenceFact = { startsAt: Date; hasCheckin: boolean };
+
+/** HELD EVENT: a scheduled occurrence that has started (by `at`) and has ≥1 check-in. The SQL in index.ts (HAS_CHECKIN up to `at`) applies the same rule. */
+export function isHeldEvent(o: OccurrenceFact, at: Date): boolean {
+  return o.hasCheckin && o.startsAt.getTime() <= at.getTime();
+}
+
+/** ACTIVITY SCORE: held events that started in the last ACTIVITY_SCORE_DAYS up to `at` (both ends inclusive). Dates still ahead never count. */
+export function activityScore(occurrences: Iterable<OccurrenceFact>, at: Date): number {
+  const from = at.getTime() - ACTIVITY_SCORE_DAYS * DAY_MS;
+  let n = 0;
+  for (const o of occurrences) if (isHeldEvent(o, at) && o.startsAt.getTime() >= from) n++;
+  return n;
 }
 
 // ─── Attendance rate ─────────────────────────────────────────────────────────

@@ -33,7 +33,12 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   return { title: request && access?.capabilities.has("budget") ? request.title : "Funding request" };
 }
 
-/** One funding request: drafts open in the builder; submitted ones show the snapshot, decision and invoice. */
+/**
+ * One funding request: drafts open in the builder; submitted ones show the
+ * snapshot, the decision line by line (with the source that funded it) and
+ * the invoice. A partly approved request offers to ask another source for
+ * the lines that got less.
+ */
 export default async function FundingRequestPage({ params }: { params: Params }) {
   const { slug, id } = await params;
   const { club, access, allowed } = await loadClubWorkspace(slug, "budget");
@@ -91,6 +96,9 @@ export default async function FundingRequestPage({ params }: { params: Params })
   }
 
   const invoice = request.invoices[0] ?? null;
+  const approved = request.status === "APPROVED" || request.status === "PARTIALLY_APPROVED";
+  const expected = sourceName(request.fundingSource, club);
+  const fundedBy = approved ? sourceName(request.fundedSource ?? request.fundingSource, club) : null;
   const steps = requestTimeline({
     status: request.status,
     createdAt: request.createdAt,
@@ -98,29 +106,40 @@ export default async function FundingRequestPage({ params }: { params: Params })
     submittedBy: request.submittedBy?.name,
     decidedAt: request.decidedAt,
     decidedBy: request.decidedBy?.name,
+    fundedBy,
     invoice,
   });
-  const approved = request.status === "APPROVED" || request.status === "PARTIALLY_APPROVED";
+  // Lines WSUSA funded for less than they asked are free again (lib/funding/locks): offer to ask another source for them.
+  const reduced = approved ? request.items.filter((i) => i.approvedCents != null && i.approvedCents < i.totalCents) : [];
+  let askAgainHref: string | null = null;
+  if (reduced.length) {
+    const budget = await loadClubTermBudget(club.id, request.termId);
+    const open = new Set(budget.lines.filter((l) => l.requestable).map((l) => l.id));
+    if (reduced.some((i) => i.budgetItemId && open.has(i.budgetItemId))) askAgainHref = `${base}/requests/new?term=${request.termId}&from=${request.id}`;
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         breadcrumbs={crumbs}
         title={<span className="flex flex-wrap items-center gap-2">{request.title} <FundingStatusBadge status={request.status} /></span>}
-        description={`${request.term.name} · ${sourceName(request.fundingSource, club)}`}
+        description={`${request.term.name} · ${fundedBy ? `Funded by ${fundedBy}` : `Expected from ${expected}`}`}
         actions={request.status === "SUBMITTED" ? <WithdrawRequest requestId={request.id} title={request.title} /> : undefined}
         className="mb-0"
       />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
-          <DecisionCallout request={request} audience="club" reviewDays={cfg["wsusa.office"].reviewDays} />
-          <RequestFactsCard request={request} sourceLabel={sourceName(request.fundingSource, club)} />
+          <DecisionCallout request={request} audience="club" reviewDays={cfg["wsusa.office"].reviewDays} fundedLabel={fundedBy} reducedLines={reduced.length} askAgainHref={askAgainHref} />
+          <RequestFactsCard request={request} sourceLabel={expected} fundedLabel={fundedBy} />
           <section className="space-y-2" aria-labelledby="items-heading">
             <h2 id="items-heading" className="text-base font-semibold text-ink">
-              What was requested
+              {approved ? "What was requested and funded" : "What was requested"}
             </h2>
-            <p className="text-sm text-ink-3">The lines as they were when the request was submitted. Later budget changes don&apos;t alter them.</p>
-            <RequestItemsTable items={request.items} requestedCents={request.amountRequestedCents} approvedCents={request.amountApprovedCents} caption={`Lines in ${request.title}`} />
+            <p className="text-sm text-ink-3">
+              The lines as they were when the request was submitted. Later budget changes don&apos;t alter them.
+              {approved ? " WSUSA decides line by line; a line that got less than it asked is free to put in a request to another source." : ""}
+            </p>
+            <RequestItemsTable items={request.items} requestedCents={request.amountRequestedCents} approvedCents={request.amountApprovedCents} showApproved={approved} caption={`Lines in ${request.title}`} />
           </section>
           {approved ? (
             <Card>
@@ -129,7 +148,7 @@ export default async function FundingRequestPage({ params }: { params: Params })
                 {invoice ? (
                   <InvoicePanel invoice={invoice} />
                 ) : (
-                  <p className="text-sm text-ink-2">WSUSA is preparing the invoice. You&apos;ll be able to download it here, and you&apos;ll get a notification once the funding goes through.</p>
+                  <p className="text-sm text-ink-2">This request was approved before approvals came with an invoice. Ask WSUSA if you need one.</p>
                 )}
               </CardBody>
             </Card>

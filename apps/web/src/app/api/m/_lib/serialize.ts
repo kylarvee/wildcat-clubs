@@ -11,6 +11,7 @@ import type { AnnouncementView } from "@/lib/domain/announcements";
 import { richToText } from "@/lib/rich/sanitize";
 import { fmtRange, inCampusTime } from "@/lib/time";
 import type { MemberClubSummary } from "@/lib/metrics/types";
+import { noRetentionText } from "@/lib/metrics/pure";
 import type { ClubMetricsView } from "@/lib/clubs/queries";
 import type { MAnnouncement, MAttendanceSummary, MClubMetrics, MClubRef, MEvent, MOccurrence, MUser, MViewerState } from "../_types";
 
@@ -115,6 +116,7 @@ export function toMetrics(m: ClubMetricsView, hasMetrics: boolean): MClubMetrics
     registeredMembers: m.registeredMembers,
     activeMembers: m.activeMembers,
     retentionRate: m.retentionRate,
+    retentionText: m.retention?.label ?? noRetentionText(),
     avgRating: m.avgRating,
     reviewCount: m.reviewCount,
     isActive: m.isActive,

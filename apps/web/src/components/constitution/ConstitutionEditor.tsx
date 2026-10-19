@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClubStatus, JoinPolicy, SuccessionMethod } from "@prisma/client";
-import { AlertTriangle, CheckCircle2, ChevronDown, Download, ExternalLink, Eye, FileText, Gavel, Loader2, Lock, PenLine, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Download, ExternalLink, Eye, FileText, Gavel, Info, Loader2, Lock, PenLine, Save, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink, buttonClasses } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -62,7 +62,45 @@ function DocToggle({ value, onChange, label }: { value: DocKind; onChange: (k: D
 
 // ─── Fields ──────────────────────────────────────────────────────────────────
 
-function FieldInput({ f, value, onChange }: { f: FieldDef; value: string; onChange: (v: string) => void }) {
+/**
+ * Under a field: what Wildcat Clubs does with the answer, or that it doesn't
+ * enforce it (the club and WSUSA do), so nobody adopts a rule expecting the
+ * platform to check it.
+ */
+function FieldNote({ f, doc }: { f: FieldDef; doc: DocKind }) {
+  if (f.applies) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-ink-2">
+        <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
+        <span>
+          <span className="font-medium text-ink">Wildcat Clubs applies this.</span> {f.applies}
+        </span>
+      </p>
+    );
+  }
+  if (f.clubEnforced) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-ink-3">
+        <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span>Written into your {doc === "constitution" ? "constitution" : "bylaws"}. Wildcat Clubs doesn&apos;t enforce this; your club and WSUSA do.</span>
+      </p>
+    );
+  }
+  return null;
+}
+
+function FieldInput({ f, value, onChange, doc }: { f: FieldDef; value: string; onChange: (v: string) => void; doc: DocKind }) {
+  const note = f.applies || f.clubEnforced;
+  if (!note) return <FieldControl f={f} value={value} onChange={onChange} />;
+  return (
+    <div className="space-y-1.5">
+      <FieldControl f={f} value={value} onChange={onChange} />
+      <FieldNote f={f} doc={doc} />
+    </div>
+  );
+}
+
+function FieldControl({ f, value, onChange }: { f: FieldDef; value: string; onChange: (v: string) => void }) {
   if (f.type === "choice" && f.options) {
     const cards = f.options.some((o) => o.description);
     if (cards) {
@@ -125,6 +163,7 @@ function FieldInput({ f, value, onChange }: { f: FieldDef; value: string; onChan
 
 function SectionItem({
   s,
+  doc,
   on,
   open,
   data,
@@ -133,6 +172,7 @@ function SectionItem({
   setField,
 }: {
   s: SectionDef;
+  doc: DocKind;
   on: boolean;
   open: boolean;
   data: DraftData;
@@ -172,7 +212,7 @@ function SectionItem({
           {!included ? (
             <p className="text-sm text-ink-3">Turn this section on to include it.</p>
           ) : s.fields.length ? (
-            s.fields.map((f) => <FieldInput key={f.id} f={f} value={data.fields[f.id] ?? ""} onChange={(v) => setField(f.id, v)} />)
+            s.fields.map((f) => <FieldInput key={f.id} f={f} doc={doc} value={data.fields[f.id] ?? ""} onChange={(v) => setField(f.id, v)} />)
           ) : (
             <p className="text-sm text-ink-3">Standard wording — nothing to fill in. See it in the preview.</p>
           )}
@@ -401,6 +441,7 @@ export function ConstitutionEditor({
               <SectionItem
                 key={s.id}
                 s={s}
+                doc={tab}
                 on={data.modules[tab].includes(s.id)}
                 open={open.has(s.id)}
                 data={data}
@@ -596,8 +637,9 @@ function AdoptDialog({
               <li>Withdraws any custom document still waiting for WSUSA.</li>
               <li>
                 Sets joining to <span className="font-medium text-ink-2">{JOIN_POLICY_SHORT[join].toLowerCase()}</span> and the primary way leaders are chosen to{" "}
-                <span className="font-medium text-ink-2">{SUCCESSION_LABEL[succession].split(" — ")[0]}</span>.
+                <span className="font-medium text-ink-2">{SUCCESSION_LABEL[succession].split(" — ")[0]}</span>. If either changes, the club&apos;s members and WSUSA are told.
               </li>
+              <li>Member votes, WSUSA&apos;s follow-up on an empty President or advisor seat, and the &quot;Fill a seat&quot; form follow the rules marked &quot;Wildcat Clubs applies this.&quot; A vote already under way keeps the rules it started with.</li>
             </ul>
             {error ? <Callout tone="danger">{error}</Callout> : null}
             <DialogFooter>

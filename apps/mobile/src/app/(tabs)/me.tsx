@@ -1,7 +1,7 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Api } from '@/api/endpoints';
 import type { MAttendanceItem, MClubAttendance } from '@/api/types';
 import { useSession } from '@/auth/session';
@@ -83,16 +83,21 @@ function Me({ userId }: { userId: string }) {
         </View>
       ) : null}
 
-      {me && me.openTasks > 0 ? (
-        <Card onPress={() => void openWeb('/tasks')} style={styles.tasks} accessibilityLabel={`You have ${plural(me.openTasks, 'open task')}. Opens on the web.`}>
-          <Icon name="checkCircle" size={22} color={c.brandText} />
+      {me ? (
+        <Card
+          onPress={() => router.push('/tasks')}
+          style={styles.tasks}
+          accessibilityLabel={me.openTasks ? `Tasks: ${plural(me.openTasks, 'open task')}` : "Tasks: you're all caught up"}
+          accessibilityHint="Approve requests, check off to-dos and see what WSUSA requires">
+          <Icon name="tasks" size={22} color={c.brandText} />
           <View style={styles.flex}>
-            <Text variant="label">You have {plural(me.openTasks, 'open task')}</Text>
+            <Text variant="label">Tasks</Text>
             <Text variant="small" tone="ink2">
-              Approvals, requirements and to-dos live on the web.
+              {me.openTasks ? `${plural(me.openTasks, 'open task')}: approvals, requirements and to-dos.` : "You're all caught up."}
             </Text>
           </View>
-          <Icon name="external" size={16} color={c.ink3} />
+          {me.openTasks ? <Badge label={String(me.openTasks)} tone="brand" /> : null}
+          <Icon name="chevron" size={16} color={c.ink3} />
         </Card>
       ) : null}
 
@@ -237,9 +242,15 @@ function HistoryRow({ item }: { item: MAttendanceItem }) {
 
 function NotificationsSetting() {
   const c = useColors();
-  const { push, setPushEnabled } = useSession();
+  const { push, setPushEnabled, refreshPushStatus } = useSession();
   const [busy, setBusy] = useState(false);
   const on = push.kind === 'on';
+  // The server's Push switch can change while the app is open: ask again when Me comes into view.
+  useFocusEffect(
+    useCallback(() => {
+      void refreshPushStatus();
+    }, [refreshPushStatus]),
+  );
   const unavailable = push.kind === 'unavailable';
   const toggle = async (next: boolean) => {
     setBusy(true);
@@ -253,9 +264,11 @@ function NotificationsSetting() {
         <View style={styles.flex}>
           <Text variant="label">Push notifications on this phone</Text>
           <Text variant="small" tone="ink3">
-            {/* "Registered", not "you'll get": delivery also waits on the server's Push switch (System → AI & integrations). */}
+            {/* "Reach this phone" only when they do: registered here AND the server's Push switch is on (System → AI & integrations). */}
             {on
-              ? 'This phone is registered for join approvals, announcements, event changes and reminders before events.'
+              ? push.delivering
+                ? 'Push notifications reach this phone: join approvals, announcements, event changes and reminders before events.'
+                : "This phone is set up, but Wildcat Clubs isn't sending push notifications yet. Everything shows in the Notifications tab until then."
               : push.kind === 'denied'
                 ? 'Notifications are blocked for Wildcat Clubs in your phone’s settings.'
                 : unavailable

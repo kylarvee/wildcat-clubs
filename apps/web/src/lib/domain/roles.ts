@@ -385,6 +385,7 @@ export async function handOffPresidency(actor: Actor | null, clubId: string, inp
     title: `${club.name} has a new President`,
     body: `${outgoing.user.name} handed off the presidency to ${successor.name}.`,
     href: `/clubs/${club.slug}/manage/org-chart`,
+    // The advisors' copy is a heads-up; the outgoing President is emailed above.
     email: false,
   });
   return { assignmentId: assignment.id, actorStillLeads: full || (await stillLeads(actor.id, clubId)) };
@@ -480,7 +481,6 @@ export async function placeAmbassador(actor: Actor | null, input: unknown) {
     title: `${person.name} is ${club.name}'s new College Ambassador`,
     body: `Placed by ${org.name}. They have no club permissions unless you grant some in the org chart.`,
     href: `/clubs/${club.slug}/manage/org-chart`,
-    email: false,
   });
   return assignment;
 }
@@ -551,7 +551,6 @@ export async function endAllRolesForUser(userId: string, reason: RoleEndReason, 
       title: `${a.position?.name ?? ROLE_LABEL[a.role]} is open in ${a.club.name}`,
       body: `${user.name}'s role ended (${END_REASON_LABEL[reason].toLowerCase()}). Fill the seat from the org chart.`,
       href: `/clubs/${a.club.slug}/manage/org-chart`,
-      email: false,
     });
   }
   await reopenRequirementTasks(userId);
@@ -631,7 +630,6 @@ export async function addRoleContribution(actor: Actor | null, roleAssignmentId:
       kind: "project.added",
       title: `${actor.name} added "${project.title}" to your ${a.position?.name ?? ROLE_LABEL[a.role]} role`,
       href: `/clubs/${a.club.slug}/history`,
-      email: false,
     });
   }
   return { project, skippedFiles: ids.length - visible.length };

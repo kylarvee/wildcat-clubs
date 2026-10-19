@@ -256,8 +256,37 @@ export function buildMessaging(ctx: Ctx) {
 }
 
 /**
+ * Psi Chi's bylaws (adopted about four weeks before the seed, steps/files.ts):
+ * members vote only after this many club events this semester, and a vote
+ * counts only if this share of them votes. Its President vote froze them.
+ */
+export const PSYCH_BYLAWS = { minEvents: 2, quorumPercent: 25, adoptedDaysAgo: 26.4 } as const;
+
+/** What a selection froze from the default builder bylaws every other seeded club keeps (lib/constitution/rules selectionRulesFor). */
+const DEFAULT_SELECTION_RULES = { minEvents: null, quorumPercent: 25, tieBreak: "RUNOFF", noticeDays: 7 };
+
+/**
+ * Check-ins at a club's events (hosted, or co-hosted and approved) that
+ * started between `from` and `to`: what lib/metrics counts for a member
+ * vote's attendance requirement.
+ */
+function eventsAttended(ctx: Ctx, club: ClubM, from: Date, to: Date): Map<string, number> {
+  const events = new Map([...ctx.clubs.flatMap((c) => c.events), ...ctx.universityEvents].map((e) => [e.id, e]));
+  const out = new Map<string, number>();
+  for (const e of events.values()) {
+    if (e.clubId !== club.id && !e.cohosts.some((h) => h.clubId === club.id && h.status === "APPROVED")) continue;
+    for (const o of e.occurrences) {
+      if (o.status !== "SCHEDULED" || o.startsAt < from || o.startsAt > to) continue;
+      for (const u of o.attendees.keys()) out.set(u, (out.get(u) ?? 0) + 1);
+    }
+  }
+  return out;
+}
+
+/**
  * The leadership pipeline in every mode the Elections tool handles:
- *   Psi Chi (psych)      MEMBER_VOTE, voting open now (Maya hasn't voted).
+ *   Psi Chi (psych)      MEMBER_VOTE under its bylaws (2 club events this semester to vote,
+ *                        25% quorum), voting open now (Maya hasn't voted; turnout is short of quorum).
  *   SWE (swe)            SELF_SELECT, closed and unanimous, waiting for a President (not the VP) to apply it.
  *   Wrecker Bots         ADVISOR_PRESIDENT: the VP stepped down, Priya proposed a successor, Dr. Alvarez is to confirm.
  *   Wildcat Investors    NEXT_IN_LINE: the VP stepped down; one officer said yes, Oscar hasn't answered, one said no.
@@ -273,13 +302,16 @@ export function buildElections(ctx: Ctx) {
     ctx.rows.candidates.push({ id, electionId, userId, statement, nominatedById, createdAt: at, fromPipeline: extra.fromPipeline ?? false, acceptedAt: extra.acceptedAt ?? null });
     return id;
   };
-  const votesFor = (electionId: string, voters: string[], cands: { id: string; userId: string; weight: number }[], from: Date, to: Date, noSelf = false) => {
+  /** `keep`: which of the sampled voters actually voted (the others still draw their choice, so the random stream stays the same). */
+  const votesFor = (electionId: string, voters: string[], cands: { id: string; userId: string; weight: number }[], from: Date, to: Date, noSelf = false, keep: (voterId: string) => boolean = () => true) => {
     let total = 0;
     for (const v of voters) {
       const options = noSelf ? cands.filter((c) => c.userId !== v) : cands;
       if (!options.length) continue;
       const c = rng.weighted(options, (x) => x.weight);
-      ctx.rows.votes.push({ id: ctx.id(), electionId, voterId: v, candidateId: c.id, createdAt: new Date(from.getTime() + rng.next() * (to.getTime() - from.getTime())) });
+      const at = new Date(from.getTime() + rng.next() * (to.getTime() - from.getTime()));
+      if (!keep(v)) continue;
+      ctx.rows.votes.push({ id: ctx.id(), electionId, voterId: v, candidateId: c.id, createdAt: at });
       total++;
     }
     return total;
@@ -313,6 +345,8 @@ export function buildElections(ctx: Ctx) {
     ctx.rows.elections.push({
       id, clubId: club.id, positionId: seat(club, "President").id, title: "President — Spring 2027", method: "MEMBER_VOTE", status: "VOTING",
       votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt,
+      // Frozen from the bylaws Psi Chi adopted before this started; voting opened 10 days after it was announced (7 days' notice).
+      rules: { minEvents: PSYCH_BYLAWS.minEvents, quorumPercent: PSYCH_BYLAWS.quorumPercent, tieBreak: "RUNOFF", noticeDays: 7 },
     });
     ctx.refs.psychElectionId = id;
     // The officers below the President start on the ballot from the org chart; one more member ran.
@@ -330,7 +364,10 @@ export function buildElections(ctx: Ctx) {
       return { id: candidate(id, u, statements[i], fromPipeline ? advisor : u, fromPipeline ? new Date(createdAt.getTime() + i) : at, { fromPipeline }), userId: u, weight: [1.4, 1, 0.8][i] };
     });
     const voters = rng.sample(club.members.filter((m) => m.status === "ACTIVE" && m.userId !== ctx.p("maya").id && ctx.person(m.userId).kind === "STUDENT").map((m) => m.userId), 19);
-    votesFor(id, voters, cands, opens, NOW);
+    // Only members who'd been to enough club events this semester when voting opened can vote, and so far fewer than the quorum have.
+    const attended = eventsAttended(ctx, club, ctx.termFor(opens).startsOn, opens);
+    let cast = 0;
+    votesFor(id, voters, cands, opens, NOW, false, (v) => (attended.get(v) ?? 0) >= PSYCH_BYLAWS.minEvents && cast++ < 9);
     ctx.activity({ at: createdAt, actorId: advisor, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title: "President — Spring 2027", seat: "President", method: "MEMBER_VOTE", candidates: pipeline.length }, isPublic: true });
   }
 
@@ -349,7 +386,7 @@ export function buildElections(ctx: Ctx) {
     const [a, b] = stay.length === 2 ? stay.map((p) => p.userId) : [...stay.map((p) => p.userId), ...club.members.filter((m) => m.status === "ACTIVE" && !ctx.person(m.userId).persona && ctx.person(m.userId).kind === "STUDENT" && m.userId !== ctx.refs.swePresident && !stay.some((p) => p.userId === m.userId)).map((m) => m.userId)].slice(0, 2);
     ctx.rows.elections.push({
       id, clubId: club.id, positionId: president.id, title: "President — Spring 2027", method: "SELF_SELECT", status: "CLOSED",
-      votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt,
+      votingOpensAt: opens, votingClosesAt: closes, createdById: advisor, createdAt, rules: DEFAULT_SELECTION_RULES,
     });
     ctx.refs.sweElectionId = id;
     ctx.activity({ at: createdAt, actorId: advisor, action: "election.created", entityType: "election", entityId: id, clubId: club.id, data: { title: "President — Spring 2027", seat: "President", method: "SELF_SELECT", candidates: pipeline.length }, isPublic: true });
@@ -389,7 +426,7 @@ export function buildElections(ctx: Ctx) {
     ctx.rows.elections.push({
       id, clubId: club.id, positionId: vp.id, title, method: "ADVISOR_PRESIDENT", status: "NOMINATING",
       votingOpensAt: createdAt, votingClosesAt: decideBy, createdById: priya.id, createdAt,
-      proposedCandidateId: ids[0], proposedById: priya.id, proposedAt,
+      proposedCandidateId: ids[0], proposedById: priya.id, proposedAt, rules: DEFAULT_SELECTION_RULES,
     });
     ctx.refs.roboticsProposalId = id;
     const href = `/clubs/${club.slug}/manage/elections/${id}`;
@@ -432,7 +469,7 @@ export function buildElections(ctx: Ctx) {
     const declined = new Set(asked.filter((p) => p.userId !== oscar && p !== yes));
     ctx.rows.elections.push({
       id, clubId: club.id, positionId: vp.id, title, method: "NEXT_IN_LINE", status: "VOTING",
-      votingOpensAt: createdAt, votingClosesAt: respondBy, createdById: president, createdAt,
+      votingOpensAt: createdAt, votingClosesAt: respondBy, createdById: president, createdAt, rules: DEFAULT_SELECTION_RULES,
     });
     ctx.refs.ficNextInLineId = id;
     const memberHref = `/clubs/${club.slug}/elections/${id}`;

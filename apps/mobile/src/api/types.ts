@@ -41,6 +41,8 @@ export type CheckInMethod = "QR" | "SELF" | "TAP" | "MANUAL";
 export type WindowState = "NOT_OPEN" | "OPEN" | "CLOSED";
 /** "mobile-scan": a scan or a typed code. "mobile-popup": the one-tap "check in?" prompt (recorded as TAP at online events). */
 export type CheckInVia = "mobile-scan" | "mobile-popup";
+/** APPROVAL, REQUIREMENT, TEST and INVOICE tasks close on their own once the thing is done; CLUB and PERSONAL ones are checked off. */
+export type TaskKind = "APPROVAL" | "REQUIREMENT" | "TEST" | "INVOICE" | "CLUB" | "PERSONAL";
 
 // ─── People and clubs ────────────────────────────────────────────────────────
 
@@ -148,6 +150,8 @@ export type MEventDetail = MEvent & {
   scheduleLabel: string | null;
   /** Open in the browser for the full page. */
   webPath: string;
+  /** "Show check-in QR" and "Add someone": only while check-in is open, and only for people who can run it. */
+  leaderCheckin: MLeaderCheckin | null;
 };
 
 export type MAnnouncement = {
@@ -200,7 +204,12 @@ export type MMe = {
 
 /** POST /api/m/push-token — register this phone; DELETE with { token } to stop pushes to it. */
 export type MPushTokenRequest = { token: string; platform: "ios" | "android" | "web" };
-export type MPushTokenResponse = { registered: boolean };
+/**
+ * `delivering`: pushes really reach this phone — it's registered and the
+ * server's Push switch (System → AI & integrations) is on. While that switch
+ * is off, notifications still land in the Notifications tab.
+ */
+export type MPushTokenResponse = { registered: boolean; delivering: boolean };
 
 // ─── Home ────────────────────────────────────────────────────────────────────
 
@@ -223,6 +232,10 @@ export type MHome = {
   announcements: MAnnouncement[];
   /** What WSUSA requires of you that's still open, soonest due first (done on the web). */
   required: MRequiredTask[];
+  /** "See more": GET /api/m/announcements?cursor=… for older announcements; null when there are none. */
+  announcementsCursor: string | null;
+  /** Your open tasks, for the Tasks row ("5 approvals waiting"). */
+  tasks: { open: number; approvals: number };
 };
 
 export type MRequiredTask = {
@@ -240,8 +253,10 @@ export type MRequiredTask = {
 export type MClubMetrics = {
   registeredMembers: number;
   activeMembers: number;
-  /** 0–1, last complete month vs the one before; null without data. */
+  /** 0–1, month retention (the latest two full months in a row with check-ins); null without data. */
   retentionRate: number | null;
+  /** How to show it, the same words as the web: "Sep → Oct: 62% came back", or what it's waiting for. */
+  retentionText: string;
   avgRating: number | null;
   reviewCount: number;
   isActive: boolean;
@@ -328,6 +343,8 @@ export type MClubDetail = {
   attendance: MAttendanceSummary | null;
   /** Check-ins open now that you could make yourself (drives the "check in?" pop-up). */
   live: MOccurrence[];
+  /** This club's meetings with check-in open now that you can run ("Show check-in QR", "Add someone"); empty for everyone else. */
+  leaderCheckins: MLeaderCheckin[];
 };
 
 /** POST /api/m/clubs/[slug]/join | leave | subscribe | unsubscribe (no body) */
@@ -382,6 +399,150 @@ export type MCheckinResult = {
   /** WSUSA requirements this check-in fulfilled. */
   requirementsMet: string[];
 };
+
+// ─── Leader check-in tools ───────────────────────────────────────────────────
+
+/**
+ * A meeting whose check-in is open that you can run: the Attendance
+ * permission in the host club (admins at university events), as on the web.
+ */
+export type MLeaderCheckin = { occurrence: MOccurrence; checkedIn: number };
+
+/**
+ * GET /api/m/checkin/[occurrenceId]/qr — the rotating QR to show at the
+ * door: the same token as the web's live check-in screen. Fetch it again
+ * after `refreshInMs`. A code keeps working for about a minute after it
+ * changes, so a slow network doesn't lock anyone out.
+ */
+export type MCheckinQr = {
+  occurrence: MOccurrence;
+  /** What the QR encodes: "<web>/c/<code>?t=<token>". */
+  url: string;
+  /** The QR's modules, top row first ("1" = dark). Draw dark on white with a margin; no QR library needed. */
+  qr: string[];
+  /** The event's check-in code, shown under the QR. */
+  code: string;
+  /** Whose members may type the code ("RC Wrecker Bots Club or SWE"). Null at university events: only the QR works there, so the code isn't shown. */
+  codeClubs: string | null;
+  rotateSeconds: number;
+  /** Milliseconds until this QR changes, by the server's clock. */
+  refreshInMs: number;
+  /** The same moment as a time. */
+  refreshAt: string;
+  windowState: WindowState;
+  checkedIn: number;
+};
+
+/** GET /api/m/checkin/[occurrenceId]/people?q= (2+ characters) — who a leader can add: the host club's members first, then any Weber State account. */
+export type MCheckinCandidate = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  avatarColor: string;
+  /** An active member of the host club. */
+  isMember: boolean;
+  /** Already checked in to this meeting. */
+  alreadyIn: boolean;
+};
+export type MCheckinCandidates = { items: MCheckinCandidate[] };
+
+/** POST /api/m/checkin/[occurrenceId]/people { userId } — checks them in as "Added by a leader". */
+export type MManualCheckinRequest = { userId: string };
+export type MManualCheckinResult = {
+  attendanceId: string;
+  name: string;
+  method: CheckInMethod;
+  /** "Added by a leader" */
+  methodLabel: string;
+  /** WSUSA requirements this check-in fulfilled for them. */
+  requirementsMet: string[];
+  checkedIn: number;
+};
+
+// ─── Tasks ───────────────────────────────────────────────────────────────────
+
+/** A request you can approve or decline right in the app. */
+export type MTaskDecision =
+  | {
+      kind: "JOIN";
+      /** The membership: POST /api/m/join-requests/[id]/approve | decline */
+      id: string;
+      personName: string;
+      clubName: string;
+    }
+  | {
+      kind: "COHOST";
+      /** The co-host invitation: POST /api/m/cohost-requests/[id]/approve | decline */
+      id: string;
+      eventTitle: string;
+      /** The club (or Weber State) hosting the event. */
+      hostName: string;
+      /** Your club, the one invited to co-host. */
+      clubName: string;
+    };
+
+/** One open task, worded like the web's Tasks page. */
+export type MTask = {
+  id: string;
+  kind: TaskKind;
+  /** "Required by WSUSA" on required tasks; otherwise the kind ("Approval", "Club test", "Club form", "Invoice"…). */
+  badge: string;
+  /** WSUSA requires it: listed first, with the "Required by WSUSA" badge. */
+  required: boolean;
+  title: string;
+  description: string | null;
+  club: MClubRef | null;
+  /** "Due tomorrow", "Overdue · was due Oct 14"; null when undated or waiting for grading. */
+  dueLabel: string | null;
+  overdue: boolean;
+  /** Due within two days. */
+  dueSoon: boolean;
+  /** "Submitted — waiting for grading": handed in on time, so it isn't late. Shown instead of a due date. */
+  waitingLabel: string | null;
+  /** "From Priya Patel": who handed you a club task. */
+  fromLabel: string | null;
+  /** "Everyone with Budget & funding": a club task for everyone who holds a permission. */
+  forGroup: string | null;
+  /** How it closes, for tasks that close on their own ("Closes on its own once you pass the test or submit the form."). */
+  note: string | null;
+  /** Approve or decline here (join requests, co-host invitations). */
+  decision: MTaskDecision | null;
+  /** A personal or club to-do: check it off with POST /api/m/tasks/[id]/done. */
+  checkable: boolean;
+  /** Where it's done, as a site path ("/tests/…"); the app opens its own screen when it has one, else the web. Null when there's nothing to open. */
+  path: string | null;
+};
+
+/** GET /api/m/tasks — your open tasks: required first, then soonest due (undated last), the same list as the web's Tasks page. */
+export type MTasks = {
+  items: MTask[];
+  /** More are open than `items` holds; the web's Tasks page lists them all. */
+  more: boolean;
+};
+
+/** POST /api/m/join-requests/[membershipId]/approve | decline and /api/m/cohost-requests/[cohostId]/approve | decline (no body). */
+export type MDecisionResponse = {
+  status: "APPROVED" | "DECLINED";
+  /** What happened, ready to show ("Jordan Lee is now a member of RC Wrecker Bots Club."). */
+  message: string;
+  /** Your open tasks now, for the badges. */
+  openTasks: number;
+};
+
+/** POST /api/m/tasks/[taskId]/done { done } — check off (or reopen) a personal or club to-do. */
+export type MTaskDoneRequest = { done: boolean };
+export type MTaskDoneResponse = { done: boolean; openTasks: number };
+
+// ─── Announcements ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/m/announcements?cursor=&limit= — older announcements for "See
+ * more" on Home: the web dashboard's feed (same audiences), newest first, a
+ * page at a time. Start from MHome.announcementsCursor; `nextCursor` is null
+ * at the end.
+ */
+export type MAnnouncementPage = { items: MAnnouncement[]; nextCursor: string | null };
 
 // ─── Calendar ────────────────────────────────────────────────────────────────
 

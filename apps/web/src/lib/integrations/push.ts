@@ -1,36 +1,69 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { integrationLive } from "@/lib/config";
+import type { DeliveryResult } from "@/lib/integrations/email";
 
 /**
- * Push notifications to the mobile app through Expo's push service.
- * With the integration off they're recorded in the outbox as MOCKED.
+ * Push notifications to the mobile app through Expo's push service, one
+ * outbox row per phone (addressed to its token). With the integration off
+ * they're recorded in the outbox as MOCKED. Big sends are recorded as QUEUED
+ * (queuePushes) and delivered by the "Send queued messages" job
+ * (lib/jobs/notifications) with pushSender().
  */
-export async function sendPush(userId: string, input: { title: string; body?: string; href?: string }) {
+export type PushInput = { title: string; body?: string; href?: string; /** The notification kind behind it. */ kind?: string | null };
+
+/** A push as the outbox records it. */
+export type ComposedPush = { to: string; subject: string; body: string; href: string | null };
+
+const compose = (token: string, input: PushInput): ComposedPush => ({ to: token, subject: input.title, body: input.body ?? "", href: input.href ?? null });
+
+/** Pushes to each of the person's phones now and records how each went. */
+export async function sendPush(userId: string, input: PushInput) {
   const tokens = await db.pushToken.findMany({ where: { userId }, select: { token: true } });
   if (tokens.length === 0) return;
-  const live = await integrationLive("push");
+  const send = await pushSender();
   for (const { token } of tokens) {
-    if (!live) {
-      await db.outboxMessage.create({ data: { channel: "PUSH", to: token, subject: input.title, body: input.body ?? "", href: input.href, status: "MOCKED" } });
-      continue;
-    }
+    const m = compose(token, input);
+    const r = await send(m);
+    await db.outboxMessage.create({ data: { channel: "PUSH", ...m, kind: input.kind ?? null, status: r.status, error: r.error, sentAt: new Date() } });
+  }
+}
+
+/** Records pushes to these people's phones as QUEUED for the "Send queued messages" job. Returns how many wait. */
+export async function queuePushes(sends: { userIds: string[]; input: PushInput }[]): Promise<number> {
+  const ids = [...new Set(sends.flatMap((s) => s.userIds))];
+  if (!ids.length) return 0;
+  const phones = new Map<string, string[]>();
+  for (let i = 0; i < ids.length; i += 1000) {
+    for (const t of await db.pushToken.findMany({ where: { userId: { in: ids.slice(i, i + 1000) } }, select: { userId: true, token: true } })) phones.set(t.userId, [...(phones.get(t.userId) ?? []), t.token]);
+  }
+  const rows = sends.flatMap((s) => s.userIds.flatMap((id) => (phones.get(id) ?? []).map((token) => ({ channel: "PUSH" as const, ...compose(token, s.input), kind: s.input.kind ?? null, status: "QUEUED" as const }))));
+  for (let i = 0; i < rows.length; i += 1000) await db.outboxMessage.createMany({ data: rows.slice(i, i + 1000) });
+  return rows.length;
+}
+
+/**
+ * A sender for one run: delivers composed pushes (MOCKED while push is off)
+ * and says how each went. Never throws. A phone Expo says is gone loses its
+ * token, so nothing more is sent to it (delivery bookkeeping, like the outbox).
+ */
+export async function pushSender(): Promise<(m: ComposedPush) => Promise<DeliveryResult>> {
+  const live = await integrationLive("push");
+  return async (m) => {
+    if (!live) return { status: "MOCKED", error: null };
     try {
       const res = await fetch("https://exp.host/--/api/v2/push/send", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ to: token, title: input.title, body: input.body, data: { href: input.href } }),
+        body: JSON.stringify({ to: m.to, title: m.subject, body: m.body || undefined, data: { href: m.href ?? undefined } }),
       });
       const ticket = readExpoTicket(res.ok, await res.text());
-      await db.outboxMessage.create({
-        data: { channel: "PUSH", to: token, subject: input.title, body: input.body ?? "", href: input.href, status: ticket.sent ? "SENT" : "FAILED", error: ticket.error },
-      });
-      // The app was uninstalled or its token replaced: stop sending to it (delivery bookkeeping, like the outbox).
-      if (ticket.deviceGone) await db.pushToken.deleteMany({ where: { token } });
+      if (ticket.deviceGone) await db.pushToken.deleteMany({ where: { token: m.to } });
+      return { status: ticket.sent ? "SENT" : "FAILED", error: ticket.error };
     } catch (e) {
-      await db.outboxMessage.create({ data: { channel: "PUSH", to: token, subject: input.title, body: input.body ?? "", href: input.href, status: "FAILED", error: String(e) } });
+      return { status: "FAILED", error: String(e) };
     }
-  }
+  };
 }
 
 type ExpoTicket = { status?: string; message?: string; details?: { error?: string } };

@@ -80,7 +80,7 @@ export default async function ConstitutionHome() {
               <p>
                 <span className="font-medium text-ink">{modular} optional sections</span> cover things like dues, committees, travel and quorum.
               </p>
-              <p>Adopting saves both documents as PDFs in your club&apos;s files and applies their rules: how students join and how leaders are chosen.</p>
+              <p>Adopting saves both documents as PDFs in your club&apos;s files and applies their rules: how students join, how leaders are chosen, and the voting rules the builder marks &quot;Wildcat Clubs applies this.&quot; The rest is your club&apos;s to follow, with WSUSA.</p>
               <p className="text-ink-3">Prefer your own documents? After your club has run for a year, you can upload a custom constitution for WSUSA approval from your club&apos;s Constitution page.</p>
             </CardBody>
           </Card>

@@ -161,7 +161,7 @@ describe("reasons", () => {
 
   test("signed out: one line about the club's standing, at most", () => {
     expect(reasonsFor({ metrics: metrics({ activeMembers: 25, activityScore: 9 }), personal: null }, ctx)).toEqual(["Popular this term"]);
-    expect(reasonsFor({ metrics: metrics({ activeMembers: 5, activityScore: 9 }), personal: null }, ctx)).toEqual(["Busy calendar lately"]);
+    expect(reasonsFor({ metrics: metrics({ activeMembers: 5, activityScore: 9 }), personal: null }, ctx)).toEqual(["Held 9 events in the last 30 days"]);
     expect(reasonsFor({ metrics: metrics({ activeMembers: 5 }), personal: null }, ctx)).toEqual([]);
   });
 

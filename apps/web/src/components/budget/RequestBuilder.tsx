@@ -13,7 +13,7 @@ import { toast } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
 import { fmtMoney } from "@/lib/time";
 import { FUNDING_SOURCES } from "@/lib/events/labels";
-import { FUNDING_STATUS_LABEL, plural } from "@/lib/funding/labels";
+import { plural } from "@/lib/funding/labels";
 import { MAX_REQUEST_CENTS } from "@/lib/funding/math";
 import { discardDraftAction, saveRequestAction } from "@/app/clubs/[slug]/manage/budget/actions";
 
@@ -30,7 +30,14 @@ export type BuilderLine = {
   setCents: number;
   occurrences: number;
   totalCents: number;
+  /** The request holding it locked: in WSUSA review, or funded in full (lib/funding/locks). */
   lockedBy: { title: string; status: FundingStatus } | null;
+  /** WSUSA's decisions on it in approved requests this semester. */
+  decisions: { title: string; askedCents: number; approvedCents: number }[];
+  fundedCents: number;
+  /** What this request would ask for: its cost less what's funded. */
+  openCents: number;
+  requestable: boolean;
 };
 
 export type RequestBuilderProps = {
@@ -44,6 +51,8 @@ export type RequestBuilderProps = {
   initial?: { requestId: string; title: string; justification: string; fundingSource: FundingSource; itemIds: string[] } | null;
   /** ?event=<id>: start with that event's lines picked. */
   preselectEventId?: string | null;
+  /** ?from=<request>: start with these lines picked (what that request didn't fund), and this title. */
+  preselect?: { lineIds: string[]; title: string } | null;
   reviewDays: number;
   minJustification: number;
 };
@@ -68,17 +77,25 @@ function mostCommonSource(lines: BuilderLine[], fallback: FundingSource): Fundin
 }
 
 /**
- * Build or edit a funding request: one semester, one funding source, the cost
- * lines it covers, and why. Lines another request already covers can't be
- * picked twice. Saving keeps a draft; submitting sends it to WSUSA.
+ * Build or edit a funding request: one semester, the source the club expects,
+ * the cost lines it covers, and why. WSUSA reviews every request and may fund
+ * it from another source. Lines a request holds (in review, or funded in
+ * full) can't be picked; a line funded in part asks only for the rest.
+ * Saving keeps a draft; submitting sends it to WSUSA.
  */
 export function RequestBuilder(p: RequestBuilderProps) {
   const router = useRouter();
   const formId = useId();
-  const available = useMemo(() => new Set(p.lines.filter((l) => !l.lockedBy).map((l) => l.id)), [p.lines]);
-  const preselected = useMemo(() => (p.preselectEventId ? p.lines.filter((l) => l.eventId === p.preselectEventId && !l.lockedBy) : []), [p.lines, p.preselectEventId]);
+  const available = useMemo(() => new Set(p.lines.filter((l) => l.requestable).map((l) => l.id)), [p.lines]);
+  const preselected = useMemo(() => {
+    if (p.preselect) {
+      const ids = new Set(p.preselect.lineIds);
+      return p.lines.filter((l) => ids.has(l.id) && l.requestable);
+    }
+    return p.preselectEventId ? p.lines.filter((l) => l.eventId === p.preselectEventId && l.requestable) : [];
+  }, [p.lines, p.preselectEventId, p.preselect]);
 
-  const [title, setTitle] = useState(p.initial?.title ?? preselected[0]?.eventTitle ?? "");
+  const [title, setTitle] = useState(p.initial?.title ?? p.preselect?.title ?? preselected[0]?.eventTitle ?? "");
   const [justification, setJustification] = useState(p.initial?.justification ?? "");
   const [source, setSource] = useState<FundingSource>(p.initial?.fundingSource ?? (preselected.length ? mostCommonSource(preselected, p.defaultSource) : p.defaultSource));
   const [selected, setSelected] = useState<Set<string>>(() => new Set((p.initial?.itemIds ?? preselected.map((l) => l.id)).filter((id) => available.has(id))));
@@ -92,7 +109,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
   const matching = p.lines.filter((l) => l.fundingSource === source);
   const others = p.lines.filter((l) => l.fundingSource !== source);
   const chosen = p.lines.filter((l) => selected.has(l.id));
-  const total = chosen.reduce((s, l) => s + l.totalCents, 0);
+  const total = chosen.reduce((s, l) => s + l.openCents, 0);
   const othersChosen = others.filter((l) => selected.has(l.id)).length;
   const base = `/clubs/${p.slug}/manage/budget`;
 
@@ -205,8 +222,9 @@ export function RequestBuilder(p: RequestBuilderProps) {
           </div>
           <ul className="divide-y divide-line">
             {g.lines.map((l) => {
-              const locked = Boolean(l.lockedBy);
+              const locked = !l.requestable;
               const inputId = `${formId}-${l.id}`;
+              const lastDecision = l.decisions.at(-1);
               return (
                 <li key={l.id} className={cn("flex items-start gap-3 px-3 py-2.5", locked && "bg-muted/40")}>
                   <input
@@ -229,11 +247,25 @@ export function RequestBuilder(p: RequestBuilderProps) {
                     </span>
                     {l.lockedBy ? (
                       <span className="mt-1 flex items-center gap-1 text-xs text-ink-2">
-                        <Lock className="h-3 w-3" aria-hidden /> Already in “{l.lockedBy.title}” ({FUNDING_STATUS_LABEL[l.lockedBy.status].toLowerCase()})
+                        <Lock className="h-3 w-3" aria-hidden />
+                        {l.lockedBy.status === "SUBMITTED" ? `Already in “${l.lockedBy.title}” (in WSUSA review)` : `Funded in full by “${l.lockedBy.title}”`}
+                      </span>
+                    ) : !l.requestable ? (
+                      <span className="mt-1 flex items-center gap-1 text-xs text-ink-2">
+                        <Lock className="h-3 w-3" aria-hidden /> Already funded: {fmtMoney(l.fundedCents)}
+                      </span>
+                    ) : lastDecision ? (
+                      <span className="mt-1 block text-xs text-warning">
+                        {l.fundedCents
+                          ? `${fmtMoney(l.fundedCents)} of ${fmtMoney(l.totalCents)} funded in “${lastDecision.title}”; this asks for the other ${fmtMoney(l.openCents)}`
+                          : `Not funded in “${lastDecision.title}”, so you can ask another source`}
                       </span>
                     ) : null}
                   </label>
-                  <span className={cn("shrink-0 text-sm font-semibold tabular-nums", locked ? "text-ink-3" : "text-ink")}>{fmtMoney(l.totalCents)}</span>
+                  <span className={cn("shrink-0 text-right text-sm font-semibold tabular-nums", locked ? "text-ink-3" : "text-ink")}>
+                    {fmtMoney(locked ? l.totalCents : l.openCents)}
+                    {!locked && l.openCents < l.totalCents ? <span className="block text-xs font-normal text-ink-3">of {fmtMoney(l.totalCents)}</span> : null}
+                  </span>
                 </li>
               );
             })}
@@ -255,7 +287,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
         <Field label="Title" required hint="Short and specific, like “Fall speaker series”.">
           {(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} placeholder="What's this request for?" required />}
         </Field>
-        <Field label="Ask for money from" required hint="One source per request. Make a second request for another source.">
+        <Field label="Expected source" required hint="Where you expect the money to come from. WSUSA reviews every request and may fund it from another source.">
           {(id) => (
             <Select id={id} value={source} onChange={(e) => setSource(e.target.value as FundingSource)}>
               {FUNDING_SOURCES.map((s) => (
@@ -312,7 +344,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
             </button>
             {showOthers ? (
               <>
-                <p className="text-xs text-ink-3">Picking one of these asks {p.sourceNames[source]} to cover it instead. The line itself doesn&apos;t change.</p>
+                <p className="text-xs text-ink-3">Picking one of these puts it in a request you expect {p.sourceNames[source]} to cover. The line&apos;s own planned source doesn&apos;t change.</p>
                 {renderGroups(others, true)}
               </>
             ) : null}
@@ -353,8 +385,8 @@ export function RequestBuilder(p: RequestBuilderProps) {
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Ask ${p.sourceNames[source]} for ${fmtMoney(total)}?`}
-        description={`WSUSA staff review every request, usually within about ${p.reviewDays} business days. Until they decide you can withdraw it, and its ${plural(chosen.length, "line")} stay locked so the budget matches what you asked for.`}
+        title={`Send ${fmtMoney(total)} to WSUSA for review?`}
+        description={`You expect it from ${p.sourceNames[source]}. WSUSA reviews every request, usually within about ${p.reviewDays} business days, and may fund it from another source. Until they decide you can withdraw it, and ${chosen.length === 1 ? "its line stays" : `its ${chosen.length} lines stay`} locked so the budget matches what you asked for.`}
         confirmLabel="Submit request"
         onConfirm={() => save(true)}
       >

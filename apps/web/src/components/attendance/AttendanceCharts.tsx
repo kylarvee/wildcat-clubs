@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BarChart3, TrendingUp } from "lucide-react";
 import { cn } from "@/components/ui/cn";
+import { latestRetention, noRetentionText } from "@/lib/metrics/pure";
 
 /**
  * Tracker charts. Colors are a validated pair for the white card surface
@@ -140,7 +141,8 @@ export function AttendanceByEventChart({ data }: { data: EventPoint[] }) {
 }
 
 export type RetentionKey = "month" | "quarter" | "academicYear" | "year";
-export type RetentionSeries = { label: string; rate: number | null; retained: number; previousAttendees: number; attendees: number }[];
+/** lib/metrics clubRetention points: `previousLabel` is the period each compares with; `inProgress` marks the one still running. */
+export type RetentionSeries = { label: string; previousLabel: string | null; rate: number | null; retained: number; previousAttendees: number; attendees: number; inProgress?: boolean }[];
 
 const PERIODS: { key: RetentionKey; label: string; noun: string }[] = [
   { key: "month", label: "Month", noun: "month" },
@@ -155,7 +157,8 @@ export function RetentionChart({ series, defaultPeriod = "month" }: { series: Re
   const points = series[period].map((p) => ({ ...p, pct: p.rate === null ? null : Math.round(p.rate * 100) }));
   const noun = PERIODS.find((p) => p.key === period)!.noun;
   const hasData = points.some((p) => p.pct !== null);
-  const latest = [...points].reverse().find((p) => p.pct !== null);
+  // The figure every screen quotes (lib/metrics latestRetention): the latest two complete periods in a row with check-ins.
+  const headline = latestRetention(series[period]);
 
   return (
     <div>
@@ -177,11 +180,7 @@ export function RetentionChart({ series, defaultPeriod = "month" }: { series: Re
             </button>
           ))}
         </div>
-        {latest ? (
-          <p className="text-xs text-ink-3">
-            Latest ({latest.label}): <span className="font-semibold text-ink">{latest.pct}%</span> came back
-          </p>
-        ) : null}
+        <p className="text-xs text-ink-3">{headline ? <span className="font-semibold text-ink">{headline.label}</span> : noRetentionText(noun)}</p>
       </div>
       {hasData ? (
         <figure>
@@ -200,7 +199,9 @@ export function RetentionChart({ series, defaultPeriod = "month" }: { series: Re
                       <TipShell>
                         <p className="mb-1 font-semibold text-ink">{row.label}</p>
                         {row.pct === null ? (
-                          <p className="text-ink-3">Nobody checked in the {noun} before, so there&apos;s nothing to compare.</p>
+                          <p className="text-ink-3">
+                            {row.previousAttendees === 0 ? `Nobody checked in the ${noun} before` : `Nobody checked in this ${noun}`}, so there&apos;s nothing to compare.
+                          </p>
                         ) : (
                           <>
                             <p className="flex items-center gap-2">
@@ -248,7 +249,7 @@ export function RetentionChart({ series, defaultPeriod = "month" }: { series: Re
               {points.map((p) => (
                 <tr key={p.label}>
                   <th scope="row">{p.label}</th>
-                  <td>{p.pct === null ? "No earlier period to compare" : `${p.pct}% (${p.retained} of ${p.previousAttendees})`}</td>
+                  <td>{p.pct !== null ? `${p.pct}% (${p.retained} of ${p.previousAttendees})` : p.previousAttendees === 0 ? "No earlier period to compare" : "Nobody checked in"}</td>
                   <td>{p.attendees}</td>
                 </tr>
               ))}
