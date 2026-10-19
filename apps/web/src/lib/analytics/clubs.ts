@@ -50,15 +50,19 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
   const ids = clubs.map((c) => c.id);
   // Founding clubs have no events; only clubs that could have run one this term need the per-event query.
   const withEvents = clubs.filter((c) => c.status === "APPROVED" || c.status === "RETIRED").map((c) => c.id);
-  const [activity, list, links, rates] = await Promise.all([
+  const [activity, list, links, rates, leaders] = await Promise.all([
     clubActivityMany(ids),
     clubListMetrics(ids),
     connectionCounts(),
     term
       ? inBatches(withEvents, 8, async (id) => [id, averageRate(await clubAttendanceByOccurrence(id, { from: term.from, to: term.to }))] as const)
       : Promise.resolve([] as (readonly [string, number | null])[]),
+    // Current Presidents and advisors, for the No President and No advisor filters.
+    db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null, role: { in: ["PRESIDENT", "ADVISOR"] } }, _count: { _all: true } }),
   ]);
   const rateBy = new Map(rates);
+  const heldBy = new Map(leaders.map((g) => [`${g.clubId}:${g.role}`, g._count._all]));
+  const held = (clubId: string, role: ClubRole) => heldBy.get(`${clubId}:${role}`) ?? 0;
 
   const rows: ClubAnalyticsRow[] = clubs.map((c) => {
     const a = activity.get(c.id);
@@ -84,6 +88,8 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
       reviews: m?.reviewCount ?? 0,
       connections: l?.clubs ?? 0,
       crossCheckins: l?.weight ?? 0,
+      presidents: held(c.id, "PRESIDENT"),
+      advisors: held(c.id, "ADVISOR"),
     };
   });
   return { rows, termName: term?.name ?? null };

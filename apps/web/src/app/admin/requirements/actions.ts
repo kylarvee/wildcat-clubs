@@ -6,9 +6,10 @@ import { act } from "@/lib/domain/kit";
 import { saveRequirement, setRequirementActive, syncAllRequirementHolders } from "@/lib/domain/requirements";
 
 /**
- * Requirement changes re-check every student leader's tasks after the
- * response is sent (new tasks, moved due dates, closed tasks), so saving stays
- * quick. The scheduled job would catch up anyway; this makes it immediate.
+ * Requirement changes run the full sweep (everyone the requirements reach:
+ * new tasks, moved due dates, closed tasks) after the response is sent, so
+ * saving stays quick. The daily sweep would catch up anyway; this makes it
+ * immediate, and counts as the day's sweep (lib/jobs/requirements).
  */
 function refresh() {
   revalidatePath("/admin/requirements", "layout");

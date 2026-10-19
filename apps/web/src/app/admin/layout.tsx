@@ -2,23 +2,26 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { SideNav } from "@/components/workspace/SideNav";
+import { wsusaQueue } from "@/lib/analytics/admin";
 
 /** Administrator area (WSUSA staff). lib/authz: admin.* = ADMIN or SYSADMIN. */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("/admin");
   if (!can(user, "admin.access")) notFound();
+  // What's waiting in each tool: the same queue as the Overview and the dashboard.
+  const waiting = (await wsusaQueue()).bySection;
   const links = [
     { href: "/admin", label: "Overview", exact: true },
     { href: "/admin/analytics", label: "Club analytics" },
-    { href: "/admin/clubs", label: "Club approvals" },
-    { href: "/admin/funding", label: "Funding" },
+    { href: "/admin/clubs", label: "Club approvals", count: waiting.clubs },
+    { href: "/admin/funding", label: "Funding", count: waiting.funding },
     { href: "/admin/policies", label: "Policies" },
-    { href: "/admin/tests", label: "Tests" },
+    { href: "/admin/tests", label: "Tests", count: waiting.tests },
     { href: "/admin/requirements", label: "Requirements" },
     { href: "/admin/trainings", label: "Trainings & events" },
     { href: "/admin/announcements", label: "Announcements" },
-    { href: "/admin/complaints", label: "Reports" },
-    { href: "/admin/reviews", label: "Review moderation" },
+    { href: "/admin/complaints", label: "Reports", count: waiting.complaints },
+    { href: "/admin/reviews", label: "Review moderation", count: waiting.reviews },
     { href: "/admin/directory", label: "Directory" },
     { href: "/files/university", label: "University files" },
     { href: "/admin/users", label: "People" },

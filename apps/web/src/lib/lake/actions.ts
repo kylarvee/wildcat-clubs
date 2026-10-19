@@ -105,6 +105,7 @@ export const ACTIONS = {
   "club.rejected": { label: "Didn't approve a club", phrase: "decided not to approve the club", public: false },
   "club.retired": { label: "Retired a club", phrase: "retired the club", public: true },
   "club.reinstated": { label: "Reinstated a club", phrase: "reinstated the club", public: true },
+  "club.renewed": { label: "Re-registered a club", phrase: (d) => q(d.year, (y) => `re-registered the club with WSUSA for ${y}`, "re-registered the club with WSUSA"), public: true },
   "club.ambassador_program_started": { label: "Started a college ambassador program", phrase: "started the college's ambassador program", public: true },
 
   // ─── Constitutions ─────────────────────────────────────────────────────────
@@ -294,6 +295,21 @@ export const ACTIONS = {
   "review.reports_cleared": { label: "Kept a flagged review", phrase: "kept a flagged review up", public: false },
   "review.bombing_flagged": { label: "Flagged possible review bombing", phrase: "flagged possible review bombing", public: false },
   "review.bombing_reviewed": { label: "Closed a review-bombing check", phrase: "closed a review-bombing check", public: false },
+
+  // ─── Staffing (WSUSA's tasks for clubs missing a leader, lib/domain/staffing) ─
+  "staffing.gap_flagged": {
+    label: "Flagged a club missing a leader",
+    phrase: (d) =>
+      d.gap === "president"
+        ? "flagged that the club has no President"
+        : d.gap === "advisor"
+          ? "flagged that the club has no advisor"
+          : d.gap === "approver"
+            ? "flagged that nobody in the club can approve join requests"
+            : "flagged that the club is missing a leader",
+    public: false,
+  },
+  "staffing.requests_flagged": { label: "Flagged join requests nobody can approve", phrase: "flagged join requests that nobody in the club can approve", public: false },
 
   // ─── System (sysadmins) ────────────────────────────────────────────────────
   "system.config_changed": { label: "Changed system settings", phrase: "changed system settings", public: false },

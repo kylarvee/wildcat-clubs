@@ -399,7 +399,7 @@ export function EventEditor(props: EventEditorProps) {
                   <p className="max-w-lg text-sm text-ink-2">Cancelling keeps the event on calendars, crossed out, so people know it isn&apos;t happening. To skip one date, click it on the calendar instead.</p>
                   <ConfirmDialog
                     title="Cancel every upcoming meeting?"
-                    description="Past meetings and their attendance stay. Co-host clubs are told."
+                    description="Past meetings and their attendance stay. Members, followers and co-host clubs are told about meetings in the next two weeks."
                     confirmLabel="Cancel event"
                     cancelLabel="Keep it"
                     danger

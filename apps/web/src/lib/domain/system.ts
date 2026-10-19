@@ -54,6 +54,7 @@ export const CONFIG_SCHEMAS: { [K in ConfigKey]: z.ZodType<Config[K]> } = {
   "checkin.opensMinutesBefore": int(0, 240, "minutes"),
   "checkin.closesMinutesAfter": int(0, 240, "minutes"),
   "checkin.qrRotateSeconds": int(10, 300, "seconds"),
+  "renewal.dueDays": int(1, 180, "days"),
   "ai.assistantEnabled": z.boolean(),
   "ai.gradingEnabled": z.boolean(),
   "integrations.googleCalendar": z.boolean(),

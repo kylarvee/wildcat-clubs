@@ -22,6 +22,7 @@ import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
 import { StartAmbassadorProgram } from "@/components/founding/admin/StartAmbassadorProgram";
 import { ChooseAdvisorDialog } from "@/components/ambassadors/ChooseAdvisorDialog";
 import { SUCCESSION_LABEL } from "@/components/founding/copy";
+import { AdminRenewals } from "@/components/renewals/AdminRenewals";
 import { CLUB_STATUS_LABEL as STATUS_LABEL, CLUB_STATUS_TONE as STATUS_TONE, CLUB_TYPE_LABEL as TYPE_LABEL, JOIN_POLICY_LABEL as JOIN_LABEL } from "@/lib/labels/clubs";
 
 export const metadata: Metadata = { title: "Club approvals" };
@@ -30,6 +31,7 @@ const TABS = [
   { key: "submissions", label: "Submissions" },
   { key: "departments", label: "Department requests" },
   { key: "documents", label: "Custom documents" },
+  { key: "renewals", label: "Renewals" },
   { key: "ambassadors", label: "Ambassador programs" },
   { key: "all", label: "All clubs" },
 ] as const;
@@ -38,7 +40,7 @@ type TabKey = (typeof TABS)[number]["key"];
 const STATUSES: ClubStatus[] = ["DRAFT", "SUBMITTED", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "RETIRED"];
 const LIVE: Prisma.ClubWhereInput = { status: { notIn: ["RETIRED", "REJECTED"] } };
 
-export default async function AdminClubsPage({ searchParams }: { searchParams: Promise<{ tab?: string; status?: string; q?: string }> }) {
+export default async function AdminClubsPage({ searchParams }: { searchParams: Promise<{ tab?: string; status?: string; q?: string; show?: string }> }) {
   const user = await requireUser("/admin/clubs");
   if (!can(user, "admin.clubs")) notFound();
   const sp = await searchParams;
@@ -54,7 +56,7 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
 
   return (
     <div>
-      <PageHeader title="Club approvals" description="New clubs waiting for WSUSA recognition, department requests, custom constitutions, and every club's status." />
+      <PageHeader title="Club approvals" description="New clubs waiting for WSUSA recognition, department requests, custom constitutions, yearly renewals, and every club's status." />
       <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-line" aria-label="Approval queues">
         {TABS.map((t) => (
           <Link
@@ -74,6 +76,8 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
         <DepartmentRequests where={deptWhere} />
       ) : tab === "documents" ? (
         <CustomDocuments />
+      ) : tab === "renewals" ? (
+        <AdminRenewals actor={user} show={sp.show} />
       ) : tab === "ambassadors" ? (
         <AmbassadorPrograms />
       ) : (

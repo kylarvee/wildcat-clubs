@@ -3,9 +3,9 @@ import type { Prisma, TaskKind } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
+import { ALL_CAPABILITIES, CAPABILITIES, clubCapabilities, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
 import { capabilitiesByClub, clubCapabilityHolders } from "@/lib/authz/people";
-import { tasksAwaitingGrade } from "@/lib/authz/requirements";
+import { pausedClubsFromTasks, tasksAwaitingGrade } from "@/lib/authz/requirements";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -81,11 +81,15 @@ export async function resolveTasks(sourceType: string, sourceId: string, complet
   });
 }
 
-/** Where clause for every task visible to this person. */
-export async function taskScopeFor(actor: Actor): Promise<Prisma.TaskWhereInput> {
+/**
+ * Where clause for every task visible to this person. `pauses: "tasks"` (the
+ * header's count) reads paused permissions from the person's open required
+ * tasks instead of re-checking requirements.
+ */
+export async function taskScopeFor(actor: Actor, opts: { pauses?: "live" | "tasks" } = {}): Promise<Prisma.TaskWhereInput> {
   // The capabilities the person's roles give them per club, once (the shared
   // authz/people rule, so paused officers and founding clubs match getClubAccess).
-  const clubs = await capabilitiesByClub(actor.id);
+  const clubs = opts.pauses === "tasks" ? await capabilitiesFromTasks(actor.id) : await capabilitiesByClub(actor.id);
   const or: Prisma.TaskWhereInput[] = [{ assigneeType: "USER", assigneeId: actor.id }];
   if (isAdmin(actor)) or.push({ assigneeType: "ADMINS" });
   for (const cap of ALL_CAPABILITIES) {
@@ -142,8 +146,28 @@ export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): 
   return waiting.size ? rows.map((t) => (waiting.has(t.id) ? { ...t, awaitingGrade: true } : t)) : rows;
 }
 
+/**
+ * capabilitiesByClub without re-checking requirements: getClubAccess's
+ * capability rule on the person's own roles (top role per club), with the
+ * pause read from their open required tasks (pausedClubsFromTasks).
+ */
+async function capabilitiesFromTasks(userId: string): Promise<[clubId: string, caps: Set<Capability>][]> {
+  const rows = await db.roleAssignment.findMany({
+    where: { userId, endedAt: null },
+    select: { clubId: true, role: true, permissions: true, startedAt: true, club: { select: { status: true, approvedAt: true } } },
+  });
+  const byClub = new Map<string, typeof rows>();
+  for (const r of rows) byClub.set(r.clubId, [...(byClub.get(r.clubId) ?? []), r]);
+  // getClubAccess's pick: the highest-ranked role in each club.
+  const tops = [...byClub.values()].map((list) => [...list].sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role])[0]);
+  const gated = tops.filter((t) => t.club.status === "APPROVED" && ROLE_RANK[t.role] >= 1 && t.role !== "ADVISOR");
+  const paused = await pausedClubsFromTasks(userId, gated.map((t) => ({ clubId: t.clubId, role: t.role, startedAt: t.startedAt, clubApprovedAt: t.club.approvedAt })));
+  return tops.map((top) => [top.clubId, clubCapabilities({ clubStatus: top.club.status, role: top.role, assignments: byClub.get(top.clubId)!, full: top.role === "ADVISOR", suspended: paused.has(top.clubId) })]);
+}
+
+/** The header's count of your open tasks: a plain count over your inbox, never re-checking requirements. */
 export async function countOpenTasks(actor: Actor) {
-  return db.task.count({ where: { AND: [await taskScopeFor(actor), { status: "OPEN" }] } });
+  return db.task.count({ where: { AND: [await taskScopeFor(actor, { pauses: "tasks" }), { status: "OPEN" }] } });
 }
 
 /** Open tasks in your inbox, counted by kind (for tabs, filters and dashboard badges). */

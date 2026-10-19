@@ -1,13 +1,20 @@
 import type { Prisma } from "@prisma/client";
-import type { Ctx } from "../ctx";
+import type { Assignment, ClubM, Ctx } from "../ctx";
 import { addDays, addHours, addMin, minDate } from "../lib/dates";
+import { gapNotice, gapTask, ORPHAN_REQUESTS_SOURCE, orphanRequestsTask, STAFFING_SOURCE, staffingSourceId } from "@/lib/staffing/rules";
+import { addMember } from "./clubs";
 import { allEvents } from "./events";
+import type { Ev } from "../ctx";
+import { placeOf, roomNotice } from "@/lib/events/notices";
+import { reviewUnlockedNotice, startingSoonNotice } from "@/lib/jobs/reminder-rules";
+import { fmtMoney } from "@/lib/time";
 
 /**
  * Everything that's waiting on someone: approval tasks (join requests,
  * co-hosts, advisor invites, club and document reviews, department requests),
  * personal and club to-dos, complaints, each persona's notifications, the
- * mocked email outbox, and the activity stream.
+ * mocked email outbox, the activity stream, and WSUSA's staffing story (a
+ * club that just lost its President, and join requests nobody can approve).
  */
 
 function caseCode(ctx: Ctx) {
@@ -64,6 +71,13 @@ function complaints(ctx: Ctx) {
       updatedAt: c.notes.length ? addDays(NOW, -c.notes[c.notes.length - 1][0]) : createdAt,
     });
     for (const [d, body] of c.notes) ctx.rows.complaintNotes.push({ id: ctx.id(), complaintId: id, authorId: alex, body, createdAt: addDays(NOW, -d) });
+    // One WSUSA task per report, with no content (domain/complaints); it closes once the report leaves New.
+    const touched = c.notes.length ? addDays(NOW, -c.notes[0][0]) : addHours(createdAt, 3);
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: "A new report is waiting", description: "Open it in Reports. Report details never appear in tasks, notifications or email.",
+      assigneeType: "ADMINS", href: `/admin/complaints?open=${id}`, status: c.status === "NEW" ? "OPEN" : "DONE", sourceType: "complaint", sourceId: id, createdAt,
+      completedAt: c.status === "NEW" ? null : touched, completedById: c.status === "NEW" ? null : alex,
+    });
     // Every opening is logged; anonymous ones also record the acknowledged notice.
     const opens = c.status === "NEW" ? (c.anon ? 0 : 1) : rng.int(2, 5);
     for (let i = 0; i < opens; i++) {
@@ -194,6 +208,40 @@ function todoTasks(ctx: Ctx) {
   );
 }
 
+/** Where a seeded event meets, as people read it in notices (lib/events/notices). */
+function seedPlace(ctx: Ctx, ev: Ev, roomOverride: string | null = null) {
+  const b = ev.buildingCode ? ctx.buildings.get(ev.buildingCode) : undefined;
+  return placeOf({ locationType: ev.locationType, building: b ? { name: b.name, code: ev.buildingCode } : null, room: ev.room, address: ev.address, virtualUrl: ev.virtualUrl }, roomOverride);
+}
+
+/**
+ * Maya's event-changed notice: a date in the next two weeks of a weekly series
+ * she follows moved rooms. ISMN first (she follows its calendar without
+ * joining), else one of her clubs. The date really has its own room, as if a
+ * leader changed it in the Events Builder about 20 hours before the seed ran,
+ * and the notice reads exactly as lib/events/notices writes it.
+ */
+function mayaRoomChange(ctx: Ctx) {
+  const { NOW } = ctx;
+  const sentAt = addHours(NOW, -20);
+  for (const key of ["anime", "psych", "climbing", "premed", "service"]) {
+    const club = ctx.club(key);
+    for (const ev of club.events.filter((e) => e.isSeries && e.status === "SCHEDULED" && e.locationType === "CAMPUS" && e.buildingCode)) {
+      const occ = ev.occurrences.find((o) => o.status === "SCHEDULED" && !o.roomOverride && o.startsAt > addDays(NOW, 2) && o.startsAt < addDays(NOW, 10));
+      const room = ctx.buildings.get(ev.buildingCode!)?.rooms.find((r) => r !== ev.room);
+      if (!occ || !room) continue;
+      occ.roomOverride = room;
+      ctx.activity({ at: sentAt, actorId: ctx.leaderAt(club, sentAt), action: "event.room_changed", entityType: "occurrence", entityId: occ.id, clubId: club.id, data: { room } });
+      const notice = roomNotice(
+        { title: ev.title, host: club.name },
+        { date: { id: occ.id, startsAt: occ.startsAt, endsAt: occ.endsAt, place: seedPlace(ctx, ev, room) }, before: seedPlace(ctx, ev), usual: seedPlace(ctx, ev), now: sentAt },
+      );
+      return notice ? { notice, href: `/events/${ev.id}?o=${occ.id}` } : null;
+    }
+  }
+  return null;
+}
+
 function personaNotifications(ctx: Ctx) {
   const { NOW } = ctx;
   const n = (key: string, kind: string, title: string, body: string | null, href: string, hoursAgo: number, read: boolean) => {
@@ -203,21 +251,29 @@ function personaNotifications(ctx: Ctx) {
   };
   const slug = (k: string) => ctx.club(k).slug;
   const nm = (k: string) => ctx.club(k).name;
-  // Maya
-  n("maya", "election.voting_open", `Voting is open: ${nm("psych")} President`, "Cast your secret ballot before voting closes in 5 days.", `/clubs/${slug("psych")}`, 50, false);
-  n("maya", "event.starting", "Starting now: Care Kit Assembly for the Weber Cares Pantry", `${nm("service")} · Shepherd Union Room 404B. Check in when you arrive.`, `/events/${ctx.refs.liveEventId}`, 0.25, false);
+  // Maya. Every kind here is one the app sends (components/notifications/catalog; verify.ts checks).
+  n("maya", "election.voting_opened", "Voting is open: President — Spring 2027", `Cast your secret ballot for ${nm("psych")}. One vote each.`, `/clubs/${slug("psych")}/elections/${ctx.refs.psychElectionId}`, 50, false);
+  // The Reminders job's notice about an hour before the live service event started (it started 15 minutes before the seed ran).
+  const live = ctx.club("service").events.find((e) => e.id === ctx.refs.liveEventId);
+  if (live?.startsAt) {
+    const soon = startingSoonNotice({ title: live.title, startsAt: live.startsAt, place: seedPlace(ctx, live).text, host: nm("service") });
+    n("maya", "event.starting_soon", soon.title, soon.body, `/events/${live.id}?o=${ctx.refs.liveOccurrenceId}`, 1.25, false);
+  }
+  const moved = mayaRoomChange(ctx);
+  if (moved) n("maya", moved.notice.kind, moved.notice.title, moved.notice.body, moved.href, 20, false);
   n("maya", "announcement.new", `New announcement in ${nm("climbing")}`, null, `/clubs/${slug("climbing")}`, 30, false);
-  n("maya", "review.unlocked", `You can now review ${nm("premed")}`, "You've been to three events — tell other students what it's like.", `/clubs/${slug("premed")}`, 24 * 120, true);
+  const unlocked = reviewUnlockedNotice({ clubName: nm("premed"), attended: 3, opensAt: null });
+  n("maya", "review.unlocked", unlocked.title, unlocked.body, `/clubs/${slug("premed")}#reviews`, 24 * 120, true);
   n("maya", "membership.approved", `You're in! Welcome to ${nm("climbing")}`, null, `/clubs/${slug("climbing")}`, 24 * 390, true);
   n("maya", "message.new", "Priya Patel sent you a message", "Thanks! See you Saturday 🥾", "/messages", 20, false);
   // Oscar
   n("oscar", "role.assigned", `You're now Treasurer of ${nm("fic")}`, null, `/clubs/${slug("fic")}`, 24 * 20.3, true);
   n("oscar", "funding.submitted", "Funding request submitted: Fall speaker series", "WSUSA reviews requests in about ten business days.", `/clubs/${slug("fic")}/manage/budget`, 24 * 5.2, true);
   n("oscar", "task.assigned", "New club task: Reconcile September spending", null, "/tasks", 24 * 4, false);
-  n("oscar", "requirement.reminder", "Club Officer Policy Test due in 10 days", "Pass it to keep your Treasurer permissions active.", `/tests/${ctx.refs.officerTestId}`, 6, false);
+  // His officer test is due in about 10 days: its week-ahead reminder (requirement.due_soon) comes from the Reminders job in about 3.
   // Vanessa
   n("vanessa", "event.cohost_request", `${nm("cyber")} asked SWE to co-host “Women in Cybersecurity Panel”`, "Approve it from your tasks so it lands on SWE's calendar.", `/clubs/${slug("swe")}/manage/events`, 30, false);
-  n("vanessa", "election.closed", "Voting closed: SWE President — Spring 2027", "Results are in. The President or advisor applies the result in the Org Chart.", `/clubs/${slug("swe")}`, 50, true);
+  n("vanessa", "election.voting_opened", "Voting is open: President — Spring 2027", `${nm("swe")}'s leaders choose together: it has to be unanimous, and ballots are secret.`, `/clubs/${slug("swe")}/elections/${ctx.refs.sweElectionId}`, 24 * 9.2, true);
   n("vanessa", "task.assigned", "New club task: Recruit SWE mentors for Robot Day", null, "/tasks", 24 * 7, true);
   n("vanessa", "message.new", "Priya Patel sent you a message", null, "/messages", 24 * 2, true);
   // Priya
@@ -239,24 +295,22 @@ function personaNotifications(ctx: Ctx) {
   n("gwen", "profile.alumni", "Congratulations, graduate!", "Your profile is now an alumni profile. Your club history and projects stay on it.", `/u/${ctx.p("gwen").handle}`, 24 * 168, true);
   n("gwen", "election.applied", "Applied AI Lab has a new president", null, `/clubs/${slug("ailab")}`, 24 * 168, true);
   n("gwen", "role.ended", "Your role as President of Applied AI Lab has ended", "Graduated — it stays in the Lab's role history and on your profile.", `/clubs/${slug("ailab")}`, 24 * 168.2, true);
-  n("gwen", "project.viewed", "Your project “Advising FAQ Chatbot” was added to Applied AI Lab's role history", null, `/u/${ctx.p("gwen").handle}`, 24 * 160, false);
   // Elena
   n("elena", "membership.requested", `New join requests for ${nm("robotics")}`, "5 people are waiting for approval.", `/clubs/${slug("robotics")}/manage/members`, 10, false);
-  n("elena", "funding.submitted", `${nm("premed")} funding request decided`, "Partially approved: MCAT prep books.", `/clubs/${slug("premed")}/manage/budget`, 24 * 20.2, true);
+  const mcat = ctx.rows.fundingRequests.find((r) => r.clubId === ctx.club("premed").id && r.status === "PARTIALLY_APPROVED");
+  if (mcat) {
+    const lead = `WSUSA approved ${fmtMoney(mcat.amountApprovedCents ?? 0)} of the ${fmtMoney(mcat.amountRequestedCents ?? 0)} requested.`;
+    n("elena", "funding.partially_approved", `Funding partly approved: ${mcat.title}`, mcat.decisionNote ? `${lead} ${mcat.decisionNote}` : lead, `/clubs/${slug("premed")}/manage/budget/requests/${mcat.id}`, 24 * 20.2, true);
+  }
   n("elena", "event.cohost_request", `${nm("premed")} asked ${nm("nursing")} to co-host “Health Careers Night”`, null, `/clubs/${slug("premed")}/manage/events`, 24 * 1.4, false);
   // Nathan
   n("nathan", "advisor.invited", "Frank Okafor invited you to advise Wildcat Beekeeping Society", "Open the request to accept or decline.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 24 * 3.2, false);
-  n("nathan", "system.welcome", "Welcome to Wildcat Clubs", "Advisors accept invitations here and get full access to the clubs they advise.", "/dashboard", 24 * 3.3, true);
-  n("nathan", "advisor.reminder", "Reminder: Frank Okafor is waiting on your answer", "Wildcat Beekeeping Society can't be submitted for WSUSA review until an advisor accepts.", `/advisor/invite/${ctx.refs.beeInviteToken}`, 5, false);
   // Alex (admin queues; review-bombing and report alerts are added with those records)
   n("alex", "club.submitted", `New club submitted: ${nm("boardgames")}`, null, `/admin/clubs/${ctx.club("boardgames").id}`, 24 * 5.1, false);
   n("alex", "funding.submitted", `Funding request: ${nm("fic")} — Fall speaker series`, null, "/admin/funding", 24 * 5.2, true);
   n("alex", "funding.submitted", `Funding request: ${nm("nursing")} — Pinning ceremony`, null, "/admin/funding", 24 * 1.1, false);
-  n("alex", "document.submitted", `${nm("theatre")} submitted custom bylaws for approval`, null, `/admin/clubs/${ctx.club("theatre").id}#documents`, 24 * 4.2, false);
-  // Sydney
-  n("sydney", "system.integrations", "Integrations are in mock mode", "Email, push and Google sync are off — messages are recorded in the outbox.", "/system", 24 * 30, true);
-  n("sydney", "system.jobs", "Scheduled jobs ran", "All jobs completed.", "/system", 3, false);
-  n("sydney", "system.ai", "Claude features are off", "Add an API key and switch on the assistant or grading assist in System settings.", "/system", 24 * 30, true);
+  n("alex", "constitution.custom_submitted", `${nm("theatre")} uploaded a custom bylaws for approval`, null, `/admin/clubs/${ctx.club("theatre").id}#documents`, 24 * 4.2, false);
+  // Sydney: nothing in the app notifies about system settings or job runs (System → Scheduled jobs shows those).
 }
 
 function outbox(ctx: Ctx) {
@@ -271,8 +325,7 @@ function outbox(ctx: Ctx) {
   for (const a of ctx.admins) mail(a.email, `Possible review bombing: ${nm("discgolf")}`, "3 reviews of 2★ or lower in the last 48 hours.", `/admin/reviews?club=${ctx.club("discgolf").id}`, 9);
   for (const a of ctx.admins) mail(a.email, `Funding request: ${nm("fic")} — Fall speaker series`, "A new funding request is waiting for review.", "/admin/funding", 24 * 5.2);
   mail(e("oscar"), "Your new role has WSUSA requirements", "Finish Club Officer Policy Test, Club Officer Training to keep your permissions on.", "/tasks", 24 * 20.3);
-  mail(e("maya"), `Voting is open: ${nm("psych")} President`, "Cast your secret ballot before voting closes.", `/clubs/${ctx.club("psych").slug}`, 50);
-  mail(e("maya"), "Starting now: Care Kit Assembly for the Weber Cares Pantry", "Check in when you arrive.", `/events/${ctx.refs.liveEventId}`, 0.25, "PUSH");
+  mail(e("maya"), "Voting is open: President — Spring 2027", `Cast your secret ballot for ${nm("psych")}. One vote each.`, `/clubs/${ctx.club("psych").slug}/elections/${ctx.refs.psychElectionId}`, 50);
   mail(e("vanessa"), `Co-host request from ${nm("cyber")}`, `${nm("cyber")} asked SWE to co-host “Women in Cybersecurity Panel”.`, `/clubs/${ctx.club("swe").slug}/manage/events`, 30);
   mail(e("priya"), "Funding approved: Combat robotics competition travel", "WSUSA approved your request.", `/clubs/${ctx.club("robotics").slug}/manage/budget`, 24 * 9.3);
   for (const m of ctx.club("robotics").members.filter((x) => x.status === "ACTIVE" && x.joinedAt && x.joinedAt > addDays(NOW, -30)).slice(0, 4)) {
@@ -314,6 +367,94 @@ function activity(ctx: Ctx) {
   }
 }
 
+/**
+ * WSUSA's staffing story (lib/domain/staffing), built last so every other
+ * step keeps the roles it was built with:
+ *   - a small approved club whose only President stepped down about three
+ *     days ago (the advisor ended the role at their request), so nobody holds
+ *     the seat: an open "{club} has no President" task for WSUSA, and the
+ *     club's other leaders were told;
+ *   - a gated club where nobody holds the Members permission, with a join
+ *     request waiting nine days: an open "Join requests waiting at {club}".
+ * No other club gets a staffing task: gaps that were already there aren't
+ * backfilled (Club analytics' No President / No advisor filters show them).
+ */
+function staffingStory(ctx: Ctx) {
+  const { NOW } = ctx;
+  const activeAt = (a: Assignment) => a.startedAt <= NOW && (!a.endedAt || a.endedAt > NOW);
+  const size = (c: ClubM) => c.members.filter((m) => m.status === "ACTIVE").length;
+  const leadsElsewhere = (a: Assignment) => ctx.clubs.some((c) => c.assignments.some((x) => x !== a && x.userId === a.userId && x.role !== "MEMBER" && activeAt(x)));
+
+  // A directory club with one President, an advisor and at least one more officer; the smallest with six members or more.
+  const candidates = ctx.clubs
+    .filter((c) => c.status === "APPROVED" && !c.def.story && c.type !== "COLLEGE_AMBASSADORS" && c.def.life !== "dormant")
+    .map((club) => {
+      const now = club.assignments.filter(activeAt);
+      const presidents = now.filter((a) => a.role === "PRESIDENT");
+      return { club, now, president: presidents.length === 1 ? presidents[0] : null };
+    })
+    .filter(({ now, president }) => president && !ctx.person(president.userId).persona && !leadsElsewhere(president) && now.some((a) => a.role === "ADVISOR") && now.some((a) => a.role === "VP" || a.role === "OFFICER"))
+    .sort((a, b) => size(a.club) - size(b.club) || a.club.name.localeCompare(b.club.name));
+  const pick = candidates.find((c) => size(c.club) >= 6) ?? candidates[0];
+  if (pick?.president) {
+    const { club, president } = pick;
+    const advisorId = pick.now.find((a) => a.role === "ADVISOR")!.userId;
+    const endedAt = addDays(NOW, -3.1);
+    president.endedAt = endedAt;
+    president.endReason = "RESIGNED";
+    ctx.activity({ at: endedAt, actorId: advisorId, action: "role.ended", entityType: "roleAssignment", entityId: president.id, clubId: club.id, data: { userId: president.userId, role: "PRESIDENT", reason: "RESIGNED" }, isPublic: true });
+    // They lead nowhere else now, so the leader requirements they owed close with the seat (domain/requirements
+    // reopenRequirementTasks). Those tasks name a club; member requirements don't, and stay.
+    for (const t of ctx.rows.tasks) {
+      if (t.assigneeId === president.userId && t.kind === "REQUIREMENT" && t.status === "OPEN" && t.clubId) Object.assign(t, { status: "CANCELLED", completedAt: endedAt, completedById: null });
+    }
+    ctx.rows.notifications.push({
+      id: ctx.id(), userId: president.userId, kind: "role.ended", title: `Your role as ${president.seatName ?? "President"} of ${club.name} ended`,
+      body: "Resigned. Your time in the role stays in the club's history.", href: `/clubs/${club.slug}/history`, createdAt: addMin(endedAt, 1), readAt: addHours(endedAt, 6),
+    });
+
+    const flaggedAt = addMin(endedAt, 1);
+    const story = { club: { name: club.name, slug: club.slug, type: club.type }, gap: "president" as const, leftName: ctx.person(president.userId).name, hasAdvisor: true };
+    const task = gapTask(story);
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: task.title, description: task.description, assigneeType: "ADMINS", clubId: club.id, href: task.href,
+      status: "OPEN", sourceType: STAFFING_SOURCE, sourceId: staffingSourceId(club.id, "president"), createdById: advisorId, createdAt: flaggedAt,
+    });
+    ctx.activity({ at: flaggedAt, actorId: null, action: "staffing.gap_flagged", entityType: "club", entityId: club.id, clubId: club.id, data: { gap: "president" } });
+    // The remaining leaders and advisors hear about it in-app (not the advisor who ended the role).
+    const notice = gapNotice(story);
+    const told = [...new Set(pick.now.filter((a) => a !== president && a.role !== "MEMBER" && a.userId !== advisorId).map((a) => a.userId))];
+    for (const userId of told) ctx.rows.notifications.push({ id: ctx.id(), userId, kind: "staffing.gap", title: notice.title, body: notice.body, href: notice.href, createdAt: flaggedAt, readAt: null });
+    ctx.refs.staffingClub = club.name;
+  }
+
+  // Join requests nobody can approve: the first gated club (by name) where nobody holds the Members permission.
+  const gated = ctx.clubs
+    .filter((c) => c.status === "APPROVED" && c.type !== "COLLEGE_AMBASSADORS" && c.def.joinPolicy === "APPROVAL" && ctx.capabilityHoldersAt(c, "roster", NOW).length === 0)
+    .sort((a, b) => a.name.localeCompare(b.name))[0];
+  const asker = gated
+    ? ctx.people.filter((p) => p.kind === "STUDENT" && p.status === "ACTIVE" && !p.persona && !gated.byUser.has(p.id)).sort((a, b) => a.handle.localeCompare(b.handle))[0]
+    : undefined;
+  if (gated && asker) {
+    const requestedAt = addDays(NOW, -9.2);
+    const m = addMember(ctx, gated, asker.id, { status: "PENDING", source: "REGISTER", joinedAt: null, requestedAt, eng: { base: 0, half: 1, floor: 0 } });
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: `${asker.name} asked to join ${gated.name}`, assigneeType: "CLUB", clubId: gated.id, capability: "roster",
+      href: `/clubs/${gated.slug}/manage/members`, status: "OPEN", sourceType: "membership", sourceId: m.id, createdById: asker.id, createdAt: requestedAt,
+    });
+    ctx.activity({ at: requestedAt, actorId: asker.id, action: "membership.requested", entityType: "membership", entityId: m.id, clubId: gated.id });
+    // The scheduled "Club staffing" job flagged it once the request had waited a week.
+    const flaggedAt = addHours(requestedAt, 7 * 24 + 0.5);
+    const task = orphanRequestsTask(gated);
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: task.title, description: task.description, assigneeType: "ADMINS", clubId: gated.id, href: task.href,
+      status: "OPEN", sourceType: ORPHAN_REQUESTS_SOURCE, sourceId: gated.id, createdAt: flaggedAt,
+    });
+    ctx.activity({ at: flaggedAt, actorId: null, action: "staffing.requests_flagged", entityType: "club", entityId: gated.id, clubId: gated.id, data: { waitingSince: requestedAt.toISOString() } });
+    ctx.refs.orphanClub = gated.name;
+  }
+}
+
 export function buildInbox(ctx: Ctx) {
   complaints(ctx);
   approvalTasks(ctx);
@@ -321,4 +462,5 @@ export function buildInbox(ctx: Ctx) {
   personaNotifications(ctx);
   outbox(ctx);
   activity(ctx);
+  staffingStory(ctx);
 }

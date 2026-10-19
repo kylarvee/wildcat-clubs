@@ -100,6 +100,13 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
     min: 10,
     max: 300,
   },
+  "renewal.dueDays": {
+    label: "Days to renew",
+    help: "Every approved club re-registers with WSUSA once a year. Renewal opens on the first day of the academic year's first term and is due this many days later. A late renewal doesn't pause or retire anything; WSUSA follows up.",
+    unit: "days",
+    min: 1,
+    max: 180,
+  },
   "ai.assistantEnabled": {
     label: "Ask Claude assistant",
     help: "Ask Wildcat Clubs, the in-app assistant that helps students, leaders and administrators set things up and answers questions about the platform.",

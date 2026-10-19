@@ -1,5 +1,6 @@
 import "server-only";
 import { Prisma, type CheckInMethod } from "@prisma/client";
+import { after } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
@@ -14,6 +15,7 @@ import { notify } from "@/lib/domain/notify";
 import { reopenRequirementTasks, requirementSourceId } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
 import { reviewEligibility } from "@/lib/metrics";
+import { reminderKeys, reviewUnlockedNotice } from "@/lib/jobs/reminder-rules";
 import { checkinPass, checkinPath, checkinToken, isCheckinPass, tokenWindow, verifyCheckinToken, verifyScanProof } from "@/lib/attendance/token";
 import { allowsTapCheckIn, blockMessage, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, whenLabel, windowMessage, type WindowState } from "@/lib/attendance/rules";
 import {
@@ -115,6 +117,39 @@ async function reviewProgressFor(userId: string, clubId: string | null) {
   if (!clubId) return null;
   const r = await reviewEligibility(userId, clubId);
   return r.canReview ? r : null;
+}
+
+/**
+ * "You can review {club} now", once per person and club (a ReminderLog key):
+ * when this check-in brings someone to the review threshold
+ * (reviews.minAttendance) at the host or an approved co-host club, where it
+ * counts too. Check-ins count once their event has started (lib/metrics), so
+ * one made before the start says when reviews open. Runs after the response,
+ * so checking in stays quick.
+ */
+function tellIfReviewUnlocked(userId: string, occ: OccurrenceRow) {
+  const run = async () => {
+    const clubs = await db.club.findMany({ where: { id: { in: participatingClubIds(occ) }, status: "APPROVED" }, select: { id: true, name: true, slug: true } });
+    for (const club of clubs) {
+      const r = await reviewEligibility(userId, club.id);
+      if (!r.canReview) continue;
+      const started = occ.startsAt <= new Date();
+      // Reached the threshold with this check-in: counted already (started), or once the event starts.
+      const opensAt = started && r.attended === r.required ? null : !started && r.attended + 1 === r.required ? occ.startsAt : undefined;
+      if (opensAt === undefined) continue;
+      if (await db.review.findUnique({ where: { clubId_userId: { clubId: club.id, userId } }, select: { id: true } })) continue;
+      const claimed = await db.reminderLog.createMany({ data: [{ key: reminderKeys.reviewUnlocked(userId, club.id) }], skipDuplicates: true });
+      if (!claimed.count) continue;
+      const copy = reviewUnlockedNotice({ clubName: club.name, attended: r.required, opensAt });
+      await notify({ userIds: [userId], kind: "review.unlocked", title: copy.title, body: copy.body, href: `/clubs/${club.slug}#reviews`, email: false });
+    }
+  };
+  const safe = () => run().catch((e) => console.error("[attendance] review-unlocked notice failed", e));
+  try {
+    after(safe);
+  } catch {
+    void safe();
+  }
 }
 
 /**
@@ -318,6 +353,7 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
     // Feeds still filter by viewer: on a profile only the person, admins and the club's attendance holders see check-ins.
     isPublic: true,
   });
+  tellIfReviewUnlocked(actor.id, occ);
 
   return {
     status: "CHECKED_IN",
@@ -383,6 +419,7 @@ export async function addManual(actor: Actor | null, occurrenceId: string, userI
     href: "/me/attendance",
     email: false,
   });
+  tellIfReviewUnlocked(person.id, occ);
   return { attendanceId: attendance.id, name: person.name, requirementsMet };
 }
 

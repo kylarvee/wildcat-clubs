@@ -10,17 +10,21 @@ import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, 
 import { notify } from "@/lib/domain/notify";
 import { openRequirementTasks, reopenRequirementTasks } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
+import { staffingAfterRoleChange } from "@/lib/domain/staffing";
 import { canViewFile } from "@/lib/domain/files";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { AMBASSADOR_REQUEST } from "@/lib/ambassadors/rules";
 import { COLLEGE_AMBASSADOR_SEAT, isClubRepSeat, seatsFor } from "@/lib/roles/defaults";
 import { END_REASON_LABEL } from "@/lib/roles/labels";
+import { filledGap } from "@/lib/staffing/rules";
 
 /**
  * Role changes — the only way anyone gains or loses a club role. The Org Chart
  * tool, presidential hand-offs, election results, ambassador placements and
  * advisor acceptance all end up in grantRole()/endRoleAssignment(), so the
  * role history stays complete. Assignments are never deleted, only ended.
+ * Every change here then checks the club's staffing (lib/domain/staffing):
+ * a seat it leaves empty opens a WSUSA task, a seat it fills closes one.
  */
 
 export async function createDefaultPositions(clubId: string, type: ClubType, tx: Tx = db) {
@@ -140,6 +144,8 @@ export async function grantRole(input: {
       href: `/clubs/${assignment.club.slug}`,
     });
   }
+  // A filled seat closes its staffing task; replacing someone can leave one empty.
+  await staffingAfterRoleChange([input.clubId], { since: now, actorId: input.assignedById });
   return assignment;
 }
 
@@ -223,7 +229,8 @@ export async function endRoleAssignment(actor: Actor | null, assignmentId: strin
     if (others === 0) throw forbidden("Name the next President before stepping down.");
   }
   const cleanNote = note?.trim().slice(0, 500) || undefined;
-  await db.roleAssignment.update({ where: { id: a.id }, data: { endedAt: new Date(), endReason: reason } });
+  const now = new Date();
+  await db.roleAssignment.update({ where: { id: a.id }, data: { endedAt: now, endReason: reason } });
   await logActivity({
     actorId: actor.id,
     action: "role.ended",
@@ -244,6 +251,7 @@ export async function endRoleAssignment(actor: Actor | null, assignmentId: strin
   }
   // Requirements they no longer owe close right away instead of waiting for the job.
   await reopenRequirementTasks(a.userId);
+  await staffingAfterRoleChange([a.clubId], { since: now, actorId: actor.id });
   return a;
 }
 
@@ -259,6 +267,9 @@ export async function setRolePermissions(actor: Actor | null, assignmentId: stri
   const perms = cleanPermissions(permissions);
   await db.roleAssignment.update({ where: { id: a.id }, data: { permissions: perms } });
   await logActivity({ actorId: actor.id, action: "role.permissions_set", entityType: "roleAssignment", entityId: a.id, clubId: a.clubId, data: { permissions: perms } });
+  // Taking Members off the last seat that had it leaves nobody to approve join requests; granting it can close that task.
+  const droppedMembers = a.permissions.includes("roster") && !perms.includes("roster");
+  await staffingAfterRoleChange([a.clubId], { actorId: actor.id, dropped: droppedMembers ? [{ role: a.role, permissions: a.permissions }] : [] });
 }
 
 // ─── Presidential hand-off ───────────────────────────────────────────────────
@@ -345,6 +356,8 @@ export async function handOffPresidency(actor: Actor | null, clubId: string, inp
       db.membership.updateMany({ where: { clubId, userId: outgoing.userId, status: "ACTIVE" }, data: { status: "ALUMNI", endedAt: now } }),
     ]);
     await reopenRequirementTasks(outgoing.userId);
+    // Their other seats just emptied (the President seat was filled above).
+    await staffingAfterRoleChange([clubId], { since: now, actorId: actor.id });
   }
 
   await logActivity({
@@ -481,8 +494,10 @@ export async function endPlacement(actor: Actor | null, assignmentId: string) {
   });
   if (!a || a.endedAt || !a.viaClubId) throw notFound("Placement");
   await assertClubCap(actor, a.viaClubId, "roster");
-  await db.roleAssignment.update({ where: { id: a.id }, data: { endedAt: new Date(), endReason: "TERM_ENDED" } });
+  const now = new Date();
+  await db.roleAssignment.update({ where: { id: a.id }, data: { endedAt: now, endReason: "TERM_ENDED" } });
   await reopenRequirementTasks(a.userId);
+  await staffingAfterRoleChange([a.clubId], { since: now, actorId: actor.id });
   await logActivity({ actorId: actor.id, action: "role.ended", entityType: "roleAssignment", entityId: a.id, clubId: a.clubId, data: { userId: a.userId, role: a.role, reason: "TERM_ENDED", placement: true }, isPublic: true });
   await logActivity({ actorId: actor.id, action: "ambassador.placement_ended", entityType: "roleAssignment", entityId: a.id, clubId: a.viaClubId, data: { userId: a.userId, clubId: a.clubId } });
   await notify({
@@ -522,9 +537,13 @@ export async function endAllRolesForUser(userId: string, reason: RoleEndReason, 
   ]);
   for (const m of pending) await resolveTasks("membership", m.id, byId, db, "CANCELLED");
 
+  // Seats left empty open WSUSA staffing tasks and tell the clubs' remaining leaders (lib/domain/staffing).
+  const staffing = await staffingAfterRoleChange(assignments.map((a) => a.clubId), { since: now, actorId: byId });
   for (const a of assignments) {
     await logActivity({ actorId: byId, action: "role.ended", entityType: "roleAssignment", entityId: a.id, clubId: a.clubId, data: { userId, role: a.role, reason }, isPublic: true });
     if (a.role === "MEMBER") continue;
+    // The staffing notice already told this club it has no President (or advisor).
+    if (staffing.get(a.clubId)?.opened.some((gap) => gap !== "approver" && filledGap(a, gap))) continue;
     await notify({
       userIds: await clubCapabilityHolders(a.clubId, "orgchart"),
       exceptUserId: userId,

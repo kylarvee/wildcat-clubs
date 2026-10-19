@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { Assignment, ClubM, Ctx } from "../ctx";
 import { POLICIES } from "../data/policies";
-import { AGREEMENT_QUESTIONS, AGREEMENTS_FORM_INTRO, FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, REREGISTRATION_FORM_INTRO, REREGISTRATION_QUESTIONS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
+import { AGREEMENT_QUESTIONS, AGREEMENTS_FORM_INTRO, FUNDING_QUESTIONS, OFFICER_QUESTIONS, OFFICER_TEST_INTRO, REVIEWER_COMMENTS, SAFETY_QUESTIONS, SAFETY_QUIZ_INTRO, type QuestionDef } from "../data/tests";
 import { addDays, addMin, DAY, maxDate, minDate } from "../lib/dates";
 import { addFolder, addPdf } from "./filehelp";
 import { missingDetails, type DetailsLike } from "@/lib/details/rules";
@@ -330,18 +330,12 @@ export function buildGovernance(ctx: Ctx) {
     });
   }
 
-  // The yearly WSUSA forms: every member's agreements, and each president's re-registration.
+  // The yearly WSUSA form every member signs. (Clubs re-register through their renewal card, not a form: steps/renewals.)
   requiredForm(ctx, currentAy, {
-    ref: "agreements", title: "Club Member Agreements", intro: AGREEMENTS_FORM_INTRO, questions: AGREEMENT_QUESTIONS, audience: "MEMBER", rate: 0.64,
+    ref: "agreements", title: "Club Member Agreements", intro: AGREEMENTS_FORM_INTRO, questions: AGREEMENT_QUESTIONS, rate: 0.64,
     description: "Sign WSUSA's waiver and release, anti-hazing and non-discrimination agreements once each academic year. They cover every club you're in.",
     // Vanessa hasn't signed (her dashboard demo); Maya, Priya and Oscar have.
     unsigned: new Set([ctx.p("vanessa").id]), signed: new Set([ctx.p("maya").id, ctx.p("priya").id, ctx.p("oscar").id]),
-  });
-  requiredForm(ctx, currentAy, {
-    ref: "reregistration", title: "Annual Club Re-registration", intro: REREGISTRATION_FORM_INTRO, questions: REREGISTRATION_QUESTIONS, audience: "PRESIDENT", rate: 0.78,
-    description: "Club presidents confirm each academic year that their club is active and its profile, advisor and meetings are current.",
-    // Priya hasn't re-registered yet, so a president's required task shows.
-    unsigned: new Set([ctx.p("priya").id]), signed: new Set(),
   });
   memberDetailsRequirement(ctx, currentAy);
 
@@ -415,8 +409,6 @@ type RequiredFormDef = {
   intro: string;
   questions: QuestionDef[];
   description: string;
-  /** MEMBER: every student in an approved club. PRESIDENT: current presidents, and their task names the club (it gates). */
-  audience: "MEMBER" | "PRESIDENT";
   /** Never signed / always signed (persona demos). */
   unsigned: Set<string>;
   signed: Set<string>;
@@ -424,12 +416,12 @@ type RequiredFormDef = {
 };
 
 /**
- * A WSUSA form required through a requirement, signed once a year: the test
- * row (isForm), the requirement, and per person a TestAssignment and a
- * required REQUIREMENT task (DONE with a graded, passed attempt for those who
- * signed). Both forms were added this fall, so each person's clock is the
- * latest of joining or taking the role, the club's approval, the year's start
- * and the day the form was added (requirementStatus's rule).
+ * A WSUSA form every student in an approved club signs once a year, required
+ * through a MEMBER requirement: the test row (isForm), the requirement, and
+ * per member a TestAssignment and a required REQUIREMENT task (DONE with a
+ * graded, passed attempt for those who signed). It was added this fall, so
+ * each member's clock is the latest of joining, the club's approval, the
+ * year's start and the day the form was added (requirementStatus's rule).
  */
 function requiredForm(ctx: Ctx, ay: { label: string; start: Date }, def: RequiredFormDef) {
   const { rng, NOW } = ctx;
@@ -445,28 +437,24 @@ function requiredForm(ctx: Ctx, ay: { label: string; start: Date }, def: Require
   const reqId = ctx.id();
   ctx.refs[`${def.ref}RequirementId`] = reqId;
   ctx.rows.requirements.push({
-    id: reqId, name: def.title, description: def.description, appliesTo: [def.audience], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created,
+    id: reqId, name: def.title, description: def.description, appliesTo: ["MEMBER"], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true, createdAt: created,
   });
 
-  // Whoever it reaches, with their earliest clock (and, for presidents, the club whose permissions it gates).
-  const firsts = new Map<string, { clock: Date; clubId: string | null }>();
+  // Every member it reaches, with their earliest clock.
+  const firsts = new Map<string, Date>();
   const consider = (userId: string, since: Date, club: ClubM) => {
     const person = ctx.person(userId);
     if (person.kind !== "STUDENT" || person.status !== "ACTIVE") return;
     const clock = maxDate(maxDate(since, club.approvedAt!), maxDate(ay.start, created));
     const cur = firsts.get(userId);
-    if (!cur || clock < cur.clock) firsts.set(userId, { clock, clubId: def.audience === "PRESIDENT" ? club.id : null });
+    if (!cur || clock < cur) firsts.set(userId, clock);
   };
   for (const club of ctx.clubs) {
     if (club.status !== "APPROVED" || !club.approvedAt) continue;
-    if (def.audience === "MEMBER") {
-      for (const m of club.members) if (m.status === "ACTIVE" && m.joinedAt) consider(m.userId, m.joinedAt, club);
-    } else {
-      for (const a of club.assignments) if (a.role === "PRESIDENT" && !a.endedAt) consider(a.userId, a.startedAt, club);
-    }
+    for (const m of club.members) if (m.status === "ACTIVE" && m.joinedAt) consider(m.userId, m.joinedAt, club);
   }
   const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" });
-  for (const [userId, { clock, clubId }] of firsts) {
+  for (const [userId, clock] of firsts) {
     const dueAt = addDays(clock, 30);
     const signed = !def.unsigned.has(userId) && clock < addDays(NOW, -1) && (def.signed.has(userId) || rng.chance(def.rate));
     let submittedAt: Date | null = null;
@@ -486,13 +474,13 @@ function requiredForm(ctx: Ctx, ay: { label: string; start: Date }, def: Require
     ctx.rows.testAssignments.push({ id: ctx.id(), testId: formId, userId, cycleKey: ay.label, dueAt, status: signed ? "COMPLETED" : "ASSIGNED", createdAt: clock, resolvedAt: submittedAt });
     // Member-wide requirements are WSUSA's, so their task isn't about one club (requirements.syncUserRequirements).
     ctx.rows.tasks.push({
-      id: ctx.id(), kind: "REQUIREMENT", title: `Fill out: ${def.title}`, description: def.description, assigneeType: "USER", assigneeId: userId, clubId, href: `/tests/${formId}`, dueAt, required: true,
+      id: ctx.id(), kind: "REQUIREMENT", title: `Fill out: ${def.title}`, description: def.description, assigneeType: "USER", assigneeId: userId, clubId: null, href: `/tests/${formId}`, dueAt, required: true,
       status: signed ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt: submittedAt, completedById: signed ? userId : null,
     });
     if (!signed && (def.unsigned.has(userId) || rng.chance(0.3))) {
       ctx.rows.notifications.push({
-        id: ctx.id(), userId, kind: "requirement.assigned", title: def.audience === "MEMBER" ? "Required by WSUSA" : "A WSUSA requirement to finish",
-        body: def.audience === "MEMBER" ? `WSUSA asks every club member to finish ${def.title} by ${shortDate(dueAt)}.` : `Finish ${def.title} by ${shortDate(dueAt)} to keep your permissions on.`,
+        id: ctx.id(), userId, kind: "requirement.assigned", title: "Required by WSUSA",
+        body: `WSUSA asks every club member to finish ${def.title} by ${shortDate(dueAt)}.`,
         href: "/tasks", createdAt: addMin(clock, 3), readAt: def.unsigned.has(userId) ? null : rng.chance(0.5) ? addDays(clock, 1) : null,
       });
     }

@@ -109,6 +109,21 @@ confirmed for this year.
    Psi Chi chat.
 8. **Profile** (`/u/mayachen`): barista job, summer research internship,
    education, club roles (none — she's a member).
+9. **Notifications** (the bell, or the app's Notifications tab):
+   - ISMN, whose calendar she follows without joining, moved one of its next
+     *Screening Night*s to another room: *Screening Night on Fri, … moves to …*.
+     Members and followers both hear when a date in the next two weeks is
+     cancelled, moved or changes rooms.
+   - *Starting soon: Care Kit Assembly…*, the Reminders job's notice about an
+     hour before it started, and *You can review Pre-Med Club now* from when
+     her third check-in there unlocked reviews.
+   - **Settings → Notifications:** *Remind me before events* is on, and the
+     push card says no phone is getting push yet and how to fix that.
+   - **Try it:** as Maya, follow the RC Wrecker Bots Club's calendar. Then, as
+     Priya, open one of its upcoming *Build Night*s in the Events Builder and
+     change its room, or move the whole series to another day or time. Maya
+     gets one notice (for the series, a summary like *Weekly Build Night moves
+     to Thursdays at 6 PM, starting …*); Priya doesn't.
 
 ## Oscar Nguyen — officer (Treasurer)
 
@@ -127,7 +142,10 @@ about 10 days after seeding (30-day grace) and **Club Officer Training** about
    - *Fall speaker series* is **SUBMITTED** and waiting on WSUSA.
    - History: last spring's approved request with a processed invoice.
 3. **Tasks:** *Pass: Club Officer Policy Test*, *Attend: Club Officer Training*
-   and a club task from his president, *Reconcile September spending*.
+   and a club task from his president, *Reconcile September spending*. The
+   test's week-ahead reminder (*Club Officer Policy Test is due in 7 days*, in
+   the bell, by email and push) comes from the Reminders job about three days
+   after seeding, and a day-ahead one follows.
 4. **Take the officer test:** info page with an embedded video, "are you sure?"
    confirmation with the 30-minute limit, eight choice questions and two open
    answers. Submitting sends it to review (open answers need a person). His
@@ -170,6 +188,10 @@ hasn't signed the *Club Member Agreements* form.
    president (graduating in December), its advisor or an admin can.
 4. SWE's *Girls in STEM Robot Day supplies* funding request is submitted.
 5. Messages: a DM thread with Priya about co-hosting.
+6. **Renewal:** SWE re-registered for 2026–27 in mid-September, and Vanessa
+   did it (a VP can renew). The Overview reads *Re-registered 2026–27 · by
+   Vanessa Brooks on Sep 13, 2026*, and the club page says *Re-registered
+   2026–27*.
 
 ## Priya Patel — president
 
@@ -177,8 +199,9 @@ hasn't signed the *Club Member Agreements* form.
 (VP 2025–26, Events Coordinator 2024–25). About 90 members, an
 **approval gate** with **five pending join requests**, Tuesday build nights,
 and regular co-hosted events with CSWS (The Computing Society at Weber State)
-and SWE. Both officer requirements met; the *Annual Club Re-registration* form
-is still hers to fill out. The club runs its own *Event Safety Quiz*.
+and SWE. Both officer requirements met. The club hasn't re-registered with
+WSUSA for 2026–27 yet, so its workspace Overview leads with the renewal card.
+The club runs its own *Event Safety Quiz*.
 
 1. **Members:** approve or decline the five requests — their tasks close for
    everyone with the roster capability.
@@ -213,6 +236,21 @@ is still hers to fill out. The club runs its own *Event Safety Quiz*.
    Maya and Vanessa.
 9. **Network map:** the RC Wrecker Bots Club should be highlighted and sit near
    the other EAST clubs.
+10. **Graduation** (Settings → Graduation): she's the club's only President, so
+    the page leads with *Pass the torch first* and links to the org chart's
+    hand-off, and the confirmation names the club as well. She could still
+    graduate, and WSUSA would get a task for the empty seat. (Don't confirm
+    unless you mean it: graduating retires her profile.)
+11. **Renew for 2026–27** (the Overview's renewal card): it's *Overdue since
+    Sep 30* (renewal opened with the fall term on Aug 31 and was due 30 days
+    later). Every required check is green: profile, President, advisor,
+    constitution and bylaws. *A Vice President* is amber, with **Fill this
+    seat**, because the VP seat is waiting on Dr. Alvarez. That one's only
+    recommended, so **Renew for 2026–27** works: confirm the club will be
+    active this academic year, add a note for WSUSA if you like, and the card
+    becomes *Re-registered 2026–27 · by Priya Patel on …*. Her and Dr.
+    Alvarez's *Renew RC Wrecker Bots Club for 2026–27* tasks close, and the
+    club page's details say *Re-registered 2026–27*.
 
 ## Amir Haddad — college ambassador
 
@@ -280,6 +318,8 @@ advisor's term ended). Full permissions in both.
 4. Advisors can assign any role and apply election results.
 5. Pre-Med Club's org chart: the College Ambassador card says the College of
    Science doesn't have an ambassador program yet (WSUSA starts them).
+6. **Tasks → *Renew RC Wrecker Bots Club for 2026–27*** (required): advisors
+   get the renewal task too. She or Priya can renew from the club's Overview.
 
 ## Prof. Nathan Reed — invited advisor
 
@@ -303,6 +343,7 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
   already hidden.
 - **Reports:** five, all on those two clubs (two anonymous — opening one
   requires acknowledging the anonymity notice, and every opening is logged).
+  The two new ones are also in WSUSA's queue, as tasks with no content.
 
 The two are fictional **demo clubs** (approved, with members, events and
 check-ins) made to carry these incidents, so nothing negative is invented
@@ -320,6 +361,35 @@ about a real club.
   placements**, the RC Wrecker Bots Club is waiting on its request (badge
   "Asked for one"). Place one of the program's club representatives, or
   decline with a note; Priya's card updates either way.
+- **Clubs missing a leader:** Engineering Honor Society / Tau Beta Pi's only
+  President stepped down about three days ago (the advisor ended the role at
+  their request), so nobody holds the seat. WSUSA has the task *Engineering
+  Honor Society / Tau Beta Pi has no President*, and the club's other leaders
+  got the same notice in-app. Assign a President in its org chart (or **Fill
+  this seat**) and the task closes on its own. To watch one open, end the only
+  President's role in a small club's org chart. Clubs that were already
+  leaderless get no task: Club analytics' **Leaders** filter (*No President*,
+  *No advisor*) lists them, and the Overview counts both.
+- **Join requests nobody can approve:** Kappa Omega Eta approves each join
+  request, but nobody there holds the Members permission, and one request has
+  waited nine days: *Join requests waiting at Kappa Omega Eta*, opened by the
+  "Club staffing" scheduled job. Deciding the request on the club's Members
+  page, or giving someone there the Members permission, closes it on the
+  job's next run.
+- **One queue:** the dashboard's WSUSA queue, the Overview's *Waiting on
+  WSUSA* and the counts in the admin side nav (Club approvals, Funding, Tests,
+  Reports, Review moderation) all count the same open tasks, so they agree.
+- **Renewals** (Club approvals → Renewals): about 40 of the 289 clubs asked
+  (roughly 60% of the active ones) have re-registered for 2026–27; the rest
+  are *Overdue since Sep 30*. **Not renewed** lists clubs with a President or
+  advisor to contact first, each with what's missing. Microbiology Club
+  (*American Society of Microbiology Student Chapter @ WSU*) has a President
+  but no advisor, so it can't renew: **Open renewal** shows its blocked card,
+  *Before … can renew, it needs a faculty or staff advisor.* Most dormant
+  clubs have nobody in either seat. **Renewed** shows who renewed, when and
+  any note, and **Download CSV** exports the list. Nothing pauses or retires
+  on its own. The Overview's *Where clubs stand* has the count. The three
+  clubs approved this fall renew starting next year.
 
 Also try: policies (eleven published, one draft, one shown from a PDF),
 trainings, university-wide announcements, analytics, directory and people.
@@ -327,14 +397,30 @@ trainings, university-wide announcements, analytics, directory and people.
 ## Sydney Park — system administrator
 
 Everything Alex can do, plus **System settings**: activity windows, the review
-threshold (3) and review-bombing rule (3 ratings ≤ 2★ in 48 hours), AI switches
-(off), integrations (mock mode), the **outbox** (mocked emails, plus one failed
-push), scheduled jobs, and granting admin.
+threshold (3) and review-bombing rule (3 ratings ≤ 2★ in 48 hours), club
+renewals (due 30 days after the academic year's first term starts), AI
+switches (off), integrations (mock mode), the **outbox** (mocked emails, plus
+one failed push), scheduled jobs (*Club renewals* keeps each club's renewal
+tasks in line with its Presidents and advisors), and granting admin.
+
+**Reminders:** System → Scheduled jobs → **Run now** includes *Reminders*. It
+reminds people about events starting 45–75 minutes from the run (followers of
+the host and co-host calendars with *Remind me before events* on who haven't
+checked in; for a university training, only the people it's required of), and
+sends requirement reminders a week and a day before they're due. Running it
+again sends nothing new. To see one, have a leader create or move an event to
+start in about an hour first; the outbox shows the emails (requirements only)
+and pushes (none until a phone registers).
 
 ---
 
 ## Other things in the data
 
+- **Notifications.** Every seeded bell is a kind the app really sends
+  (`src/components/notifications/catalog.ts`; `verify.ts` fails on any other).
+  Nobody has registered a phone for push, and nothing has been reminded yet:
+  the first *Reminders* run sends the week-ahead and day-ahead reminders for
+  required tasks that are already due soon.
 - **300 clubs.** All 292 clubs on Weber State's list: 290 approved and 2
   retired (Photographic Society and Ballroom and Hip Hop Club, with full role
   history). Plus the two college ambassador orgs (Goddard School Ambassadors,
@@ -394,6 +480,12 @@ push), scheduled jobs, and granting admin.
 - **Event Safety Quiz:** RC Wrecker Bots Club members who haven't passed it
   have a *Take: Event Safety Quiz* task, marked *Club test* (a club's own
   test, not a WSUSA requirement; /tasks has a Tests filter).
+- **Renewals:** clubs re-registered for 2026–27 between Aug 31 and Sep 30
+  (busiest in the first week and the last few days), mostly by their
+  President, sometimes by a VP or the advisor, a few with a note for WSUSA.
+  Every club that hasn't renewed has a required *Renew <club> for 2026–27*
+  task for each current President and advisor, the way the *Club renewals*
+  job opens them.
 
 All policy text is sample text and says so at the top. People, memberships,
 events and reviews are fictional even where the club is real; reports and

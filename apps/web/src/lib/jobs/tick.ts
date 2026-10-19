@@ -1,9 +1,12 @@
 import "server-only";
 import { logActivity } from "@/lib/lake/activity";
 import { advanceElections } from "@/lib/domain/elections";
-import { notifyOverdueRequirements, syncAllRequirementHolders } from "@/lib/domain/requirements";
+import { runRequirementsJob } from "@/lib/jobs/requirements";
+import { runClubRenewals } from "@/lib/jobs/renewals";
 import { markMissedAssignments, prefillPendingSuggestions, runTestCycles, submitAbandonedAttempts } from "@/lib/domain/tests";
 import { pruneSearchLog, reindexStale, SEARCH_LOG_DAYS } from "@/lib/search/index-build";
+import { sendReminders } from "@/lib/jobs/reminders";
+import { runClubStaffing } from "@/lib/jobs/staffing";
 
 /**
  * CONTRACT (owner: tests & policy builder). Scheduled jobs, run by
@@ -65,11 +68,12 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
-    await job("WSUSA requirements", async () => {
-      const synced = await syncAllRequirementHolders({ notify: "due", now });
-      const overdue = await notifyOverdueRequirements(now);
-      return `Re-checked ${plural(synced.people, "person", "people")}; opened ${plural(synced.opened, "new requirement task")}; told ${plural(overdue.notified, "person", "people")} a requirement is overdue.`;
-    }),
+    // Every run: deadlines just crossed (overdue notices). The first run each day: the full sweep (lib/jobs/requirements).
+    await job("WSUSA requirements", () => runRequirementsJob(now)),
+  );
+  reports.push(
+    // Yearly re-registration with WSUSA (lib/jobs/renewals): Presidents' and advisors' tasks from the day renewal opens.
+    await job("Club renewals", () => runClubRenewals(now)),
   );
   reports.push(
     await job("Missed test deadlines", async () => {
@@ -84,6 +88,19 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
+    // Events starting in about an hour, and required tasks due in a week or a day (lib/jobs/reminders).
+    // After the requirements job, so requirement tasks and their due dates are current.
+    await job("Reminders", async () => {
+      const r = await sendReminders(now);
+      const parts = [
+        r.events ? `Reminded ${plural(r.eventPeople, "person", "people")} about ${plural(r.events, "event")} starting in about an hour` : "No new reminders for events starting in about an hour",
+        r.dueTasks ? `sent ${plural(r.dueTasks, "due-date reminder")} for required tasks` : "no new due-date reminders for required tasks",
+      ];
+      if (r.pruned) parts.push(`cleared ${plural(r.pruned, "reminder record")} older than 30 days`);
+      return parts.join("; ") + ".";
+    }),
+  );
+  reports.push(
     // Catches what the write paths' reindexClubSoon didn't (constitutions, seats, files, renames):
     // clubs whose content is newer than their search document, plus any document a day old.
     await job("Club search", async () => {
@@ -94,6 +111,10 @@ async function runSequence(now: Date): Promise<JobReport[]> {
       if (pruned) parts.push(`cleared ${plural(pruned, "search")} older than ${SEARCH_LOG_DAYS} days`);
       return parts.join("; ") + ".";
     }),
+  );
+  reports.push(
+    // Join requests nobody can approve (one WSUSA task per club), and a re-check of clubs missing a leader (lib/jobs/staffing).
+    await job("Club staffing", () => runClubStaffing(now)),
   );
   return reports;
 }

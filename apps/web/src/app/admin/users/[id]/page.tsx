@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { DomainError } from "@/lib/domain/kit";
 import { userDetail } from "@/lib/domain/users";
 import { detailsFor } from "@/lib/domain/details";
+import { lastLeaderSeats } from "@/lib/domain/staffing";
 import { GENDER_LABEL, missingDetails, YEAR_LABEL } from "@/lib/details/rules";
 import { EmergencyContactButton } from "@/components/details/EmergencyContactButton";
 import { revealEmergencyContactAdminAction } from "@/app/admin/users/actions";
@@ -57,7 +58,7 @@ export default async function PersonPage({ params }: { params: Params }) {
     throw e;
   }
   const { user: person, roles, pastRoles, pastRoleCount, checkins, activity } = data;
-  const det = await detailsFor(viewer, person.id);
+  const [det, lastSeats] = await Promise.all([detailsFor(viewer, person.id), person.status === "DEACTIVATED" ? Promise.resolve([]) : lastLeaderSeats(person.id)]);
   const detMissing = missingDetails(det, person.kind);
   const none = <span className="text-ink-3">Not given</span>;
   const memberships = [...data.memberships].sort((a, b) => MEMBERSHIP_ORDER[a.status] - MEMBERSHIP_ORDER[b.status]);
@@ -260,7 +261,15 @@ export default async function PersonPage({ params }: { params: Params }) {
                     : "Deactivated — they can't sign in on the web or the app. Their history stays in their clubs."}
               </p>
               <AccountActions
-                person={{ id: person.id, name: person.name, kind: person.kind, status: person.status, roleCount: leadRoles.length }}
+                person={{
+                  id: person.id,
+                  name: person.name,
+                  kind: person.kind,
+                  status: person.status,
+                  roleCount: leadRoles.length,
+                  // Graduating or deactivating them leaves these seats empty.
+                  lastSeats: lastSeats.map((s) => ({ clubName: s.clubName, clubSlug: s.clubSlug, role: s.role })),
+                }}
                 today={fmtDate(new Date(), "yyyy-MM-dd")}
                 blockedReason={blockedReason}
               />

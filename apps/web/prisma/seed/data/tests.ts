@@ -203,7 +203,8 @@ export const REVIEWER_COMMENTS = [
 /**
  * WSUSA forms (nothing graded). The member agreements replace the three
  * agreements the old system asked for inside every club's sign-up: signed
- * once a year, for every club.
+ * once a year, for every club. (The old system's re-registration form is gone:
+ * clubs renew from their workspace's renewal card, lib/renewals.)
  */
 export const AGREEMENTS_FORM_INTRO = `<p>WSUSA asks every club member to sign these once each academic year. They cover every club you're in, so no club asks again. Read each policy first; they're linked from the policy library.</p><ul><li><strong>Participant Waiver and Release</strong>: the risks of club activities, emergency care, and photos.</li><li><strong>Anti-Hazing Agreement</strong>: no hazing, ever, and reporting it if you see it.</li><li><strong>Non-Discrimination Agreement</strong>: clubs are open to everyone and treat people fairly.</li></ul><p>Under 18? You need a parent or guardian's signature instead. Contact WSUSA for the guardian version.</p>`;
 
@@ -214,11 +215,3 @@ export const AGREEMENT_QUESTIONS: QuestionDef[] = [
   { type: "SHORT_ANSWER", prompt: "<p>Type your full name to sign.</p>" },
 ];
 
-/** Presidents confirm their club for the year (the old system's re-registration). */
-export const REREGISTRATION_FORM_INTRO = `<p>Each academic year, every club president confirms the club is active and its details are current. Check your club profile, advisor and meeting schedule in Wildcat Clubs first. They're what students and WSUSA see, so you don't type them again here.</p>`;
-
-export const REREGISTRATION_QUESTIONS: QuestionDef[] = [
-  { type: "SINGLE_CHOICE", prompt: "<p>The club I lead will be active this academic year.</p>", options: [{ id: "confirm", text: "I confirm" }] },
-  { type: "SINGLE_CHOICE", prompt: "<p>Our club profile is up to date: contact email, social media, category and advisor.</p>", options: [{ id: "confirm", text: "I confirm" }] },
-  { type: "SINGLE_CHOICE", prompt: "<p>Our regular meetings are on the club calendar in the Events Builder.</p>", options: [{ id: "confirm", text: "I confirm" }] },
-];

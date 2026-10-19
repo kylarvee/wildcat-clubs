@@ -14,6 +14,9 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Stat } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { ActivityFeed } from "@/components/founding/ActivityFeed";
+import { getCurrentUser } from "@/lib/auth/session";
+import { renewalView } from "@/lib/domain/renewals";
+import { RenewalCard } from "@/components/renewals/RenewalCard";
 
 const TOOLS: { key: string; label: string; desc: string; icon: typeof Users; cap: Capability | null }[] = [
   { key: "profile", label: "Club profile", desc: "Description, logo, documents", icon: Palette, cap: "profile" },
@@ -34,7 +37,7 @@ const TOOLS: { key: string; label: string; desc: string; icon: typeof Users; cap
 export async function ClubDashboard({ club, access }: { club: Club; access: ClubAccess }) {
   const now = new Date();
   const base = `/clubs/${club.slug}/manage`;
-  const [activity, cfg, pendingJoins, pendingCohosts, upcoming, tasks, taskCount] = await Promise.all([
+  const [activity, cfg, pendingJoins, pendingCohosts, upcoming, tasks, taskCount, renewal] = await Promise.all([
     // Same call as the workspace header's standing, so the two always agree (and share one computation).
     clubActivity(club.id),
     getConfig(),
@@ -52,6 +55,8 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
     }),
     db.task.findMany({ where: { clubId: club.id, status: "OPEN", assigneeType: "CLUB" }, orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }], take: 6 }),
     db.task.count({ where: { clubId: club.id, status: "OPEN", assigneeType: "CLUB" } }),
+    // WSUSA's yearly renewal: a card while it's due or late, one line once renewed (lib/domain/renewals).
+    getCurrentUser().then((actor) => renewalView(actor, club.id, now)),
   ]);
 
   // Registered members come from lib/metrics (students only), so this matches the club page.
@@ -71,6 +76,7 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
 
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-6">
+          <RenewalCard view={renewal} />
           <Card>
             <CardHeader title="Activity standing" action={<Badge tone={STANDING_TONE[standing]}>{STANDING_LABEL[standing]}</Badge>} description={standingHint} />
             <CardBody className="space-y-2 text-sm">

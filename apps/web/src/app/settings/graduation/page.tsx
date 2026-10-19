@@ -5,6 +5,7 @@ import { AlertTriangle, Award, GraduationCap, History, Lock, Users } from "lucid
 import { requireUser } from "@/lib/auth/session";
 import { getConfigValue } from "@/lib/config";
 import { db } from "@/lib/db";
+import { lastLeaderSeats } from "@/lib/domain/staffing";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtGraduated, toDateInput } from "@/lib/profiles/format";
 import { myRoleOptions } from "@/lib/profiles/queries";
@@ -19,6 +20,9 @@ export const metadata: Metadata = { title: "Settings · Graduation" };
  * Graduating: the student marks themself graduated. Their roles end
  * (Graduated) through the org chart's own path, memberships become alumni,
  * and the profile is retired — fully visible, read-only, history intact.
+ * The last President of a club is shown that club first, with a link to
+ * pass the torch; they can still graduate, and WSUSA then gets a staffing
+ * task for the empty seat (lib/domain/staffing).
  */
 export default async function GraduationSettingsPage() {
   const actor = await requireUser("/settings/graduation");
@@ -60,11 +64,8 @@ export default async function GraduationSettingsPage() {
     db.membership.findMany({ where: { userId: actor.id, status: "ACTIVE" }, select: { club: { select: { id: true, name: true, slug: true, logoUrl: true, logoColor: true } } }, orderBy: { club: { name: "asc" } } }),
   ]);
   const current = roles.filter((r) => r.current);
-  // Presidents hand off first, so their club isn't left without a leader.
-  const presidencies = await db.roleAssignment.findMany({
-    where: { userId: actor.id, endedAt: null, role: "PRESIDENT" },
-    select: { id: true, club: { select: { name: true, slug: true } } },
-  });
+  // Clubs they're the last President of: graduating leaves the seat empty, so they pass the torch first if they can.
+  const lastPresidencies = (await lastLeaderSeats(actor.id)).filter((s) => s.role === "PRESIDENT").map((s) => ({ name: s.clubName, slug: s.clubSlug }));
 
   return (
     <div className="space-y-6">
@@ -108,17 +109,22 @@ export default async function GraduationSettingsPage() {
         </p>
       </Card>
 
-      {presidencies.length ? (
-        <Callout tone="warning" icon={<AlertTriangle />} title="Name your successor first">
-          You&apos;re President of {presidencies.map((p, i) => (
-            <span key={p.id}>
-              {i > 0 ? (i === presidencies.length - 1 ? " and " : ", ") : null}
-              <Link href={`/clubs/${p.club.slug}/manage/org-chart`} className="font-medium underline underline-offset-2">
-                {p.club.name}
-              </Link>
-            </span>
-          ))}
-          . Hand off the presidency from the org chart before you graduate, so the club isn&apos;t left without a leader.
+      {lastPresidencies.length ? (
+        <Callout tone="warning" icon={<AlertTriangle />} title="Pass the torch first">
+          <p>
+            You&apos;re the last President of {lastPresidencies.length === 1 ? "this club" : "these clubs"}. Hand off the presidency before you graduate, so{" "}
+            {lastPresidencies.length === 1 ? "it always has" : "each one always has"} a President. If you graduate first, the seat stays empty and WSUSA is asked to help fill it.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {lastPresidencies.map((c) => (
+              <li key={c.slug}>
+                <span className="font-medium">{c.name}</span> ·{" "}
+                <Link href={`/clubs/${c.slug}/manage/org-chart#pass-the-torch`} className="font-medium underline underline-offset-2">
+                  Passing the torch
+                </Link>
+              </li>
+            ))}
+          </ul>
         </Callout>
       ) : null}
 
@@ -157,7 +163,14 @@ export default async function GraduationSettingsPage() {
         <h2 className="text-base font-semibold text-ink">Ready?</h2>
         <p className="mt-1 text-sm text-ink-3">Only mark this once you&apos;ve actually graduated.</p>
         <div className="mt-4">
-          <GraduationForm handle={me.handle} today={toDateInput(new Date())} roleCount={current.length} clubCount={memberships.length} supportEmail={supportEmail} />
+          <GraduationForm
+            handle={me.handle}
+            today={toDateInput(new Date())}
+            roleCount={current.length}
+            clubCount={memberships.length}
+            lastPresidencies={lastPresidencies}
+            supportEmail={supportEmail}
+          />
         </div>
       </Card>
     </div>

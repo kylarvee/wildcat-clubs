@@ -419,13 +419,19 @@ export async function deleteProject(actor: Actor | null, id: string) {
 
 // ─── Preferences ─────────────────────────────────────────────────────────────
 
-const NotificationSettings = z.object({ emailNotifications: z.boolean() });
+const NotificationSettings = z
+  .object({ emailNotifications: z.boolean().optional(), eventReminders: z.boolean().optional() })
+  .refine((v) => v.emailNotifications !== undefined || v.eventReminders !== undefined, "Choose a setting to change.");
 
-/** Email on or off. In-app notifications always arrive; push follows the mobile app's own permission. */
+/**
+ * Settings → Notifications: email on or off, and "Remind me before events"
+ * (lib/jobs/reminders). Send either or both. In-app notifications always
+ * arrive; push follows the mobile app's own switch and the phone's permission.
+ */
 export async function updateNotificationSettings(actor: Actor | null, input: unknown) {
   assertSignedIn(actor);
   const v = parse(NotificationSettings, input);
-  await db.user.update({ where: { id: actor.id }, data: { emailNotifications: v.emailNotifications } });
+  await db.user.update({ where: { id: actor.id }, data: v });
   await logActivity({ actorId: actor.id, action: "user.settings_updated", entityType: "user", entityId: actor.id, data: v });
   return v;
 }

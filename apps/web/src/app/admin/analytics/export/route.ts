@@ -7,7 +7,7 @@ import { clubAnalyticsRows } from "@/lib/analytics/clubs";
 import { csvRows, filterRows, parseTableFilters, sortRows } from "@/lib/analytics/club-table";
 
 /**
- * GET /admin/analytics/export?q=&college=&type=&status=&sort=&dir=
+ * GET /admin/analytics/export?q=&college=&type=&status=&missing=&sort=&dir=
  * The club analytics table as CSV, with the same filters and order as the
  * page (lib/analytics/club-table), so the download matches the screen.
  * Admins only (admin.analytics). Aggregates only — no people.

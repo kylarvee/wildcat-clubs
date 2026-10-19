@@ -9,6 +9,17 @@ import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notifyClubCapability } from "@/lib/domain/notify";
+import {
+  beforeDelete,
+  datesToCancel,
+  noticeDateCancelled,
+  noticeDeleted,
+  noticeEdit,
+  noticeEventCancelled,
+  noticeRestored,
+  noticeRoom,
+  snapshotEvent,
+} from "@/lib/domain/event-notices";
 import { canViewFile } from "@/lib/domain/files";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { expandOccurrences, MAX_OCCURRENCES, type OccurrenceTimes } from "@/lib/events/recurrence";
@@ -41,6 +52,10 @@ import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
  * Costs are BudgetItem rows with eventId — entered only here; the Budget tool
  * reads them through eventCostSummary() to request funding. A line that a
  * submitted or approved funding request covers is locked (costLineLocks).
+ *
+ * Notices: co-host leaders hear about new times and cancellations
+ * (tellCohostsAboutChange); the event's followers hear when a date in the next
+ * 14 days is cancelled, back on, moved or re-placed (lib/domain/event-notices).
  */
 
 // ─── Input schemas ───────────────────────────────────────────────────────────
@@ -655,6 +670,9 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
   const status: Event["status"] = existing && existing.status === "CANCELLED" ? "CANCELLED" : "SCHEDULED";
   // Co-hosts before this save: one dropped from the list must lose the event from its search page too.
   const cohostsBefore = existing ? (await db.eventCohost.findMany({ where: { eventId: existing.id, status: "APPROVED" }, select: { clubId: true } })).map((c) => c.clubId) : [];
+  // What followers expect before the save, so they hear what moved (lib/domain/event-notices).
+  const noticeNow = new Date();
+  const expected = existing ? await snapshotEvent(existing.id, noticeNow) : null;
 
   const { event, cohostChanges } = await withCodeRetry(() =>
     db.$transaction(
@@ -717,6 +735,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
   if (club && cohostChanges.length) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
   if (club && existing && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
   const google = await mirror(event.id, actor, f.createMeetLink);
+  await noticeEdit(event.id, expected, { actorId: actor.id, now: noticeNow, cohostsTold: Boolean(club && existing && timesChanged) });
   return { id: event.id, google: { status: google.status, message: google.message } };
 }
 
@@ -823,6 +842,7 @@ export async function cancelEvent(actor: Actor | null, eventId: string, reason?:
   const note = reason?.trim().slice(0, 300) || null;
   const now = new Date();
   const pending = await db.eventCohost.findMany({ where: { eventId, status: "PENDING" }, select: { id: true } });
+  const dropping = await datesToCancel(eventId, now);
   await db.$transaction(async (tx) => {
     const kept = await tx.eventOccurrence.findMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: now } }, select: { id: true } });
     await tx.event.update({ where: { id: eventId }, data: { status: "CANCELLED" } });
@@ -836,6 +856,7 @@ export async function cancelEvent(actor: Actor | null, eventId: string, reason?:
   reindexEventClubsSoon(eventId);
   if (club) await tellCohostsAboutChange(event, club, a, "cancelled");
   await mirror(eventId, a);
+  await noticeEventCancelled(eventId, dropping, note, { actorId: a.id, now, cohostsTold: Boolean(club) });
   return { id: event.id };
 }
 
@@ -855,6 +876,8 @@ export async function restoreEvent(actor: Actor | null, eventId: string) {
   const { actor: a, club, event } = await loadManaged(actor, eventId);
   if (event.status !== "CANCELLED") return { id: event.id };
   const kept = await cancelledBeforeEvent(eventId);
+  const now = new Date();
+  const restoring = (await db.eventOccurrence.findMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: now }, id: { notIn: kept } }, select: { id: true } })).map((o) => o.id);
   await db.$transaction(async (tx) => {
     await tx.event.update({ where: { id: eventId }, data: { status: "SCHEDULED" } });
     await tx.eventOccurrence.updateMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: new Date() }, id: { notIn: kept } }, data: { status: "SCHEDULED", note: null } });
@@ -863,6 +886,7 @@ export async function restoreEvent(actor: Actor | null, eventId: string) {
   });
   reindexEventClubsSoon(eventId);
   await mirror(eventId, a);
+  await noticeRestored(eventId, restoring, true, { actorId: a.id, now });
   return { id: event.id };
 }
 
@@ -883,6 +907,7 @@ export async function cancelOccurrence(actor: Actor | null, occurrenceId: string
   await db.eventOccurrence.update({ where: { id: occ.id }, data: { status: "CANCELLED", note: note?.trim().slice(0, 300) || null } });
   await logActivity({ actorId: a.id, action: "event.occurrence_cancelled", entityType: "occurrence", entityId: occ.id, clubId: occ.event.clubId, data: { eventId: occ.eventId, startsAt: occ.startsAt.toISOString() } });
   await mirror(occ.eventId, a);
+  await noticeDateCancelled(occ.id, note?.trim().slice(0, 300) || null, { actorId: a.id, now: new Date() });
   return { id: occ.id };
 }
 
@@ -900,6 +925,7 @@ export async function restoreOccurrence(actor: Actor | null, occurrenceId: strin
   });
   if (occ.event.status === "CANCELLED") reindexEventClubsSoon(occ.eventId);
   await mirror(occ.eventId, a);
+  await noticeRestored(occ.eventId, [occ.id], false, { actorId: a.id, now: new Date() });
   return { id: occ.id };
 }
 
@@ -909,6 +935,7 @@ export async function setOccurrenceRoom(actor: Actor | null, occurrenceId: strin
   const clean = room?.trim().slice(0, 60) || null;
   await db.eventOccurrence.update({ where: { id: occ.id }, data: { roomOverride: clean } });
   await logActivity({ actorId: a.id, action: "event.room_changed", entityType: "occurrence", entityId: occ.id, clubId: occ.event.clubId, data: { room: clean } });
+  await noticeRoom(occ.id, occ.roomOverride, { actorId: a.id, now: new Date() });
   return { id: occ.id };
 }
 
@@ -930,6 +957,8 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
   const [lock] = (await costLineLocks(costLines.map((b) => b.id))).values();
   if (lock) throw conflict(`This event's costs are part of the funding request “${lock.title}”, so it can't be deleted. Cancel it instead — its costs stay.`);
   const cohosts = await db.eventCohost.findMany({ where: { eventId }, select: { id: true, clubId: true, status: true } });
+  const noticeNow = new Date();
+  const deleted = await beforeDelete(eventId, noticeNow);
   await db.$transaction(async (tx) => {
     for (const c of cohosts) await resolveTasks("cohost", c.id, a.id, tx, "CANCELLED");
     await tx.event.delete({ where: { id: eventId } });
@@ -937,6 +966,7 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
   });
   reindexClubSoon(event.clubId, ...cohosts.filter((c) => c.status === "APPROVED").map((c) => c.clubId));
   await removeEventFromGoogle({ googleEventId: event.googleEventId, clubId: event.clubId });
+  await noticeDeleted(deleted, { actorId: a.id, now: noticeNow });
   return { id: eventId };
 }
 

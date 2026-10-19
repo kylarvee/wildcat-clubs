@@ -32,6 +32,13 @@ export const CONFIG_DEFAULTS = {
   /** The on-screen QR code changes this often, so a photo of it stops working. */
   "checkin.qrRotateSeconds": 30,
 
+  /**
+   * Clubs re-register with WSUSA once a year (lib/renewals). The window opens
+   * on the first day of the academic year's first term; renewal is due this
+   * many days later, at the end of that day.
+   */
+  "renewal.dueDays": 30,
+
   /** Claude features. Off until the university has API access. */
   "ai.assistantEnabled": false,
   "ai.gradingEnabled": false,

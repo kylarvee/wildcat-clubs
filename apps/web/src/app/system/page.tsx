@@ -39,6 +39,13 @@ const SECTIONS: { id: string; title: string; description: string; summary: RuleS
     summary: "checkin",
     keys: ["checkin.opensMinutesBefore", "checkin.closesMinutesAfter", "checkin.qrRotateSeconds"],
   },
+  {
+    id: "renewals",
+    title: "Club renewals",
+    description: "When clubs re-register with WSUSA each year. Presidents and advisors get a required task when renewal opens, and WSUSA sees who hasn't renewed in Club approvals → Renewals.",
+    summary: null,
+    keys: ["renewal.dueDays"],
+  },
 ];
 
 const APP_KEYS: StringKey[] = ["app.iosUrl", "app.androidUrl"];

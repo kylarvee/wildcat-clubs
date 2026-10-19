@@ -6,8 +6,9 @@ import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { platformSummary } from "@/lib/metrics";
 import { fmtAgo, fmtDate, fmtLongDate } from "@/lib/time";
-import { atRiskClubs, clubCounts, recentPlatformActivity, waitingOnWsusa, type AtRiskClub, type Queue } from "@/lib/analytics/admin";
+import { atRiskClubs, clubCounts, recentPlatformActivity, wsusaQueue, type AtRiskClub, type QueueRow } from "@/lib/analytics/admin";
 import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL as CLUB_TYPE_NAMES, STANDING_HINT, STANDING_LABEL } from "@/lib/labels/clubs";
+import { GAP_LABEL } from "@/lib/staffing/rules";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { cn } from "@/components/ui/cn";
 import { PageHeader, Stat } from "@/components/ui/layout";
 import { BarList, type BarItem } from "@/components/analytics/BarList";
 import { MonthlyCheckinsChart } from "@/components/analytics/MonthlyCheckinsChart";
+import { RenewalProgress } from "@/components/renewals/RenewalProgress";
 
 export const metadata: Metadata = { title: "Admin overview" };
 
@@ -24,20 +26,21 @@ const pctOf = (part: number, whole: number) => (whole > 0 ? `${Math.round((part 
 
 /**
  * WSUSA's front page: this term's headline numbers (all from lib/metrics
- * platformSummary), check-ins by month, what's waiting on WSUSA, clubs at
- * risk of going inactive, and recent platform activity. Reports appear only
- * as a count.
+ * platformSummary), check-ins by month, what's waiting on WSUSA (the same
+ * queue as the dashboard and the side nav's counts), clubs at risk of going
+ * inactive, approved clubs missing a President or advisor, and recent
+ * platform activity. Reports appear only as a count.
  */
 export default async function AdminOverviewPage() {
   const user = await requireUser("/admin");
   if (!can(user, "admin.access")) notFound();
   const now = new Date();
-  const [summary, waiting, atRisk, counts, feed] = await Promise.all([platformSummary(now), waitingOnWsusa(), atRiskClubs(now), clubCounts(), recentPlatformActivity(12)]);
+  const [summary, waiting, atRisk, counts, feed] = await Promise.all([platformSummary(now), wsusaQueue(), atRiskClubs(now), clubCounts(), recentPlatformActivity(12)]);
 
   const term = summary.termName ?? "this term";
   const onRecord = summary.activeClubs - summary.pilotClubs;
   const founding = (counts.byStatus.DRAFT ?? 0) + (counts.byStatus.SUBMITTED ?? 0) + (counts.byStatus.CHANGES_REQUESTED ?? 0);
-  const busyQueues = waiting.queues.filter((q) => q.count > 0).length + (waiting.other ? 1 : 0);
+  const busyQueues = waiting.rows.filter((q) => q.count > 0).length;
 
   // The newest month is still running: drawn lighter so a half month doesn't read as a drop.
   const thisMonth = fmtDate(now, "MMM yyyy");
@@ -61,7 +64,12 @@ export default async function AdminOverviewPage() {
   const types: BarItem[] = (Object.keys(CLUB_TYPE_NAMES) as (keyof typeof CLUB_TYPE_NAMES)[])
     .map((t) => ({ key: t, label: CLUB_TYPE_NAMES[t], value: counts.approvedByType[t] ?? 0, href: `/admin/analytics?status=approved&type=${t}` }))
     .sort((a, b) => b.value - a.value);
-  const barMax = Math.max(...stages.map((s) => s.value), ...types.map((t) => t.value));
+  // Club analytics' No President and No advisor filters list these clubs.
+  const leaders: BarItem[] = [
+    { key: "noPresident", label: GAP_LABEL.president, value: counts.missing.president, href: "/admin/analytics?missing=president" },
+    { key: "noAdvisor", label: GAP_LABEL.advisor, value: counts.missing.advisor, href: "/admin/analytics?missing=advisor" },
+  ];
+  const barMax = Math.max(...stages.map((s) => s.value), ...types.map((t) => t.value), ...leaders.map((l) => l.value));
 
   return (
     <div className="space-y-6">
@@ -131,7 +139,7 @@ export default async function AdminOverviewPage() {
             title="Waiting on WSUSA"
             description={waiting.total ? `${fmt(waiting.total)} open ${waiting.total === 1 ? "item" : "items"} for any admin to pick up.` : "All caught up."}
           />
-          <QueueList queues={waiting.other ? [...waiting.queues, waiting.other] : waiting.queues} now={now} />
+          <QueueList queues={waiting.rows} now={now} />
         </Card>
       </div>
 
@@ -155,9 +163,14 @@ export default async function AdminOverviewPage() {
           <CardHeader title="Where clubs stand" description="Every club on the platform, by status." />
           <CardBody className="space-y-6">
             <BarList items={stages} max={barMax} label="Clubs by status" />
+            <RenewalProgress actor={user} />
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Approved clubs by type</h3>
               <BarList items={types} max={barMax} label="Approved clubs by type" />
+            </div>
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Approved clubs missing a leader</h3>
+              <BarList items={leaders} max={barMax} label="Approved clubs missing a leader" />
             </div>
           </CardBody>
         </Card>
@@ -203,7 +216,7 @@ function foundingHint(byStatus: Partial<Record<string, number>>) {
   return parts.length ? parts.join(" · ") : undefined;
 }
 
-function QueueList({ queues, now }: { queues: Queue[]; now: Date }) {
+function QueueList({ queues, now }: { queues: QueueRow[]; now: Date }) {
   return (
     <ul className="divide-y divide-line">
       {queues.map((q) => (

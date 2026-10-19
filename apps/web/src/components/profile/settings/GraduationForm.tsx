@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,19 +16,23 @@ import { INSTITUTION } from "@/lib/institution";
 /**
  * "I've graduated": pick the date, confirm what happens, done. Roles end as
  * Graduated in every club's history, memberships become alumni and the
- * profile is retired (read-only) — the history stays.
+ * profile is retired (read-only) — the history stays. The confirmation names
+ * the clubs left without a President, so that never happens silently.
  */
 export function GraduationForm({
   handle,
   today,
   roleCount,
   clubCount,
+  lastPresidencies = [],
   supportEmail,
 }: {
   handle: string;
   today: string;
   roleCount: number;
   clubCount: number;
+  /** Clubs they're the last President of: graduating leaves the seat empty. */
+  lastPresidencies?: { name: string; slug: string }[];
   /** System config `platform.supportEmail`: who undoes a graduation marked by mistake. */
   supportEmail: string;
 }) {
@@ -78,6 +83,20 @@ export function GraduationForm({
         confirmLabel="Yes, I've graduated"
         onConfirm={() => void graduate()}
       >
+        {lastPresidencies.length ? (
+          <Callout tone="warning" className="mt-3" title={`${listNames(lastPresidencies.map((c) => c.name))} will have no President`}>
+            You can still graduate, and WSUSA is asked to help fill the seat. To hand it off first, cancel and open{" "}
+            {lastPresidencies.map((c, i) => (
+              <span key={c.slug}>
+                {i > 0 ? (i === lastPresidencies.length - 1 ? " or " : ", ") : null}
+                <Link href={`/clubs/${c.slug}/manage/org-chart#pass-the-torch`} className="font-medium underline underline-offset-2">
+                  {lastPresidencies.length === 1 ? "Passing the torch" : `${c.name}'s Passing the torch`}
+                </Link>
+              </span>
+            ))}
+            .
+          </Callout>
+        ) : null}
         <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-2">
           {ending.map((t) => (
             <li key={t}>{t[0].toUpperCase() + t.slice(1)}.</li>
@@ -87,4 +106,9 @@ export function GraduationForm({
       </ConfirmDialog>
     </form>
   );
+}
+
+/** "A", "A and B", "A, B and C". */
+function listNames(names: string[]) {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }

@@ -8,11 +8,13 @@ import { BRAND } from '@/theme';
  * Push notifications through Expo's push service (the server's
  * lib/integrations/push sends to the tokens registered here).
  *
- * Getting a token needs an EAS project id (app.json → extra.eas.projectId,
- * added by `npx eas-cli@latest init`), and on Android a Firebase
- * google-services.json (README → Push notifications). Without them — or on
- * the web, or in Expo Go on Android, which can't receive pushes — we skip
- * quietly and say why in Settings; everything else in the app still works.
+ * Getting a token needs an EAS project id: EXPO_PUBLIC_EAS_PROJECT_ID (in
+ * .env.local or the EAS build's environment; app.config.ts copies it into
+ * extra.eas.projectId) or app.json → expo.extra.eas.projectId. Android also
+ * needs a Firebase google-services.json (README → Push notifications).
+ * Without them — or on the web, or in Expo Go on Android, which can't receive
+ * pushes — we skip quietly and say why in Me → Settings; everything else in
+ * the app still works.
  */
 
 export type PushOutcome =
@@ -22,14 +24,14 @@ export type PushOutcome =
 
 export function pushProjectId(): string | null {
   const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
-  return extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? null;
+  return extra?.eas?.projectId || Constants.easConfig?.projectId || process.env.EXPO_PUBLIC_EAS_PROJECT_ID?.trim() || null;
 }
 
 /** Why push can't work in this build at all (null = it can). */
 export function pushUnavailableReason(): string | null {
   if (Platform.OS === 'web') return 'Push notifications come through the phone app, not the web preview.';
   if (Platform.OS === 'android' && isRunningInExpoGo()) return "Expo Go on Android can't receive push notifications. A development or store build can.";
-  if (!pushProjectId()) return "This build isn't linked to an EAS project yet, so it can't receive push notifications. Your notifications in the app still update.";
+  if (!pushProjectId()) return "This build isn't linked to an EAS project yet, so it can't get push notifications. The Notifications tab still updates.";
   return null;
 }
 

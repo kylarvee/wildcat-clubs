@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/form";
 import { EmptyState, PageHeader, Section, Stat } from "@/components/ui/layout";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Pager } from "@/components/admin/Filters";
 import { ActiveToggle } from "./ActiveToggle";
 import { applyFilter, filterQuery, parseFilter } from "./filters";
 import { requireRequirementAdmin } from "./guard";
@@ -20,13 +21,17 @@ import { requireRequirementAdmin } from "./guard";
 export const metadata: Metadata = { title: "Requirements" };
 
 const SOON_DAYS = 14;
+/** Leader rows per page; the stats, filters and CSV always cover everyone. */
+const PAGE_SIZE = 50;
 
 /**
  * Requirements: the tests, forms and trainings WSUSA requires of club
  * members and student leaders, and where every current student leader stands.
- * Leader status comes from requirementStatus (passed attempts, submitted
- * forms and training check-ins), never stored; member-wide requirements show
- * how many people still owe them (their open required tasks).
+ * Leader status comes from the requirement rule (passed attempts, submitted
+ * forms and training check-ins), never stored, evaluated for every leader in
+ * one batch (requirementCompliance); member-wide requirements show how many
+ * people still owe them (their open required tasks). The table shows
+ * PAGE_SIZE rows at a time.
  */
 export default async function RequirementsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireRequirementAdmin("/admin/requirements");
@@ -38,6 +43,10 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
   const active = reqs.filter((r) => r.active && r.appliesTo.some((role) => role !== "MEMBER"));
   const shown = applyFilter(rows, f);
   const columns = f.req ? active.filter((r) => r.id === f.req) : active;
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const page = Math.min(pages, Math.max(1, Number.parseInt(String([sp.page].flat()[0] ?? "1"), 10) || 1));
+  const from = (page - 1) * PAGE_SIZE;
+  const pageRows = shown.slice(from, from + PAGE_SIZE);
 
   const people = new Set(rows.map((r) => r.person.id)).size;
   const pausedPeople = new Set(rows.filter((r) => r.paused).map((r) => r.person.id)).size;
@@ -220,7 +229,8 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-ink-3" aria-live="polite">
-            Showing {shown.length} of {rows.length}
+            {shown.length > pageRows.length ? `Showing ${from + 1}–${from + pageRows.length} of ${shown.length}` : `Showing ${shown.length}`}
+            {shown.length !== rows.length ? ` (${rows.length} in all)` : ""}
           </p>
           {shown.length ? (
             <a href={`/admin/requirements/export${filterQuery(f)}`} className={buttonClasses("outline", "sm")} download>
@@ -234,7 +244,10 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
         ) : shown.length === 0 ? (
           <EmptyState icon={<CheckCircle2 />} title="Nobody matches" description={rows.length ? "Try a different filter." : "There are no current student leaders in approved clubs yet."} />
         ) : (
-          <ComplianceTable rows={shown} columns={columns} now={now} />
+          <>
+            <ComplianceTable rows={pageRows} columns={columns} now={now} />
+            {pages > 1 ? <Pager page={page} pages={pages} total={shown.length} noun="club role" /> : null}
+          </>
         )}
       </Section>
     </div>

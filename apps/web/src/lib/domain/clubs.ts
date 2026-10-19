@@ -12,6 +12,7 @@ import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyAdmins } from "@/lib/domain/notify";
 import { guessMime, MAX_UPLOAD_BYTES, putBytes } from "@/lib/files/storage";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
+import { profileGaps } from "@/lib/clubs/profile-rules";
 import { reindexClubSoon } from "@/lib/search/fresh";
 import { SOCIAL_PLATFORMS } from "@/components/clubs/labels";
 
@@ -125,23 +126,10 @@ async function assertNameFree(name: string, exceptClubId?: string) {
   if (clash) throw conflict(`There's already a club named “${clash.name}”. Choose a different name, or join that club instead.`);
 }
 
-// ─── Profile rules (shared by create, edit and the founding checklist) ──────
+// ─── Profile rules (shared by create, edit, the founding checklist and renewals) ─
 
-type ProfileShape = Pick<Club, "name" | "shortDescription" | "descriptionHtml" | "scope" | "collegeId" | "type" | "departmentId" | "requestedDepartmentName"> & Partial<Pick<Club, "category">>;
-
-/** What's still missing from a club's profile, in plain words. Empty = complete. */
-export function profileGaps(club: ProfileShape): string[] {
-  const gaps: string[] = [];
-  if (club.name.trim().length < 3) gaps.push("Club name");
-  if (club.shortDescription.trim().length < 10) gaps.push("Short description");
-  const longText = (club.descriptionHtml ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim();
-  if (longText.length < 40) gaps.push("Full description (a few sentences about what you'll do)");
-  if (club.scope === "COLLEGE" && !club.collegeId) gaps.push("College");
-  if (club.type === "SPONSORED" && !club.departmentId && !club.requestedDepartmentName) gaps.push("Sponsoring department");
-  // WSUSA's category; the College Ambassadors orgs admins create don't need one.
-  if ("category" in club && !club.category && club.type !== "COLLEGE_AMBASSADORS") gaps.push("Category");
-  return gaps;
-}
+/** Pure, in lib/clubs/profile-rules, so the renewal checks and the seed use the same rule. */
+export { profileGaps };
 
 async function checkReferences(v: { scope: string; collegeId: string | null; departmentId: string | null; focusMajorId: string | null }) {
   if (v.scope === "COLLEGE") {

@@ -1,5 +1,6 @@
 import type { ClubScope, ClubStatus, ClubType } from "@prisma/client";
 import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, CLUB_TYPES, STANDING_HINT, STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
+import { GAP_LABEL } from "@/lib/staffing/rules";
 
 /**
  * The admin club-analytics table: one row per club, with filters, sorting and
@@ -38,6 +39,9 @@ export type ClubAnalyticsRow = {
   /** Clubs it shares cross-club attendance with in the last 12 months, and the total of those lines. */
   connections: number;
   crossCheckins: number;
+  /** People in a President seat now, and the club's current advisors. */
+  presidents: number;
+  advisors: number;
 };
 
 /** Type names (lib/labels/clubs), under the name analytics code imports. */
@@ -73,6 +77,25 @@ export function stageOf(status: ClubStatus, activity: { active: boolean; inPilot
   return "founding";
 }
 
+// ─── Leaders ─────────────────────────────────────────────────────────────────
+
+/** The leaders an approved club can be missing (lib/staffing/rules' first two gaps): the No President and No advisor filters. */
+export type MissingLeader = "president" | "advisor";
+
+export const MISSING_FILTERS: { key: MissingLeader; label: string }[] = [
+  { key: "president", label: GAP_LABEL.president },
+  { key: "advisor", label: GAP_LABEL.advisor },
+];
+
+/** What an approved club is missing right now. Founding, retired and rejected clubs aren't counted. */
+export function missingLeaders(row: Pick<ClubAnalyticsRow, "status" | "presidents" | "advisors">): MissingLeader[] {
+  if (row.status !== "APPROVED") return [];
+  const out: MissingLeader[] = [];
+  if (row.presidents === 0) out.push("president");
+  if (row.advisors === 0) out.push("advisor");
+  return out;
+}
+
 // ─── Filters & sorting ──────────────────────────────────────────────────────
 
 export type SortKey = "name" | "stage" | "registered" | "active" | "retention" | "attendance" | "events" | "rating" | "connections";
@@ -86,6 +109,8 @@ export type TableFilters = {
   college: string | null;
   type: ClubType | null;
   stage: StageFilter | null;
+  /** Approved clubs with no President, or with no advisor. */
+  missing: MissingLeader | null;
   sort: SortKey;
   dir: SortDir;
 };
@@ -100,7 +125,7 @@ export function defaultDir(sort: SortKey): SortDir {
   return WORD_SORTS.includes(sort) ? "asc" : "desc";
 }
 
-export const DEFAULT_FILTERS: TableFilters = { q: "", college: null, type: null, stage: null, sort: "name", dir: "asc" };
+export const DEFAULT_FILTERS: TableFilters = { q: "", college: null, type: null, stage: null, missing: null, sort: "name", dir: "asc" };
 
 type ParamSource = URLSearchParams | Record<string, string | string[] | undefined>;
 function read(src: ParamSource, key: string): string | null {
@@ -117,6 +142,7 @@ export function parseTableFilters(src: ParamSource): TableFilters {
     college: read(src, "college") || null,
     type: TYPES.find((t) => t === read(src, "type")) ?? null,
     stage: STAGE_FILTERS.find((s) => s === read(src, "status")) ?? null,
+    missing: MISSING_FILTERS.find((m) => m.key === read(src, "missing"))?.key ?? null,
     sort,
     dir: dirRaw === "asc" || dirRaw === "desc" ? dirRaw : defaultDir(sort),
   };
@@ -129,13 +155,14 @@ export function filtersToQuery(f: TableFilters): string {
   if (f.college) p.set("college", f.college);
   if (f.type) p.set("type", f.type);
   if (f.stage) p.set("status", f.stage);
+  if (f.missing) p.set("missing", f.missing);
   if (f.sort !== DEFAULT_FILTERS.sort) p.set("sort", f.sort);
   if (f.dir !== defaultDir(f.sort)) p.set("dir", f.dir);
   return p.toString();
 }
 
 export function hasFilters(f: TableFilters) {
-  return Boolean(f.q || f.college || f.type || f.stage);
+  return Boolean(f.q || f.college || f.type || f.stage || f.missing);
 }
 
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -147,6 +174,7 @@ export function filterRows(rows: ClubAnalyticsRow[], f: TableFilters): ClubAnaly
     if (f.college && (f.college === "none" ? r.collegeId !== null : r.collegeId !== f.college)) return false;
     if (f.type && r.type !== f.type) return false;
     if (f.stage === "approved" ? r.status !== "APPROVED" : f.stage && r.stage !== f.stage) return false;
+    if (f.missing && !missingLeaders(r).includes(f.missing)) return false;
     return true;
   });
 }
@@ -214,6 +242,8 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       "Reviews",
       "Connected clubs (12 months)",
       "Cross-club check-ins (12 months)",
+      "Presidents",
+      "Advisors",
       "Club page",
     ],
     ...rows.map((r) => [
@@ -230,6 +260,8 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       r.reviews,
       r.connections,
       r.crossCheckins,
+      r.presidents,
+      r.advisors,
       link(`/clubs/${r.slug}`),
     ]),
   ];

@@ -11,7 +11,8 @@ It keeps to what people need on the go:
   follow a club's calendar without joining.
 - **Calendar** — your subscribed clubs (plus university events if you follow
   them), grouped by day.
-- **Inbox** — your notifications, and push notifications on the phone.
+- **Notifications** — your notifications, and push notifications on the phone
+  (join approvals, announcements, event changes, reminders before events).
 - **Me** — attendance in every club, your roles, settings and sign-out.
 
 Everything else (leader tools, budgets, tests, messages, reviews) opens the web
@@ -115,16 +116,52 @@ an event until 30 minutes after it ends).
 
 The app asks for notification permission right after you sign in and registers
 the phone's Expo push token with the server (`POST /api/m/push-token`). The
-server sends through Expo's push service once a sysadmin switches **Push** on in
-System settings; until then pushes land in the outbox (`/system/outbox`) so you
-can see what would have been sent. Tapping a notification opens the matching
-screen (club, event, calendar, inbox, check-in) or the web page for anything the
-app doesn't do.
+server sends through Expo's push service once a sysadmin switches **Push** on;
+until then pushes land in the outbox (`/system/outbox`) so you can see what
+would have been sent. Pushed: join approvals, announcements, event changes and
+cancellations, reminders about an hour before events (each person's **Remind me
+before events** switch in Settings → Notifications), and WSUSA requirements due
+in a week or a day. Tapping a notification opens the matching screen (club,
+event, calendar, notifications, check-in) or the web page for anything the app
+doesn't do.
 
-Getting a push token needs an **EAS project id**. Run `npx eas-cli@latest init`
-once — it adds `extra.eas.projectId` to `app.json`. Without it (and in the web
-preview, or Expo Go on Android, which can't receive pushes) the app skips push
-quietly and Me → Settings says why; the in-app inbox still works.
+### One-time setup
+
+Push needs all three of these. Until then the web's Settings → Notifications
+says what's missing, and the app's Me → Settings says why the phone can't
+register; the Notifications tab works either way.
+
+1. **Create the Expo (EAS) project.** Whoever holds the university's Expo
+   account runs, once:
+
+   ```bash
+   cd apps/mobile
+   npx eas-cli@latest login
+   npx eas-cli@latest init    # creates the project on expo.dev and shows its id
+   ```
+
+   `app.config.ts` is a dynamic config, so `eas init` may ask you to add the
+   id yourself instead of writing it (step 2).
+2. **Put in the project id** (a UUID), one of two ways:
+   - `EXPO_PUBLIC_EAS_PROJECT_ID=<id>` in `apps/mobile/.env.local` (git ignores
+     it) for local builds, plus the same variable in each EAS environment you
+     build from (`npx eas-cli@latest env:set --name EXPO_PUBLIC_EAS_PROJECT_ID
+     --value <id> --environment production --visibility plaintext`; repeat with
+     `development` and `preview`). It must be plain text or sensitive, not
+     secret, because EAS reads it while it resolves `app.config.ts`. Or:
+   - `"extra": { "eas": { "projectId": "<id>" } }` under `expo` in `app.json`.
+     It's a public identifier, so it can be committed.
+
+   `app.config.ts` copies it into `extra.eas.projectId`, where the app
+   (`src/lib/push.ts`) and EAS look for it. Check with
+   `npx expo config --type public`.
+3. **Turn on Push** on the web: sign in as a sysadmin → **System → AI &
+   integrations → Email and push → Push**. Expo's push service needs no key.
+
+Then use a development or store build (Expo Go on Android can't receive
+pushes; iOS and Android each need their push credentials, below), sign in and
+allow notifications. Settings → Notifications on the web then says push
+notifications reach your phone.
 
 **Android also needs Firebase (FCM)** — without it Android builds get no push
 token (Me → Settings shows the Firebase error):
@@ -147,7 +184,7 @@ On iOS, the first `eas build` offers to create the Apple push key; say yes.
 ```bash
 npm install -g eas-cli          # or use npx eas-cli@latest
 eas login
-eas init                        # links the project, sets extra.eas.projectId
+eas init                        # links the project (then step 2 of Push notifications → One-time setup)
 eas build:configure             # creates eas.json
 eas build --profile development --platform ios   # a dev build (Google sign-in, push)
 eas build --platform all        # store builds
@@ -170,7 +207,7 @@ Before a store release:
 
 ```
 src/app/              screens (expo-router)
-  (tabs)/             Home, Scan, Clubs, Calendar, Inbox, Me
+  (tabs)/             Home, Scan, Clubs, Calendar, Notifications (inbox.tsx), Me
   welcome.tsx         sign in (Google / test personas)
   c/[code].tsx        the check-in flow (scan, typed code, pop-up, deep link)
   club/[slug].tsx     a club: Register / Subscribe, events, your attendance, pop-up

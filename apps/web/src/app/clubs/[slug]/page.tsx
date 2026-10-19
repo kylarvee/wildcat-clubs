@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Archive, CalendarX2, Hammer, History, Mail } from "lucide-react";
+import { Archive, BadgeCheck, CalendarX2, Hammer, History, Mail } from "lucide-react";
 import { loadVisibleClub } from "@/lib/clubs/context";
 import { clubMeetingPattern, clubMetricsFor, clubUpcomingEvents, shouldPromptForApp, viewerClubStates, visibleAnnouncementCount } from "@/lib/clubs/queries";
 import { getConfig } from "@/lib/config";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtLongDate } from "@/lib/time";
+import { renewedThisYear } from "@/lib/domain/renewals";
 import { richToText } from "@/lib/rich/sanitize";
 import { ClubAnnouncements } from "@/components/announcements/ClubAnnouncements";
 import { ClubAttendanceRecord } from "@/components/attendance/ClubAttendanceRecord";
@@ -57,7 +58,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
   const isPublic = approved || retired;
   const member = Boolean(access?.isMember);
 
-  const [states, promptForApp, metrics, events, announcementCount, cfg, meets] = await Promise.all([
+  const [states, promptForApp, metrics, events, announcementCount, cfg, meets, renewal] = await Promise.all([
     user ? viewerClubStates(user.id) : Promise.resolve(null),
     user && approved ? shouldPromptForApp(user.id) : Promise.resolve(false),
     clubMetricsFor(club.id),
@@ -65,6 +66,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
     visibleAnnouncementCount(club.id, access),
     getConfig(),
     approved ? clubMeetingPattern(club.id, user) : Promise.resolve([] as string[]),
+    approved ? renewedThisYear(club.id) : Promise.resolve(null),
   ]);
   const links = readSocialLinks(club.socialLinks);
   const subscribed = Boolean(states?.get(club.id)?.subscribed);
@@ -129,7 +131,20 @@ export default async function ClubPage({ params, searchParams }: Props) {
           },
         ]
       : []),
-    { label: approved || retired ? "Approved by WSUSA" : "Started", value: fmtLongDate(club.approvedAt ?? club.createdAt) },
+    {
+      label: approved || retired ? "Approved by WSUSA" : "Started",
+      value: (
+        <>
+          {fmtLongDate(club.approvedAt ?? club.createdAt)}
+          {/* The yearly renewal (lib/domain/renewals), only once the club has renewed for this academic year. */}
+          {renewal ? (
+            <span className="mt-0.5 flex items-center gap-1 text-ink-3" title={`Renewed with WSUSA on ${fmtLongDate(renewal.at)}`}>
+              <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" /> Re-registered {renewal.year}
+            </span>
+          ) : null}
+        </>
+      ),
+    },
   ];
 
   return (

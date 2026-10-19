@@ -1,0 +1,111 @@
+/**
+ * Every notification kind the code sends, once: the `kind` of each
+ * lib/domain/notify call ("event.changed", "requirement.due_soon"). Pure and
+ * import-free, so the seed's verify.ts can read it too.
+ *
+ * catalog.test.ts reads the source and fails on a kind sent without an entry
+ * here, and on an entry nothing sends; prisma/seed/verify.ts fails on a seeded
+ * notification of any other kind, so the test bells only show what the app
+ * really sends. Icons live in kinds.ts.
+ */
+export const NOTIFICATION_KINDS = [
+  "advisor.accepted",
+  "advisor.declined",
+  "advisor.invited",
+  "ambassador.advisor_set",
+  "ambassador.placed",
+  "ambassador.placement_ended",
+  "ambassador.request_declined",
+  "ambassador.requested",
+  "announcement.new",
+  "attendance.added",
+  "club.approved",
+  "club.changes_requested",
+  "club.department_added",
+  "club.google_account_verified",
+  "club.reinstated",
+  "club.rejected",
+  "club.renewal_due",
+  "club.renewed",
+  "club.retired",
+  "club.submitted",
+  "complaint.new",
+  "complaint.received",
+  "complaint.updated",
+  "constitution.adopted",
+  "constitution.custom_approved",
+  "constitution.custom_rejected",
+  "constitution.custom_submitted",
+  "election.accepted",
+  "election.applied",
+  "election.cancelled",
+  "election.candidate_added",
+  "election.created",
+  "election.next_in_line",
+  "election.nominated",
+  "election.nominations_open",
+  "election.proposal_declined",
+  "election.proposal_withdrawn",
+  "election.proposed",
+  "election.results",
+  "election.voting_opened",
+  "election.withdrawn",
+  "event.cancelled",
+  "event.changed",
+  "event.cohost_added",
+  "event.cohost_approved",
+  "event.cohost_cancelled",
+  "event.cohost_changed",
+  "event.cohost_declined",
+  "event.cohost_request",
+  "event.starting_soon",
+  "file.shared",
+  "funding.approved",
+  "funding.denied",
+  "funding.partially_approved",
+  "funding.submitted",
+  "funding.withdrawn",
+  "invoice.created",
+  "invoice.processed",
+  "membership.approved",
+  "membership.declined",
+  "membership.requested",
+  "message.group_added",
+  "message.new",
+  "profile.alumni",
+  "project.added",
+  "requirement.assigned",
+  "requirement.due_soon",
+  "requirement.overdue",
+  "review.bombing",
+  "review.flagged",
+  "review.hidden",
+  "review.unlocked",
+  "role.assigned",
+  "role.ended",
+  "role.handoff",
+  "role.vacated",
+  "staffing.gap",
+  "system.admin_granted",
+  "system.admin_revoked",
+  "system.sysadmin_granted",
+  "system.sysadmin_revoked",
+  "task.assigned",
+  "task.completed",
+  "test.assigned",
+  "test.automation",
+  "test.completed",
+  "test.failed",
+  "test.missed",
+  "test.permissions_paused",
+  "test.permissions_resumed",
+] as const;
+
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+const KINDS = new Set<string>(NOTIFICATION_KINDS);
+
+/** Is this a kind the code sends? */
+export function isNotificationKind(kind: string): kind is NotificationKind {
+  return KINDS.has(kind);
+}

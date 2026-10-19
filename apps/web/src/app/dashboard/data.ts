@@ -5,6 +5,7 @@ import type { Actor } from "@/lib/auth/session";
 import { can, isAdmin, ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
 import { eventVisibilityWhere } from "@/lib/authz/events";
 import { listTasks } from "@/lib/domain/tasks";
+import { wsusaQueue, type QueueRow } from "@/lib/analytics/admin";
 import { clubLeaderCompliance, requirementsOverview } from "@/lib/domain/requirements";
 import { feedOccurrences, viewerContext, type FeedOccurrence, type ViewerContext } from "@/lib/events/feed";
 import { shortLocationText } from "@/lib/events/labels";
@@ -33,8 +34,6 @@ export type DashClub = {
   /** The club's next meeting (the next date of any repeating event: meetings, practices…) the viewer may see. */
   nextMeeting: Date | null;
 };
-
-export type AdminQueueRow = { key: string; label: string; href: string; count: number; urgent: boolean };
 
 /** One line of "Coming up": an event, or (admins) a requirement deadline. */
 export type AgendaItem = {
@@ -103,36 +102,9 @@ async function myClubs(user: Actor, ctx: ViewerContext, now: Date): Promise<Dash
   return clubs.sort((a, b) => Number(b.leads) - Number(a.leads) || Number(a.pending) - Number(b.pending) || a.name.localeCompare(b.name));
 }
 
-/** WSUSA's shared queue, counted by what it is and where it's handled. */
-async function adminQueue(): Promise<AdminQueueRow[]> {
-  const [rows, reports] = await Promise.all([
-    db.task.groupBy({ by: ["sourceType", "kind"], where: { assigneeType: "ADMINS", status: "OPEN" }, _count: { _all: true } }),
-    db.complaint.count({ where: { status: "NEW" } }),
-  ]);
-  const buckets: Record<string, { label: string; href: string; urgent?: boolean }> = {
-    club: { label: "Club submissions to review", href: "/admin/clubs?tab=submissions" },
-    clubDocument: { label: "Custom constitutions & bylaws", href: "/admin/clubs?tab=documents" },
-    departmentRequest: { label: "Departments to add", href: "/admin/clubs?tab=departments" },
-    // No admin list shows these; each task links to its club's Google account section.
-    googleAccount: { label: "Club Google accounts to verify", href: "/tasks?kind=APPROVAL" },
-    funding: { label: "Funding requests", href: "/admin/funding" },
-    invoice: { label: "Invoices to process", href: "/admin/funding" },
-    testAttempt: { label: "Test answers to grade", href: "/tasks?kind=APPROVAL" },
-    reviewBombing: { label: "Possible review bombing", href: "/admin/reviews", urgent: true },
-    reviewFlag: { label: "Reported reviews", href: "/admin/reviews", urgent: true },
-  };
-  const out = new Map<string, AdminQueueRow>();
-  for (const r of rows) {
-    const key = r.sourceType && buckets[r.sourceType] ? r.sourceType : "other";
-    const b = buckets[key] ?? { label: "Other WSUSA tasks", href: "/tasks" };
-    const cur = out.get(key);
-    if (cur) cur.count += r._count._all;
-    else out.set(key, { key, label: b.label, href: b.href, count: r._count._all, urgent: Boolean(b.urgent) });
-  }
-  // Reports are confidential; the dashboard shows only how many are new.
-  if (reports) out.set("complaints", { key: "complaints", label: "New reports of concerns", href: "/admin/complaints", count: reports, urgent: true });
-  const order = [...Object.keys(buckets), "complaints", "other"];
-  return [...out.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+/** WSUSA's shared queue: the rows of lib/analytics/admin's wsusaQueue (the admin Overview's too) that have something waiting. */
+async function adminQueue(): Promise<QueueRow[]> {
+  return (await wsusaQueue()).rows.filter((r) => r.count > 0);
 }
 
 function toAgendaItem(o: FeedOccurrence, ctx: ViewerContext): AgendaItem {
@@ -168,7 +140,7 @@ export async function loadDashboard(user: Actor) {
     myClubs(user, ctx, now),
     listTasks(user, { status: "OPEN", take: 300 }),
     getTerms(),
-    admin ? adminQueue() : Promise.resolve([] as AdminQueueRow[]),
+    admin ? adminQueue() : Promise.resolve([] as QueueRow[]),
     admin && (can(user, "admin.tests") || can(user, "admin.trainings")) ? requirementsOverview(user, now) : Promise.resolve(null),
   ]);
 

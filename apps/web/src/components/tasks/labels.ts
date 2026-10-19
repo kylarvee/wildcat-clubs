@@ -47,7 +47,7 @@ export const KIND_TONE: Record<TaskKind, Tone> = {
 /** Why there's no checkbox: these close when the underlying thing is done. */
 export const SELF_CLOSING_NOTE: Partial<Record<TaskKind, string>> = {
   APPROVAL: "Closes on its own once a decision is made — open it to approve or decline.",
-  REQUIREMENT: "Closes on its own once it's done: you pass the test, submit the form, check in at the training or confirm your details.",
+  REQUIREMENT: "Closes on its own once it's done: you pass the test, submit the form, check in at the training, confirm your details or renew your club.",
   TEST: "Closes on its own once you pass the test or submit the form.",
   INVOICE: "Closes on its own when the invoice is marked processed.",
 };

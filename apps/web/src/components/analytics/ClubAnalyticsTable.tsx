@@ -7,13 +7,16 @@ import type { ClubType } from "@prisma/client";
 import {
   CLUB_TYPE_NAMES,
   DEFAULT_FILTERS,
+  MISSING_FILTERS,
   STAGES,
   defaultDir,
   filterRows,
   filtersToQuery,
   hasFilters,
+  missingLeaders,
   sortRows,
   type ClubAnalyticsRow,
+  type MissingLeader,
   type SortKey,
   type StageFilter,
   type TableFilters,
@@ -27,6 +30,7 @@ import { StageBadge } from "./StageBadge";
 const fmt = (n: number) => n.toLocaleString("en-US");
 const pct = (r: number | null) => (r === null ? null : `${Math.round(r * 100)}%`);
 const NONE = <span className="text-ink-3">—</span>;
+const missingLabel = (k: MissingLeader) => MISSING_FILTERS.find((m) => m.key === k)!.label;
 
 type Column = { key: SortKey; label: string; sub?: string; numeric?: boolean; className?: string };
 
@@ -127,6 +131,14 @@ export function ClubAnalyticsTable({
             </option>
           ))}
         </FilterSelect>
+        <FilterSelect id={`${ids}-missing`} label="Leaders" value={f.missing ?? ""} onChange={(v) => set({ missing: (v || null) as MissingLeader | null })}>
+          <option value="">Any</option>
+          {MISSING_FILTERS.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </FilterSelect>
         {hasFilters(f) ? (
           <Button variant="ghost" size="sm" className="h-9" onClick={() => setF({ ...DEFAULT_FILTERS, sort: f.sort, dir: f.dir })}>
             <X className="h-4 w-4" aria-hidden="true" /> Clear filters
@@ -202,6 +214,7 @@ export function ClubAnalyticsTable({
             <tbody className="divide-y divide-line">
               {shown.map((r) => {
                 const live = r.status === "APPROVED" || r.status === "RETIRED";
+                const missing = missingLeaders(r);
                 return (
                   <tr key={r.id} className="group hover:bg-muted/40">
                     <th scope="row" className="sticky left-0 z-[1] w-[13.5rem] max-w-[13.5rem] bg-surface py-2.5 pl-4 pr-2 text-left font-normal group-hover:bg-[#faf9fb]">
@@ -214,6 +227,7 @@ export function ClubAnalyticsTable({
                     </th>
                     <td className="whitespace-nowrap px-2 py-2.5">
                       <StageBadge row={r} />
+                      {missing.length ? <span className="mt-1 block text-xs text-ink-3">{missing.map(missingLabel).join(" · ")}</span> : null}
                     </td>
                     <Num>{fmt(r.registered)}</Num>
                     <Num>{live ? fmt(r.active) : NONE}</Num>
@@ -250,6 +264,7 @@ export function ClubAnalyticsTable({
       <p className="text-xs leading-relaxed text-ink-3">
         This term is {term}. Attending members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention compares the last full month with the one before.
         Attendance is the average share of members at each event with check-ins. Connections count members of one club checking in at another&rsquo;s events.
+        No President and No advisor list approved clubs with nobody in a President seat, or without a faculty or staff advisor, right now.
       </p>
     </div>
   );

@@ -253,13 +253,14 @@ function NotificationsSetting() {
         <View style={styles.flex}>
           <Text variant="label">Push notifications on this phone</Text>
           <Text variant="small" tone="ink3">
+            {/* "Registered", not "you'll get": delivery also waits on the server's Push switch (System → AI & integrations). */}
             {on
-              ? 'Join approvals, announcements and event reminders.'
+              ? 'This phone is registered for join approvals, announcements, event changes and reminders before events.'
               : push.kind === 'denied'
                 ? 'Notifications are blocked for Wildcat Clubs in your phone’s settings.'
                 : unavailable
                   ? push.reason
-                  : 'Off. Your notifications in the app still update.'}
+                  : 'Off. The Notifications tab still updates.'}
           </Text>
         </View>
         <Toggle value={on} onValueChange={(v) => void toggle(v)} disabled={busy || unavailable || (push.kind === 'denied' && !push.canAskAgain)} accessibilityLabel="Push notifications on this phone" />

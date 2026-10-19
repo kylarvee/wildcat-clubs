@@ -138,6 +138,8 @@ model User {
   emailNotifications   Boolean          @default(true)
   appPromptDismissedAt DateTime?
   hasMobileApp         Boolean          @default(false)
+  /// "Remind me before events" (Settings → Notifications): event reminders from the scheduled jobs.
+  eventReminders       Boolean          @default(true)
   createdAt            DateTime         @default(now())
   lastSeenAt           DateTime?
   /// Private member details (Settings → Member details), entered once and reused for every club.
@@ -195,6 +197,7 @@ model User {
   clubDecisions       ClubDecision[]
   cohostRequests      EventCohost[]          @relation("CohostRequester")
   cohostDecisions     EventCohost[]          @relation("CohostDecider")
+  clubRenewals        ClubRenewal[]          @relation("ClubRenewalSubmitter")
 }
 
 model UserMajor {
@@ -373,6 +376,7 @@ model Club {
   /// Any change to the club row; the search index (lib/search) uses it to know what's stale.
   updatedAt                 DateTime         @default(now()) @updatedAt
   searchDoc                 ClubSearchDoc?
+  renewals                  ClubRenewal[]
   submittedAt               DateTime?
   approvedAt                DateTime?
   retiredAt                 DateTime?
@@ -1654,4 +1658,32 @@ model SearchQuery {
   at       DateTime @default(now())
 
   @@index([at])
+}
+
+/// A club's yearly renewal with WSUSA ("Re-registered 2026–27"). One per club
+/// per academic year; written only by domain/renewals.
+model ClubRenewal {
+  id            String   @id @default(cuid())
+  clubId        String
+  club          Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  /// The academic year renewed for, as lib/terms labels it (e.g. "2026–27").
+  academicYear  String
+  submittedById String?
+  submittedBy   User?    @relation("ClubRenewalSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedAt   DateTime @default(now())
+  /// The computed checks when the club renewed: [{ key, label, ok, detail }]
+  checks        Json     @default("[]")
+  note          String?
+
+  @@unique([clubId, academicYear])
+  @@index([academicYear])
+}
+
+/// One row per reminder the scheduled jobs already sent, so none goes out twice.
+/// Keys like "event:<occurrenceId>", "task:<taskId>:7d", "review:<userId>:<clubId>".
+model ReminderLog {
+  key    String   @id
+  sentAt DateTime @default(now())
+
+  @@index([sentAt])
 }

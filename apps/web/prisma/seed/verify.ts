@@ -2,12 +2,17 @@
  * Read-only checks that the mock database still matches the persona guide and
  * the platform's rules. Run after seeding:  npx tsx prisma/seed/verify.ts
  */
-import { PrismaClient, type ClubRole } from "@prisma/client";
+import { PrismaClient, type ClubRole, type Prisma } from "@prisma/client";
 import { PERSONAS } from "@/lib/auth/personas";
 import { awaitingGrade, requirementState as ruleState } from "@/lib/authz/requirement-rules";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
 import { unanimousChoice } from "@/lib/roles/pipeline";
+import { loadRenewalStates } from "@/lib/renewals/facts";
+import { isRequiredCheck, readSnapshot, RENEWAL_SOURCE, renewalSourceId, renewalTaskTitle, renewalTerm, renewalWindow } from "@/lib/renewals/rules";
+import { fmtLongDate } from "@/lib/time";
+import { ORPHAN_REQUEST_DAYS, ORPHAN_REQUESTS_SOURCE, parseStaffingSourceId, seatApproves, STAFFING_SOURCE } from "@/lib/staffing/rules";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
+import { NOTIFICATION_KINDS } from "@/components/notifications/catalog";
 
 const db = new PrismaClient();
 // Must match the seed run (SEED_NOW pins both).
@@ -141,11 +146,15 @@ async function clubChecks() {
   const storyMissing = story.filter((d) => !held(bySlug.get(d.slug)!.id, "PRESIDENT") || !held(bySlug.get(d.slug)!.id, "ADVISOR"));
   check(storyMissing.length === 0, "Every approved story club has a current president and advisor", storyMissing.map((d) => d.name).join(", "));
   const listed = CLUBS.filter((d) => !d.story && d.life !== "dormant");
+  // The staffing story's club (steps/inbox) lost its President a few days ago, so it holds one fewer than the list shows.
+  const staffingTask = await db.task.findFirst({ where: { sourceType: STAFFING_SOURCE, status: "OPEN" }, select: { sourceId: true } });
+  const lostPresident = parseStaffingSourceId(staffingTask?.sourceId)?.clubId ?? null;
   const offList = listed.filter((d) => {
     const id = bySlug.get(d.slug)!.id;
     const plan = d.seatPlan ?? {};
     const officers = Object.entries(plan).filter(([k]) => k !== "President" && k !== "Vice President").reduce((n, [, v]) => n + v, 0);
-    return held(id, "PRESIDENT") !== (plan.President ?? 0) || held(id, "VP") !== (plan["Vice President"] ?? 0) || held(id, "OFFICER") !== officers || held(id, "ADVISOR") !== (d.advisors ?? 0);
+    const presidents = (plan.President ?? 0) - (id === lostPresident ? 1 : 0);
+    return held(id, "PRESIDENT") !== presidents || held(id, "VP") !== (plan["Vice President"] ?? 0) || held(id, "OFFICER") !== officers || held(id, "ADVISOR") !== (d.advisors ?? 0);
   });
   check(offList.length === 0, `Directory clubs with members have the officers and advisors the list shows (${listed.length} clubs)`, offList.map((d) => d.name).join(", "));
   const members = await db.membership.groupBy({ by: ["clubId"], where: { status: "ACTIVE", user: { kind: "STUDENT" } }, _count: true });
@@ -272,6 +281,180 @@ async function ambassadorChecks() {
   }
 }
 
+/**
+ * WSUSA's staffing queue (lib/domain/staffing, steps/inbox staffingStory): one
+ * club that just lost its President, one gated club whose join request nobody
+ * can approve, nothing backfilled, and the queue's counts matching each admin
+ * tool's own list (lib/analytics/admin wsusaQueue counts the open tasks).
+ */
+async function staffingChecks() {
+  const open = await db.task.findMany({ where: { sourceType: { in: [STAFFING_SOURCE, ORPHAN_REQUESTS_SOURCE] }, status: "OPEN" }, include: { club: true } });
+  const staffing = open.filter((t) => t.sourceType === STAFFING_SOURCE);
+  const gap = parseStaffingSourceId(staffing[0]?.sourceId);
+  check(
+    staffing.length === 1 && gap?.gap === "president" && staffing[0].assigneeType === "ADMINS" && staffing[0].kind === "APPROVAL",
+    "One open WSUSA staffing task, for a club with no President (clubs that were already leaderless get none)",
+    staffing.map((t) => t.title).join(", "),
+  );
+  const sc = staffing[0]?.club;
+  if (gap && sc) {
+    const [presidents, advisors, last] = await Promise.all([
+      db.roleAssignment.count({ where: { clubId: sc.id, role: "PRESIDENT", endedAt: null } }),
+      db.roleAssignment.count({ where: { clubId: sc.id, role: "ADVISOR", endedAt: null } }),
+      db.roleAssignment.findFirst({ where: { clubId: sc.id, role: "PRESIDENT", endedAt: { not: null } }, orderBy: { endedAt: "desc" } }),
+    ]);
+    const ago = last?.endedAt ? (NOW.getTime() - last.endedAt.getTime()) / DAY : null;
+    check(sc.status === "APPROVED" && presidents === 0 && advisors >= 1 && staffing[0].title === `${sc.name} has no President`, `${sc.name} has no President now but still has an advisor, and the task says so`);
+    check(last?.endReason === "RESIGNED" && ago !== null && ago > 2 && ago < 5, "…its President stepped down a few days ago", ago === null ? "" : `${ago.toFixed(1)} days ago`);
+    const told = await db.notification.count({ where: { kind: "staffing.gap", href: `/clubs/${sc.slug}/manage/org-chart` } });
+    check(told >= 1, "…and its remaining leaders got the in-app notice", `${told} told`);
+  }
+
+  const cutoff = new Date(NOW.getTime() - ORPHAN_REQUEST_DAYS * DAY);
+  const approverIn = async (clubId: string) =>
+    (await db.roleAssignment.findMany({ where: { clubId, endedAt: null, user: { status: "ACTIVE" } }, select: { role: true, permissions: true } })).some(seatApproves);
+  const orphans = open.filter((t) => t.sourceType === ORPHAN_REQUESTS_SOURCE);
+  const oc = orphans[0]?.club;
+  check(orphans.length === 1 && Boolean(oc) && orphans[0].title === `Join requests waiting at ${oc!.name}`, 'One open "Join requests waiting at …" task', orphans.map((t) => t.title).join(", "));
+  if (oc) {
+    const old = await db.membership.count({ where: { clubId: oc.id, status: "PENDING", requestedAt: { lt: cutoff } } });
+    check(oc.status === "APPROVED" && oc.joinPolicy === "APPROVAL" && old >= 1 && !(await approverIn(oc.id)), `${oc.name} approves each join request, nobody there can, and a request has waited over a week`);
+  }
+  // The scheduled job would flag the same clubs: no other week-old request is waiting where nobody can approve it.
+  const waiting = await db.membership.groupBy({ by: ["clubId"], where: { status: "PENDING", requestedAt: { lt: cutoff }, club: { status: "APPROVED" } } });
+  const stuck: string[] = [];
+  for (const g of waiting) if (!(await approverIn(g.clubId))) stuck.push(g.clubId);
+  check(stuck.length === 1 && stuck[0] === oc?.id, "No other club has a week-old join request nobody can approve", `${stuck.length} club(s)`);
+
+  // One WSUSA queue: the dashboard, the Overview and the side nav count open ADMINS tasks, which match each tool's own list.
+  const tasks = (sourceType: string) => db.task.count({ where: { assigneeType: "ADMINS", status: "OPEN", sourceType } });
+  const live: Prisma.ClubWhereInput = { status: { notIn: ["RETIRED", "REJECTED"] } };
+  const pairs: [string, number, number][] = [
+    ["Club submissions", await db.club.count({ where: { status: "SUBMITTED" } }), await tasks("club")],
+    ["Department requests", await db.club.count({ where: { ...live, requestedDepartmentName: { not: null }, departmentId: null } }), await tasks("departmentRequest")],
+    ["Custom constitutions & bylaws", await db.clubDocument.count({ where: { status: "PENDING_APPROVAL", club: live } }), await tasks("clubDocument")],
+    ["Funding requests", await db.fundingRequest.count({ where: { status: "SUBMITTED" } }), await tasks("funding")],
+    ["Invoices to process", await db.invoice.count({ where: { status: "OPEN" } }), await tasks("invoice")],
+    ["Test answers to grade", await db.testAttempt.count({ where: { status: "NEEDS_REVIEW", test: { clubId: null } } }), await tasks("testAttempt")],
+    ["New reports", await db.complaint.count({ where: { status: "NEW" } }), await tasks("complaint")],
+  ];
+  const off = pairs.filter(([, listedThere, open]) => listedThere !== open);
+  check(off.length === 0, "WSUSA's queue matches each admin tool's own list", off.map(([l, a, b]) => `${l}: ${a} listed, ${b} open tasks`).join("; "));
+}
+
+/**
+ * This academic year's club renewals (lib/renewals, steps/renewals): the old
+ * re-registration form is gone, about 60% of the active clubs renewed inside
+ * the window, each by a President, VP or advisor with every required check
+ * passing, the tasks are exactly what the "Club renewals" job keeps, and the
+ * story clubs: Wrecker Bots not renewed with one amber recommended check, SWE
+ * renewed by Vanessa, and a club with no advisor blocked.
+ */
+async function renewalChecks() {
+  const old = (await db.test.count({ where: { title: "Annual Club Re-registration" } })) + (await db.roleRequirement.count({ where: { name: "Annual Club Re-registration" } })) + (await db.task.count({ where: { title: { contains: "Re-registration" } } }));
+  check(old === 0, "The old Annual Club Re-registration form, its requirement and its tasks are gone");
+  const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+  // renewal.dueDays at its default: the seed clears SystemConfig.
+  const window = renewalWindow(terms, NOW, 30);
+  if (!window) return check(false, "There's a renewal window this academic year");
+  const states = await loadRenewalStates(db, { window, term: renewalTerm(terms, NOW), now: NOW });
+  const asked = states.filter((s) => !s.exemption);
+  const lifeOf = new Map(CLUBS.map((d) => [d.slug, d.life]));
+  const active = asked.filter((s) => ["active", "pilot"].includes(lifeOf.get(s.club.slug) ?? ""));
+  const renewedActive = active.filter((s) => s.renewal).length;
+  check(renewedActive >= active.length * 0.5 && renewedActive <= active.length * 0.7, `About 60% of the active clubs re-registered for ${window.year}`, `${renewedActive} of ${active.length}`);
+
+  const rows = await db.clubRenewal.findMany({ include: { club: { select: { name: true } } } });
+  const outside = rows.filter((r) => r.academicYear !== window.year || r.submittedAt < window.opensAt || r.submittedAt > window.dueAt || r.submittedAt > NOW);
+  check(rows.length > 0 && outside.length === 0, `Every renewal is for ${window.year} and inside its window`, outside.slice(0, 5).map((r) => r.club.name).join(", "));
+  const seats = await db.roleAssignment.findMany({ where: { clubId: { in: rows.map((r) => r.clubId) }, role: { in: ["PRESIDENT", "VP", "ADVISOR"] } }, select: { clubId: true, userId: true, startedAt: true, endedAt: true } });
+  const byOutsider = rows.filter((r) => !seats.some((a) => a.clubId === r.clubId && a.userId === r.submittedById && a.startedAt <= r.submittedAt && (!a.endedAt || a.endedAt > r.submittedAt)));
+  check(byOutsider.length === 0, "Each club was renewed by its President, a VP or an advisor at the time", byOutsider.slice(0, 5).map((r) => r.club.name).join(", "));
+  const badSnapshot = rows.filter((r) => {
+    const snap = readSnapshot(r.checks);
+    return snap.length !== 6 || snap.some((c) => isRequiredCheck(c.key) && !c.ok);
+  });
+  check(badSnapshot.length === 0, "Every renewal's snapshot has all six checks, every required one passing", badSnapshot.slice(0, 5).map((r) => r.club.name).join(", "));
+  const logs = await db.activityLog.findMany({ where: { action: "club.renewed" }, select: { clubId: true, actorId: true, isPublic: true } });
+  check(
+    logs.length === rows.length && logs.every((l) => l.isPublic) && rows.every((r) => logs.some((l) => l.clubId === r.clubId && l.actorId === r.submittedById)),
+    "One public club.renewed activity row per renewal",
+    `${logs.length} rows for ${rows.length} renewals`,
+  );
+
+  // The tasks are what the "Club renewals" job keeps (lib/jobs/renewals): one per current President and advisor until the club renews.
+  const tasks = await db.task.findMany({ where: { sourceType: RENEWAL_SOURCE }, include: { club: { select: { name: true } } } });
+  const offShape = tasks.filter((t) => t.kind !== "REQUIREMENT" || !t.required || t.dueAt?.getTime() !== window.dueAt.getTime() || t.sourceId !== renewalSourceId(t.clubId ?? "", window.year) || t.title !== renewalTaskTitle(t.club?.name ?? "", window.year));
+  check(tasks.length > 0 && offShape.length === 0, `Every renewal task is a required REQUIREMENT, "Renew <club> for ${window.year}", due ${fmtLongDate(window.dueAt)}`, `${offShape.length} of ${tasks.length} off`);
+  const wrong: string[] = [];
+  for (const s of states) {
+    const open = tasks.filter((t) => t.clubId === s.club.id && t.status === "OPEN").map((t) => t.assigneeId ?? "").sort();
+    const want = s.renewal || s.exemption ? [] : [...new Set([...s.presidents, ...s.advisors].map((p) => p.id))].sort();
+    if (open.join() !== want.join()) wrong.push(s.club.name);
+    else if (s.renewal && tasks.some((t) => t.clubId === s.club.id && t.status !== "DONE")) wrong.push(`${s.club.name} (renewed, task not done)`);
+  }
+  check(wrong.length === 0, "Clubs that haven't renewed have one open task per current President and advisor; renewed clubs' tasks are done", wrong.slice(0, 5).join(", "));
+  const unstaffed = asked.filter((s) => !s.renewal && !s.presidents.length && !s.advisors.length);
+  check(unstaffed.length >= 150 && unstaffed.every((s) => !tasks.some((t) => t.clubId === s.club.id)), "Approved clubs with nobody in the President's or advisor's seat get no task, and show as not renewed", `${unstaffed.length} clubs`);
+  const exempt = states.filter((s) => s.exemption);
+  check(exempt.every((s) => !s.renewal && !tasks.some((t) => t.clubId === s.club.id)), "Clubs approved this academic year aren't asked to renew until next year", exempt.map((s) => s.club.name).join(", "));
+
+  // Story clubs.
+  const of = (key: string) => states.find((s) => s.club.slug === clubByKey(key).slug);
+  const robotics = of("robotics");
+  const amber = robotics?.checks.filter((c) => !c.ok) ?? [];
+  check(
+    Boolean(robotics) && !robotics!.renewal && robotics!.blocking.length === 0 && amber.length === 1 && amber[0].key === "vicePresident",
+    `${robotics?.club.name ?? "RC Wrecker Bots Club"} hasn't renewed: every required check passes and one recommended check (a Vice President) is amber`,
+    amber.map((c) => c.key).join(", "),
+  );
+  const [priya, elena, vanessa] = await Promise.all([user("priya"), user("elena"), user("vanessa")]);
+  const roboticsOpen = tasks.filter((t) => t.clubId === robotics?.club.id && t.status === "OPEN").map((t) => t.assigneeId);
+  check(roboticsOpen.includes(priya.id) && roboticsOpen.includes(elena.id), "…and Priya and Dr. Alvarez both have its open renewal task");
+  const swe = of("swe");
+  check(swe?.renewal?.submittedBy?.id === vanessa.id, `${swe?.club.name ?? "SWE"} re-registered for ${window.year}, by Vanessa as VP`);
+  const micro = states.find((s) => s.club.name.startsWith("American Society of Microbiology"));
+  check(
+    Boolean(micro) && !micro!.renewal && micro!.presidents.length > 0 && micro!.blocking.map((c) => c.key).join() === "advisor",
+    `${micro?.club.name ?? "Microbiology Club"} can't renew: it has a President but no advisor (the blocking check)`,
+  );
+}
+
+/**
+ * Bells and reminders (components/notifications/catalog, lib/events/notices,
+ * lib/jobs/reminders): no notification kind exists only in the seed, the
+ * persona bells use the kinds the app sends now, Maya's event-changed notice
+ * is about a date that really changed, and nothing has been reminded or pushed
+ * yet (no phone is registered, and the Reminders job runs after seeding).
+ */
+async function notificationChecks() {
+  const sendable = new Set<string>(NOTIFICATION_KINDS);
+  const seeded = await db.notification.groupBy({ by: ["kind"], _count: { _all: true }, orderBy: { kind: "asc" } });
+  const seedOnly = seeded.filter((k) => !sendable.has(k.kind));
+  check(
+    seedOnly.length === 0,
+    `Every seeded notification is a kind the code can send (${seeded.length} of the ${NOTIFICATION_KINDS.length} in components/notifications/catalog)`,
+    seedOnly.length ? `seed only: ${seedOnly.map((k) => `${k.kind} ×${k._count._all}`).join(", ")}` : seeded.map((k) => k.kind).join(", "),
+  );
+
+  const maya = await user("maya");
+  const bell = await db.notification.findMany({ where: { userId: maya.id }, select: { kind: true, title: true, href: true } });
+  for (const kind of ["event.changed", "event.starting_soon", "review.unlocked"]) check(bell.some((n) => n.kind === kind), `Maya's bell has a notice of kind ${kind}`);
+  const changed = bell.find((n) => n.kind === "event.changed");
+  const occurrenceId = changed?.href ? new URL(changed.href, "http://seed.test").searchParams.get("o") : null;
+  const occ = occurrenceId ? await db.eventOccurrence.findUnique({ where: { id: occurrenceId }, include: { event: { select: { clubId: true, room: true } } } }) : null;
+  const follows = occ?.event.clubId ? await db.calendarSubscription.count({ where: { userId: maya.id, clubId: occ.event.clubId } }) : 0;
+  check(
+    Boolean(occ?.roomOverride && occ.roomOverride !== occ.event.room && occ.status === "SCHEDULED" && occ.startsAt > NOW && occ.startsAt <= new Date(NOW.getTime() + 14 * DAY) && follows),
+    "…about a date in the next two weeks, on a calendar she follows, that really has a new room",
+    changed?.title ?? "",
+  );
+
+  check((await db.pushToken.count()) === 0, "No phone is registered for push, so Settings → Notifications says how to get push notifications");
+  check((await db.reminderLog.count({ where: { OR: ["event:", "due:", "review:"].map((p) => ({ key: { startsWith: p } })) } })) === 0, "Nothing has been reminded yet (the Reminders job runs after seeding)");
+  check((await db.user.count({ where: { eventReminders: false } })) === 0, "Everyone starts with “Remind me before events” on");
+}
+
 async function main() {
   console.log("Personas");
   const sam = await user("sam");
@@ -379,8 +562,8 @@ async function main() {
     check((await db.eventCohost.count({ where: { clubId: c.id, status: "APPROVED", event: { clubId: robotics.id } } })) >= 3, `${robotics.name} co-hosts with ${label}`);
   }
   check(
-    (await db.task.count({ where: { assigneeId: priya.id, required: true, status: "OPEN", title: "Fill out: Annual Club Re-registration", clubId: robotics.id } })) === 1,
-    `Priya owes WSUSA's Annual Club Re-registration for ${robotics.name} (a required task)`,
+    (await db.task.count({ where: { assigneeId: priya.id, required: true, kind: "REQUIREMENT", status: "OPEN", sourceType: RENEWAL_SOURCE, clubId: robotics.id } })) === 1,
+    `Priya has the required task to renew ${robotics.name} for this academic year (its renewal card is checked under Renewals)`,
   );
   for (const k of ["priya", "vanessa"]) {
     const u = await user(k);
@@ -516,6 +699,15 @@ async function main() {
 
   await searchChecks();
   await ambassadorChecks();
+
+  console.log("Staffing");
+  await staffingChecks();
+
+  console.log("Renewals");
+  await renewalChecks();
+
+  console.log("Notifications");
+  await notificationChecks();
 
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();

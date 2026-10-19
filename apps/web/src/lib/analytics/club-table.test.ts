@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvRows, filterRows, filtersToQuery, parseTableFilters, sortRows, stageLabel, stageOf, type ClubAnalyticsRow } from "./club-table";
+import { csvRows, filterRows, filtersToQuery, missingLeaders, parseTableFilters, sortRows, stageLabel, stageOf, type ClubAnalyticsRow } from "./club-table";
 
 const row = (p: Partial<ClubAnalyticsRow>): ClubAnalyticsRow => ({
   id: p.name ?? "x",
@@ -21,14 +21,16 @@ const row = (p: Partial<ClubAnalyticsRow>): ClubAnalyticsRow => ({
   reviews: 2,
   connections: 3,
   crossCheckins: 40,
+  presidents: 1,
+  advisors: 1,
   ...p,
 });
 
 const rows = [
   row({ name: "Astronomy Club", retention: 0.9, registered: 8 }),
-  row({ name: "Béisbol Club", collegeId: null, collegeName: null, collegeShort: null, scope: "SPORTS", retention: null, type: "AFFILIATE" }),
-  row({ name: "Chess Club", stage: "inactive", retention: 0.2, registered: 30 }),
-  row({ name: "Drafty", status: "DRAFT", stage: "founding", retention: null, rating: null }),
+  row({ name: "Béisbol Club", collegeId: null, collegeName: null, collegeShort: null, scope: "SPORTS", retention: null, type: "AFFILIATE", advisors: 0 }),
+  row({ name: "Chess Club", stage: "inactive", retention: 0.2, registered: 30, presidents: 0, advisors: 0 }),
+  row({ name: "Drafty", status: "DRAFT", stage: "founding", retention: null, rating: null, presidents: 0, advisors: 0 }),
   row({ name: "Pilot Club", stage: "pilot", retention: 1 }),
 ];
 
@@ -67,6 +69,17 @@ describe("filters", () => {
     expect(filterRows(rows, { ...base, stage: "approved" }).map((r) => r.name)).toEqual(["Astronomy Club", "Béisbol Club", "Chess Club", "Pilot Club"]);
     expect(filterRows(rows, { ...base, stage: "inactive" }).map((r) => r.name)).toEqual(["Chess Club"]);
   });
+  it("finds approved clubs with no President or no advisor, leaving founding clubs out", () => {
+    const base = parseTableFilters({});
+    expect(filterRows(rows, { ...base, missing: "president" }).map((r) => r.name)).toEqual(["Chess Club"]);
+    expect(filterRows(rows, { ...base, missing: "advisor" }).map((r) => r.name)).toEqual(["Béisbol Club", "Chess Club"]);
+    expect(missingLeaders(rows[2])).toEqual(["president", "advisor"]);
+    expect(missingLeaders(rows[3])).toEqual([]);
+    const f = parseTableFilters(new URLSearchParams("missing=president&status=active"));
+    expect(f).toMatchObject({ missing: "president", stage: "active" });
+    expect(filtersToQuery(f)).toBe("status=active&missing=president");
+    expect(parseTableFilters({ missing: "treasurer" }).missing).toBeNull();
+  });
 });
 
 describe("sortRows", () => {
@@ -83,7 +96,8 @@ describe("csvRows", () => {
   it("writes percentages, blanks for missing data and full links", () => {
     const [header, first] = csvRows([rows[0], rows[3]], "Fall 2026", (p) => `https://clubs.example${p}`);
     expect(header).toContain("Average attendance rate (Fall 2026) (%)");
-    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, 60, 3, 4, 2, 3, 40, "https://clubs.example/clubs/club"]);
+    expect(header.slice(-3)).toEqual(["Presidents", "Advisors", "Club page"]);
+    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, 60, 3, 4, 2, 3, 40, 1, 1, "https://clubs.example/clubs/club"]);
     const draft = csvRows([rows[3]], null)[1];
     expect(draft[3]).toBe("Draft");
     expect(draft[6]).toBe("");

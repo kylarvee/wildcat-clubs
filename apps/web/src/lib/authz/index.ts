@@ -164,15 +164,8 @@ const computeClubAccess = cache(async (actorId: string | null, platformRole: str
     suspended = status.overdue;
   }
 
-  const caps = new Set<Capability>();
   const full = viaPlatform !== null || isAdvisor;
-  if (full || (!suspended && (role === "PRESIDENT" || role === "VP"))) {
-    ALL_CAPABILITIES.forEach((c) => caps.add(c));
-  } else if (!suspended) {
-    for (const a of assignments) for (const p of a.permissions) if (p in CAPABILITIES) caps.add(p as Capability);
-  }
-  const allowed = new Set(PHASE_CAPABILITIES[club.status]);
-  for (const c of [...caps]) if (!allowed.has(c)) caps.delete(c);
+  const caps = clubCapabilities({ clubStatus: club.status, role, assignments, full, suspended });
 
   const effective = suspended ? -1 : rank;
   const ranked: ClubRole[] =
@@ -204,6 +197,26 @@ const computeClubAccess = cache(async (actorId: string | null, platformRole: str
     canInviteAdvisor: club.status !== "RETIRED" && !ambassadorOrg && (full || ((role === "PRESIDENT" || role === "VP") && !suspended)),
   };
 });
+
+/**
+ * The capabilities roles give in a club, given whether the person's leader
+ * permissions are paused (getClubAccess's rule; the header's task count
+ * passes a pause read from stored tasks). Platform admins and advisors hold
+ * everything. Presidents and VPs hold everything unless paused. Other seats
+ * hold their own permissions unless paused. Then only what the club's phase
+ * allows.
+ */
+export function clubCapabilities(v: { clubStatus: ClubStatus; role: ClubRole | null; assignments: readonly { permissions: readonly string[] }[]; full: boolean; suspended: boolean }): Set<Capability> {
+  const caps = new Set<Capability>();
+  if (v.full || (!v.suspended && (v.role === "PRESIDENT" || v.role === "VP"))) {
+    ALL_CAPABILITIES.forEach((c) => caps.add(c));
+  } else if (!v.suspended) {
+    for (const a of v.assignments) for (const p of a.permissions) if (p in CAPABILITIES) caps.add(p as Capability);
+  }
+  const allowed = new Set(PHASE_CAPABILITIES[v.clubStatus]);
+  for (const c of [...caps]) if (!allowed.has(c)) caps.delete(c);
+  return caps;
+}
 
 /** Everything `actor` may do in a club. Cached per request. Null if the club doesn't exist. */
 export function getClubAccess(actor: Actor | null, clubId: string) {

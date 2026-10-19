@@ -128,7 +128,12 @@ export function PipelineSection({
           </li>
         ))}
       </ol>
-      {footer ? <CardBody className="border-t border-line">{footer}</CardBody> : null}
+      {/* #pass-the-torch: Settings → Graduation links a last President straight to the hand-off. */}
+      {footer ? (
+        <CardBody id="pass-the-torch" className="scroll-mt-24 border-t border-line">
+          {footer}
+        </CardBody>
+      ) : null}
     </Card>
   );
 }

@@ -9,6 +9,7 @@ import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound }
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyClubCapability } from "@/lib/domain/notify";
 import { reopenRequirementTasks, syncUserRequirements } from "@/lib/domain/requirements";
+import { staffingAfterRoleChange } from "@/lib/domain/staffing";
 
 /**
  * Membership and calendar subscriptions. Register buttons (web + mobile),
@@ -102,6 +103,8 @@ export async function leaveClub(actor: Actor | null, clubId: string) {
   await resolveTasks("membership", m.id, actor.id, db, "CANCELLED");
   // Ended roles and membership: requirements they no longer owe close now, not on the next job tick.
   await reopenRequirementTasks(actor.id);
+  // A leader leaving can leave the club without an advisor or anyone to approve join requests (lib/domain/staffing).
+  if (roles.some((r) => r.role !== "MEMBER")) await staffingAfterRoleChange([clubId], { since: now, actorId: actor.id });
   await logActivity({ actorId: actor.id, action: "membership.left", entityType: "membership", entityId: m.id, clubId });
 }
 
@@ -122,6 +125,8 @@ export async function removeMember(actor: Actor | null, membershipId: string) {
     db.calendarSubscription.deleteMany({ where: { userId: m.userId, clubId: m.clubId } }),
   ]);
   await reopenRequirementTasks(m.userId);
+  // Removing a President or advisor can leave the seat empty (lib/domain/staffing).
+  if (theirRoles.some((r) => r.role !== "MEMBER")) await staffingAfterRoleChange([m.clubId], { since: now, actorId: actor!.id });
   await logActivity({ actorId: actor!.id, action: "membership.removed", entityType: "membership", entityId: m.id, clubId: m.clubId });
 }
 

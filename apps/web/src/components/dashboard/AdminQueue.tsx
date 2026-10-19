@@ -3,14 +3,15 @@ import { BarChart3, CheckCircle2, ChevronRight, Shield } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Panel } from "@/components/dashboard/Panel";
-import type { AdminQueueRow } from "@/app/dashboard/data";
+import type { QueueRow } from "@/lib/analytics/admin";
 
 /**
- * WSUSA staff: the shared admin queue, counted by kind, each linking to the
+ * WSUSA staff: the shared admin queue (lib/analytics/admin wsusaQueue, the
+ * same numbers as the admin Overview), counted by kind, each linking to the
  * tool that handles it. It's the admin's switchboard, so it takes the left
  * column (where students see their clubs).
  */
-export function AdminQueue({ rows }: { rows: AdminQueueRow[] }) {
+export function AdminQueue({ rows }: { rows: QueueRow[] }) {
   const total = rows.reduce((n, r) => n + r.count, 0);
   return (
     <Panel

@@ -1,15 +1,19 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { GraduationCap, Loader2, Power, RotateCcw, UserCheck } from "lucide-react";
 import type { UserKind, UserStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/form";
+import { Callout } from "@/components/ui/layout";
 import { useRunAction } from "@/components/roles/useRunAction";
 import { deactivateAction, markCurrentAction, markGraduatedAction, reactivateAction } from "@/app/admin/users/actions";
 
-type Person = { id: string; name: string; kind: UserKind; status: UserStatus; roleCount: number };
+/** A club where they're the only President or the only advisor (lib/domain/staffing lastLeaderSeats). */
+type LastSeat = { clubName: string; clubSlug: string; role: "PRESIDENT" | "ADVISOR" };
+type Person = { id: string; name: string; kind: UserKind; status: UserStatus; roleCount: number; lastSeats: LastSeat[] };
 
 /** Account status changes an admin can make. People are never deleted. */
 export function AccountActions({ person, today, blockedReason }: { person: Person; today: string; blockedReason: string | null }) {
@@ -24,6 +28,26 @@ export function AccountActions({ person, today, blockedReason }: { person: Perso
 }
 
 const rolesLine = (n: number, how: string) => (n ? `Their ${n} current role${n === 1 ? "" : "s"} end${n === 1 ? "s" : ""} (${how}) and club leaders are told the seat is open.` : "They don't hold any roles right now.");
+
+/** The clubs this change leaves without their last President or advisor, so it's never a surprise. */
+function LastSeatsWarning({ seats }: { seats: LastSeat[] }) {
+  if (!seats.length) return null;
+  return (
+    <Callout tone="warning" title={seats.length === 1 ? "A club loses its last leader in a seat" : `${seats.length} clubs lose their last leader in a seat`}>
+      <ul className="space-y-0.5">
+        {seats.map((s) => (
+          <li key={`${s.clubSlug}:${s.role}`}>
+            <Link href={`/clubs/${s.clubSlug}/manage/org-chart`} className="font-medium underline underline-offset-2">
+              {s.clubName}
+            </Link>{" "}
+            will have no {s.role === "PRESIDENT" ? "President" : "advisor"}.
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1">Each approved club gets a WSUSA task to fill the seat, and its other leaders are told.</p>
+    </Callout>
+  );
+}
 
 function GraduateDialog({ person, today }: { person: Person; today: string }) {
   const [open, setOpen] = useState(false);
@@ -54,6 +78,7 @@ function GraduateDialog({ person, today }: { person: Person; today: string }) {
             <li>Their memberships become alumni memberships.</li>
             <li>They can still sign in and see their history.</li>
           </ul>
+          <LastSeatsWarning seats={person.lastSeats} />
           <div className="space-y-1.5">
             <label htmlFor={dateId} className="block text-sm font-medium text-ink">
               Graduation date
@@ -127,6 +152,7 @@ function DeactivateDialog({ person }: { person: Person }) {
             <li>{rolesLine(person.roleCount, "removed")}</li>
             <li>They stop getting notifications and emails.</li>
           </ul>
+          <LastSeatsWarning seats={person.lastSeats} />
           <div className="space-y-1.5">
             <label htmlFor={reasonId} className="block text-sm font-medium text-ink">
               Reason <span className="text-danger">*</span>

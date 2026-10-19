@@ -50,6 +50,16 @@ export async function notifyClubCapability(clubId: string, cap: Capability, inpu
   await notify({ ...input, userIds: await clubCapabilityHolders(clubId, cap) });
 }
 
+/**
+ * notify() for big audiences (a club's followers, everyone owed a reminder):
+ * the same notification, sent `size` people at a time so one batch's email
+ * and push work stays small. Run it after the response (next/server after()).
+ */
+export async function notifyInBatches(input: NotifyInput, size = 100) {
+  const ids = [...new Set(input.userIds)].filter((id) => id && id !== input.exceptUserId);
+  for (let i = 0; i < ids.length; i += size) await notify({ ...input, userIds: ids.slice(i, i + size) });
+}
+
 /** Sends to an address that may not have an account yet (advisor invites). */
 export async function emailAddress(to: string, subject: string, body: string, href?: string) {
   await sendEmail({ to, subject, body, href });

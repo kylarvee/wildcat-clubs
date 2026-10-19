@@ -1,12 +1,21 @@
 import "server-only";
 import { cache } from "react";
-import type { ClubRole, RenewalPeriod, RoleRequirement } from "@prisma/client";
+import type { ClubRole, Prisma, RenewalPeriod, RoleRequirement, Term } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getTerms, currentOrLastTerm, academicYearAt } from "@/lib/terms";
-import { TZ } from "@/lib/time";
-import { detailsCurrent } from "@/lib/details/rules";
-import { awaitingGrade, requirementState, type RequirementState } from "@/lib/authz/requirement-rules";
-import { TZDate } from "@date-fns/tz";
+import { getTerms } from "@/lib/terms";
+import {
+  awaitingGrade,
+  fulfillmentOf,
+  periodStartIn,
+  requirementState,
+  seatDueAt,
+  seatStatus,
+  type Fulfillment,
+  type RequirementEvidence,
+  type RequirementState,
+  type SeatClock,
+  type TermLike,
+} from "@/lib/authz/requirement-rules";
 
 /**
  * Requirements (tests, forms and trainings WSUSA sets for members and
@@ -22,6 +31,13 @@ import { TZDate } from "@date-fns/tz";
  * it's done (graceDays = 0 makes it a hard gate); members have nothing to pause.
  * A test handed in by the deadline that's waiting for a grader isn't overdue
  * (lib/authz/requirement-rules): nobody is paused over a grader's delay.
+ *
+ * One evaluator answers for one person (requirementStatus, for getClubAccess)
+ * and for everyone at once (loadRequirementBatch, for the sweep and the admin
+ * views): it loads what the rule reads in one query per kind, then decides
+ * with the pure rule in requirement-rules. "Met" depends only on the person
+ * and the period, so it's decided once per person and requirement; the
+ * deadline, and with it due, overdue or waiting for grading, per seat.
  */
 
 export type RequirementItem = {
@@ -37,54 +53,153 @@ export type RequirementItem = {
   state: RequirementState;
 };
 
-const activeRequirements = cache(async () => db.roleRequirement.findMany({ where: { active: true } }));
+export type RequirementStatus = { items: RequirementItem[]; overdue: boolean; allMet: boolean };
+
+/** Requirements in the order the rule walks them (and task notices name them): oldest first, then by name. */
+export const REQUIREMENT_ORDER = [{ createdAt: "asc" }, { name: "asc" }, { id: "asc" }] satisfies Prisma.RoleRequirementOrderByWithRelationInput[];
+
+/** Active requirements, in REQUIREMENT_ORDER (read once per request). */
+const activeRequirements = cache(async () => db.roleRequirement.findMany({ where: { active: true }, orderBy: REQUIREMENT_ORDER }));
+
+/** Only semester and academic-year periods read the calendar. */
+const readsTerms = (renewal: RenewalPeriod) => renewal === "SEMESTER" || renewal === "ACADEMIC_YEAR";
 
 export async function periodStartFor(renewal: RenewalPeriod, at: Date): Promise<Date> {
-  if (renewal === "NONE") return new Date(0);
-  if (renewal === "ANNUAL") return new TZDate(new TZDate(at, TZ).getFullYear(), 0, 1, TZ);
-  const terms = await getTerms();
-  if (renewal === "SEMESTER") return currentOrLastTerm(terms, at)?.startsOn ?? new Date(0);
-  return academicYearAt(terms, at)?.start ?? new Date(0);
+  return periodStartIn(renewal, at, readsTerms(renewal) ? await getTerms() : []);
 }
 
-export async function requirementStatus(
-  userId: string,
-  role: ClubRole,
-  ctx: { assignmentStartedAt: Date; clubApprovedAt: Date | null; at?: Date },
-): Promise<{ items: RequirementItem[]; overdue: boolean; allMet: boolean }> {
-  const at = ctx.at ?? new Date();
-  const reqs = (await activeRequirements()).filter((r) => r.appliesTo.includes(role));
-  const items: RequirementItem[] = [];
-  for (const r of reqs) {
-    const periodStart = await periodStartFor(r.renewal, at);
-    const clock = Math.max(ctx.assignmentStartedAt.getTime(), ctx.clubApprovedAt?.getTime() ?? 0, periodStart.getTime(), r.createdAt.getTime());
-    const dueAt = new Date(clock + r.graceDays * 86_400_000);
-    let met = false;
-    let waiting = false;
-    let gradingPending = false;
-    if (r.kind === "TEST" && r.testId) {
-      // Passed this period, or handed in and waiting for a grader.
-      const attempts = await db.testAttempt.findMany({
-        where: { testId: r.testId, userId, submittedAt: { gte: periodStart }, OR: [{ passed: true }, { status: "NEEDS_REVIEW" }] },
-        select: { status: true, passed: true, submittedAt: true },
-      });
-      met = attempts.some((a) => a.passed);
-      gradingPending = !met && attempts.some((a) => a.status === "NEEDS_REVIEW");
-      waiting = !met && awaitingGrade(attempts, dueAt);
-    } else if (r.kind === "TRAINING" && r.trainingEventId) {
-      met =
-        (await db.attendance.count({
-          where: { userId, checkedInAt: { gte: periodStart }, occurrence: { eventId: r.trainingEventId } },
-        })) > 0;
-    } else if (r.kind === "PROFILE") {
-      // Member details: complete and confirmed this period (Settings → Member details).
-      const u = await db.user.findUnique({ where: { id: userId }, select: { kind: true, details: true } });
-      met = Boolean(u && detailsCurrent(u.details, u.kind, periodStart));
-    }
-    const state = requirementState({ met, awaitingGrade: waiting, dueAt, at });
-    items.push({ requirement: r, met, awaitingGrade: waiting, gradingPending, periodStart, dueAt, overdue: state === "overdue", state });
+/**
+ * Each renewal period's start at `at`, and how far back each kind of
+ * evidence counts: the earliest period among the requirements that read it
+ * (member details aren't dated by period, so they don't push it back).
+ */
+function periodStarts(requirements: readonly RoleRequirement[], at: Date, terms: readonly TermLike[]) {
+  const starts = new Map<RenewalPeriod, Date>();
+  for (const r of requirements) if (!starts.has(r.renewal)) starts.set(r.renewal, periodStartIn(r.renewal, at, terms));
+  const earliest = (kind: RoleRequirement["kind"]) => Math.min(Number.MAX_SAFE_INTEGER, ...requirements.filter((r) => r.kind === kind).map((r) => starts.get(r.renewal)!.getTime()));
+  return { starts, since: { tests: earliest("TEST"), trainings: earliest("TRAINING") } };
+}
+
+/** Evidence cut-offs, as epoch ms (primitive, so per-request caching can key on them). */
+type EvidenceSince = { tests: number; trainings: number };
+
+type EvidenceRows = { attempts: RequirementEvidence["attempts"][number][]; lastCheckIn: Map<string, Date>; person: RequirementEvidence["person"] };
+
+const NO_CHECK_INS: ReadonlyMap<string, Date> = new Map();
+
+/** Above this many people, evidence is read for whole periods instead of by person (one long id list costs more). */
+const BULK_PEOPLE = 200;
+
+/**
+ * The evidence for `userIds`, in one query per kind: attempts on requirement
+ * tests that passed or wait for a grader, check-ins at training events (each
+ * since its cut-off), and member details (only while a PROFILE requirement is on).
+ */
+async function loadEvidence(userIds: readonly string[], requirements: readonly RoleRequirement[], since: EvidenceSince): Promise<Map<string, RequirementEvidence>> {
+  const out = new Map<string, EvidenceRows>();
+  if (!userIds.length || !requirements.length) return out;
+  const testIds = [...new Set(requirements.flatMap((r) => (r.kind === "TEST" && r.testId ? [r.testId] : [])))];
+  const eventIds = [...new Set(requirements.flatMap((r) => (r.kind === "TRAINING" && r.trainingEventId ? [r.trainingEventId] : [])))];
+  const profile = requirements.some((r) => r.kind === "PROFILE");
+  const who = userIds.length > BULK_PEOPLE ? {} : { userId: { in: [...userIds] } };
+  const [attempts, checkIns, people] = await Promise.all([
+    testIds.length
+      ? db.testAttempt.findMany({
+          where: { testId: { in: testIds }, submittedAt: { gte: new Date(since.tests) }, OR: [{ passed: true }, { status: "NEEDS_REVIEW" }], ...who },
+          select: { userId: true, testId: true, status: true, passed: true, submittedAt: true },
+        })
+      : [],
+    eventIds.length
+      ? db.attendance.findMany({ where: { checkedInAt: { gte: new Date(since.trainings) }, occurrence: { eventId: { in: eventIds } }, ...who }, select: { userId: true, checkedInAt: true, occurrence: { select: { eventId: true } } } })
+      : [],
+    profile ? db.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, kind: true, details: true } }) : [],
+  ]);
+  const wanted = new Set(userIds);
+  const evidence = (userId: string) => {
+    let e = out.get(userId);
+    if (!e) out.set(userId, (e = { attempts: [], lastCheckIn: new Map(), person: null }));
+    return e;
+  };
+  for (const a of attempts) if (wanted.has(a.userId)) evidence(a.userId).attempts.push(a);
+  for (const c of checkIns) {
+    if (!wanted.has(c.userId)) continue;
+    const last = evidence(c.userId).lastCheckIn;
+    const prev = last.get(c.occurrence.eventId);
+    if (!prev || c.checkedInAt > prev) last.set(c.occurrence.eventId, c.checkedInAt);
   }
-  return { items, overdue: items.some((i) => i.overdue), allMet: items.every((i) => i.met) };
+  for (const p of people) evidence(p.id).person = { kind: p.kind, details: p.details };
+  return out;
+}
+
+const emptyEvidence = (): RequirementEvidence => ({ attempts: [], lastCheckIn: NO_CHECK_INS, person: null });
+
+/**
+ * The rule for many people at once (the sweep, admin compliance, advisor
+ * dashboards): everything is loaded up front, so answering for 800 people
+ * costs the same handful of queries as answering for one.
+ */
+export type RequirementBatch = {
+  readonly at: Date;
+  /** The requirements it decides (the active ones unless given), in REQUIREMENT_ORDER. */
+  readonly requirements: readonly RoleRequirement[];
+  /** The academic calendar, when a requirement renews by it (for renewalCycle). */
+  readonly terms: Term[];
+  /** When a batch requirement's current renewal period started. */
+  periodStart(r: RoleRequirement): Date;
+  /** Met this period? Decided once per person and requirement. */
+  fulfillment(userId: string, r: RoleRequirement): Fulfillment;
+  /** Kind and member details (loaded while a PROFILE requirement is on; null otherwise). */
+  person(userId: string): RequirementEvidence["person"];
+  /** One requirement through one seat (requirementStatus's item). */
+  item(userId: string, r: RoleRequirement, seat: SeatClock): RequirementItem;
+  /** requirementStatus for one person in a role. */
+  status(userId: string, role: ClubRole, seat: SeatClock): RequirementStatus;
+};
+
+function makeBatch(at: Date, requirements: readonly RoleRequirement[], terms: Term[], starts: Map<RenewalPeriod, Date>, evidence: Map<string, RequirementEvidence>): RequirementBatch {
+  const met = new Map<string, Fulfillment>();
+  const fulfillment = (userId: string, r: RoleRequirement) => {
+    const key = `${userId}:${r.id}`;
+    let f = met.get(key);
+    if (!f) met.set(key, (f = fulfillmentOf(r, starts.get(r.renewal)!, evidence.get(userId) ?? emptyEvidence())));
+    return f;
+  };
+  const item = (userId: string, r: RoleRequirement, seat: SeatClock): RequirementItem => ({ requirement: r, ...seatStatus(r, starts.get(r.renewal)!, fulfillment(userId, r), seat, at) });
+  return {
+    at,
+    requirements,
+    terms,
+    periodStart: (r) => starts.get(r.renewal) ?? periodStartIn(r.renewal, at, terms),
+    fulfillment,
+    person: (userId) => evidence.get(userId)?.person ?? null,
+    item,
+    status(userId, role, seat) {
+      const items = requirements.filter((r) => r.appliesTo.includes(role)).map((r) => item(userId, r, seat));
+      return { items, overdue: items.some((i) => i.overdue), allMet: items.every((i) => i.met) };
+    },
+  };
+}
+
+/** Loads the rule's inputs for these people (and these requirements: the active ones unless given). */
+export async function loadRequirementBatch(userIds: readonly string[], opts: { at?: Date; requirements?: RoleRequirement[] } = {}): Promise<RequirementBatch> {
+  const at = opts.at ?? new Date();
+  const requirements = opts.requirements ?? (await activeRequirements());
+  const terms = requirements.some((r) => readsTerms(r.renewal)) ? await getTerms() : [];
+  const { starts, since } = periodStarts(requirements, at, terms);
+  return makeBatch(at, requirements, terms, starts, await loadEvidence(userIds, requirements, since));
+}
+
+/** One person's evidence, read once per request however many clubs and roles ask (getClubAccess asks per club). */
+const personEvidence = cache(async (userId: string, tests: number, trainings: number) => (await loadEvidence([userId], await activeRequirements(), { tests, trainings })).get(userId) ?? emptyEvidence());
+
+export async function requirementStatus(userId: string, role: ClubRole, ctx: { assignmentStartedAt: Date; clubApprovedAt: Date | null; at?: Date }): Promise<RequirementStatus> {
+  const at = ctx.at ?? new Date();
+  const all = await activeRequirements();
+  if (!all.some((r) => r.appliesTo.includes(role))) return { items: [], overdue: false, allMet: true };
+  const terms = all.some((r) => readsTerms(r.renewal)) ? await getTerms() : [];
+  const { starts, since } = periodStarts(all, at, terms);
+  const evidence = new Map([[userId, await personEvidence(userId, since.tests, since.trainings)]]);
+  return makeBatch(at, all, terms, starts, evidence).status(userId, role, { startedAt: ctx.assignmentStartedAt, clubApprovedAt: ctx.clubApprovedAt });
 }
 
 type TaskLike = { id: string; status: string; sourceType: string | null; sourceId: string | null; assigneeId: string | null; dueAt: Date | null };
@@ -131,4 +246,43 @@ export async function tasksAwaitingGrade(tasks: readonly TaskLike[], at: Date = 
     }
   }
   return out;
+}
+
+/** A person's top role in one approved club, when it's a student leader role (the role getClubAccess checks). */
+export type LeaderSeat = SeatClock & { clubId: string; role: ClubRole };
+
+/**
+ * getClubAccess's pause, read from the person's open required tasks instead
+ * of re-checking the evidence. It's for the header's task count, which
+ * renders on every page. In a club, the person is paused when a requirement
+ * on their top role there is still owed (its task is open), is past that
+ * seat's deadline, and isn't waiting for a grader. The sweep and the event
+ * path keep tasks in step with the evidence, so this matches getClubAccess.
+ * Anything that acts on a permission asks getClubAccess itself.
+ */
+export async function pausedClubsFromTasks(userId: string, seats: readonly LeaderSeat[], at: Date = new Date()): Promise<Set<string>> {
+  const paused = new Set<string>();
+  if (!seats.length) return paused;
+  // A task is due at the earliest of the person's deadlines, so every pause has a task past due.
+  const late = await db.task.findMany({ where: { assigneeId: userId, sourceType: "requirement", status: "OPEN", dueAt: { lt: at } }, select: { sourceId: true } });
+  if (!late.length) return paused;
+  const owed = new Set(late.map((t) => t.sourceId?.split(":")[0]));
+  const reqs = (await activeRequirements()).filter((r) => owed.has(r.id) && seats.some((s) => r.appliesTo.includes(s.role)));
+  if (!reqs.length) return paused;
+  const terms = reqs.some((r) => readsTerms(r.renewal)) ? await getTerms() : [];
+  const testIds = [...new Set(reqs.flatMap((r) => (r.kind === "TEST" && r.testId ? [r.testId] : [])))];
+  const waiting = testIds.length ? await db.testAttempt.findMany({ where: { userId, status: "NEEDS_REVIEW", testId: { in: testIds } }, select: { testId: true, status: true, submittedAt: true } }) : [];
+  for (const s of seats) {
+    for (const r of reqs) {
+      if (!r.appliesTo.includes(s.role)) continue;
+      const start = periodStartIn(r.renewal, at, terms);
+      const dueAt = seatDueAt(r, start, s);
+      const mine = waiting.filter((a) => a.testId === r.testId && a.submittedAt !== null && a.submittedAt >= start);
+      if (requirementState({ met: false, awaitingGrade: awaitingGrade(mine, dueAt), dueAt, at }) === "overdue") {
+        paused.add(s.clubId);
+        break;
+      }
+    }
+  }
+  return paused;
 }
