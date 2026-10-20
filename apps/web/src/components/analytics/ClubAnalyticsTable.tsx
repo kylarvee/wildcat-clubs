@@ -21,6 +21,7 @@ import {
   type StageFilter,
   type TableFilters,
 } from "@/lib/analytics/club-table";
+import { fmtServiceHours } from "@/lib/metrics/service";
 import { CLUB_SCOPE_LABEL } from "@/components/clubs/labels";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
@@ -81,6 +82,7 @@ export function ClubAnalyticsTable({
     { key: "retention", label: "Retention", sub: "latest full months", numeric: true },
     { key: "attendance", label: "Attendance", sub: "avg. this term", numeric: true },
     { key: "events", label: "Events", sub: "this term", numeric: true },
+    { key: "service", label: "Service", sub: "hours this term", numeric: true },
     { key: "rating", label: "Rating", sub: "of 5", numeric: true },
     { key: "connections", label: "Connections", sub: "12 months", numeric: true },
   ];
@@ -173,7 +175,7 @@ export function ClubAnalyticsTable({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-[var(--radius-card)] border border-line bg-surface shadow-[var(--shadow-card)]">
-          <table className="w-full min-w-[880px] border-collapse text-sm">
+          <table className="w-full min-w-[960px] border-collapse text-sm">
             <caption className="sr-only">
               Club analytics, {shown.length} clubs. Column headers sort the table.
             </caption>
@@ -237,6 +239,7 @@ export function ClubAnalyticsTable({
                     </Num>
                     <Num>{pct(r.avgAttendance) ?? NONE}</Num>
                     <Num>{live ? fmt(r.heldEvents) : NONE}</Num>
+                    <Num>{live && r.serviceMinutes ? fmtServiceHours(r.serviceMinutes) : NONE}</Num>
                     <Num>
                       {r.rating === null ? (
                         NONE
@@ -266,7 +269,7 @@ export function ClubAnalyticsTable({
       )}
       <p className="text-xs leading-relaxed text-ink-3">
         This term is {term}. Attending members checked in within {activeDays} days or at one of the club&rsquo;s last {activeEvents} events. Retention is the share of one full month&rsquo;s attendees who came back the next full month, for the latest two months in a row with check-ins (&ldquo;Sep → Oct: 62% came back&rdquo;).
-        Attendance is the average share of members at each event with check-ins. Connections count members of one club checking in at another&rsquo;s events.
+        Attendance is the average share of members at each event with check-ins. Service hours add up what every check-in at the club&rsquo;s service events earned this term, hosted or co-hosted. Connections count members of one club checking in at another&rsquo;s events.
         No President and No advisor list approved clubs with nobody in a President seat, or without a faculty or staff advisor, right now.
       </p>
     </div>

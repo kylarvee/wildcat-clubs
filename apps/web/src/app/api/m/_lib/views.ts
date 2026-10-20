@@ -8,7 +8,8 @@ import { unreadNotificationCount } from "@/lib/domain/notifications";
 import { countOpenTasks, countOpenTasksByKind } from "@/lib/domain/tasks";
 import { feedOccurrences, viewerContext } from "@/lib/events/feed";
 import { clubMetricsFor, viewerClubStates } from "@/lib/clubs/queries";
-import { memberClubSummaries, memberClubSummary } from "@/lib/metrics";
+import { memberClubSummaries, memberClubSummary, serviceSummary } from "@/lib/metrics";
+import { serviceHours, serviceLine } from "@/lib/metrics/service";
 import { loadPersonAttendance } from "@/lib/attendance/queries";
 import { METHOD_LABEL } from "@/lib/attendance/rules";
 import { richToText } from "@/lib/rich/sanitize";
@@ -215,9 +216,11 @@ const HISTORY = 100;
 
 export async function attendanceView(actor: Actor | null): Promise<MAttendance> {
   assertSignedIn(actor);
-  const [summaries, person] = await Promise.all([memberClubSummaries(actor.id), loadPersonAttendance(actor.id)]);
+  const [summaries, person, service] = await Promise.all([memberClubSummaries(actor.id), loadPersonAttendance(actor.id), serviceSummary(actor.id)]);
   return {
     totalCheckins: person.rows.length,
+    service: { minutes: service.minutes, hours: serviceHours(service.minutes), events: service.events, label: serviceLine(service) },
+    recordPath: "/me/involvement/record.pdf?inline=1",
     clubs: summaries.map((s) => ({ club: toClubRef(s.club), membershipStatus: s.membershipStatus, summary: toAttendanceSummary(s.summary) })),
     history: person.rows.slice(0, HISTORY).map((r) => ({
       id: r.id,

@@ -1,11 +1,14 @@
-import type { EventKind, Visibility } from "@prisma/client";
+import type { EventKind, EventPerk, Visibility } from "@prisma/client";
 import { expandOccurrences, type OccurrenceTimes } from "@/lib/events/recurrence";
 import { generateCheckinSecret } from "@/lib/attendance/token";
 import type { ClubM, Ctx, Ev, Occ } from "../ctx";
 import { COLLEGE_BUILDINGS, OFFSITE } from "../data/reference";
 import { isQuiet } from "../data/clubs";
 import { EVENT_IDEAS, type EventIdea } from "../data/text";
-import { addDays, addMin, calAdd, campusDate, DAY, floor5, local, maxDate, minDate } from "../lib/dates";
+import { addDays, addMin, calAdd, campusDate, DAY, floor5, HOUR, local, maxDate, minDate } from "../lib/dates";
+import { shortcutRange } from "@/lib/events/browse-params";
+import { resolveVisibility } from "@/lib/files/visibility";
+import { createRng } from "../lib/rng";
 import { fallStart, holidayNote, springEnd } from "./reference";
 
 /**
@@ -51,11 +54,15 @@ export function newEvent(ctx: Ctx, e: Partial<Ev> & Pick<Ev, "clubId" | "title" 
     lat: null,
     lng: null,
     virtualUrl: null,
+    coverUrl: null,
+    perks: [],
     createdAt: ctx.NOW,
     termId: null,
     isSeries: false,
     cohosts: [],
     occurrences: [],
+    // Service projects count toward service hours: their length, up to three hours a date (60–180 minutes).
+    serviceMinutes: e.kind === "SERVICE" ? Math.min(e.durationMinutes ?? 60, 180) : null,
     ...e,
   };
 }
@@ -485,6 +492,74 @@ function upcomingCohosts(ctx: Ctx) {
     "<p>Middle-school girls from Ogden build and drive their first robots with RC Wrecker Bots and SWE mentors.</p>", ["Robot kits and supplies", 1, 320]);
 }
 
+/**
+ * University service events (no host club; WSUSA runs them), which count
+ * toward service hours like any service project: a Day of Service in every
+ * fall and spring (and the next one on the calendar) and a pantry restock
+ * night about a week ago. Their check-in codes come from their own
+ * generator, so adding them doesn't shift the rest of the seed's choices.
+ * Attendance: steps/attendance.
+ */
+function universityServiceEvents(ctx: Ctx) {
+  const { NOW } = ctx;
+  const alex = ctx.p("alex");
+  const su = ctx.buildings.get("SU")!;
+  const codes = createRng(20261020);
+  const code = () => {
+    for (;;) {
+      const c = codes.string("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+      if (!ctx.usedCodes.has(c)) return c;
+    }
+  };
+  const union = { locationType: "CAMPUS" as const, buildingId: su.id, buildingCode: "SU", lat: su.lat, lng: su.lng };
+  const current = ctx.termFor(NOW);
+  const next = ctx.terms.find((t) => t.countsForActivity && t.startsOn > current.startsOn);
+
+  // A Saturday in each term's sixth week, 9:00 to 1:00. Three of the four hours count; the rest is check-in and lunch.
+  for (const term of [...EVENT_TERMS(ctx), ...(next ? [next] : [])]) {
+    const startsAt = onWeekday(addDays(term.startsOn, 35), 6, 9, 0);
+    const ev = newEvent(ctx, {
+      clubId: null,
+      title: "WSUSA Day of Service",
+      descriptionHtml:
+        "<p>Weber State's campus-wide service day. Students from every club head out across Ogden for the morning: cleanup on the Ogden River Parkway, sorting at the Weber Cares Food Pantry and reading with kids at the Weber County Library.</p><ul><li>Meet in the Shepherd Union Ballroom at 9:00 for check-in and team assignments.</li><li>Checking in with the QR code at the door counts for three service hours.</li><li>Lunch is on WSUSA when everyone's back at 1:00.</li></ul>",
+      kind: "SERVICE",
+      visibility: "PUBLIC",
+      startsAt,
+      durationMinutes: 240,
+      serviceMinutes: 180,
+      ...union,
+      room: "Ballroom A",
+      createdById: alex.id,
+      createdAt: minDate(addDays(startsAt, -28), addDays(NOW, -2)),
+      termId: term.id,
+    });
+    addOccurrences(ctx, ev, [{ startsAt, endsAt: addMin(startsAt, 240) }], { code: code() });
+    ctx.universityEvents.push(ev);
+  }
+
+  const restockAt = onWeekday(addDays(NOW, -12), 3, 18, 0);
+  const restock = newEvent(ctx, {
+    clubId: null,
+    title: "Weber Cares Pantry Restock Night",
+    descriptionHtml:
+      "<p>Unload the week's donations and restock the Weber Cares Food Pantry shelves so they're full for the weekend. No experience needed, and you can bring a friend.</p><ul><li>Checking in counts for two service hours.</li><li>Wear closed-toe shoes.</li></ul>",
+    kind: "SERVICE",
+    visibility: "UNIVERSITY",
+    startsAt: restockAt,
+    durationMinutes: 120,
+    serviceMinutes: 120,
+    ...union,
+    room: "Weber Cares Food Pantry",
+    createdById: alex.id,
+    createdAt: addDays(restockAt, -9),
+    termId: current.id,
+  });
+  addOccurrences(ctx, restock, [{ startsAt: restockAt, endsAt: addMin(restockAt, 120) }], { code: code() });
+  ctx.universityEvents.push(restock);
+  ctx.refs.pantryRestockEventId = restock.id;
+}
+
 export function buildEvents(ctx: Ctx) {
   universityEvents(ctx);
   for (const club of ctx.clubs) {
@@ -496,6 +571,118 @@ export function buildEvents(ctx: Ctx) {
   const anime = ctx.club("anime");
   const target = anime.events.find((e) => !e.isSeries && e.startsAt && e.startsAt < ctx.NOW && e.cohosts.length === 0);
   if (target) approvedCohost(ctx, target, anime, ctx.club("chess"), "DECLINED");
+  universityServiceEvents(ctx);
+  eventExtras(ctx);
+}
+
+// ─── Perks, hybrid events and covers (the Events page) ──────────────────────
+
+/** Food an event offers, from its title and cost line (and a university event's description). */
+const FOOD = /pizza|snack|refreshment|dinner|lunch|breakfast|catering|appetizer|cocoa|hot chocolate|ice cream|pan dulce|pancake|bbq|tacos?\b/i;
+const SWAG = /t-shirt|swag|giveaway/i;
+const plain = (html: string | null) => (html ?? "").replace(/<[^>]+>/g, " ");
+
+/**
+ * What the Events page filters on, decided after every event exists and from
+ * its own generator, so none of the seed's other choices shift: Free food on
+ * about 30% of socials (more often when the title or cost line is food), on
+ * one-off events whose cost line is food (pizza, snacks, dinner…), on a few
+ * meeting series and on university events that serve a meal; Free stuff on
+ * some; an online link on a few in-person workshops (hybrid), past and
+ * upcoming; and one free-food social this weekend in a club Maya belongs to.
+ */
+function eventExtras(ctx: Ctx) {
+  const r = createRng(20261022);
+  for (const ev of allEvents(ctx)) {
+    const words = `${ev.title} ${ev.cost?.[0] ?? ""} ${ev.clubId ? "" : plain(ev.descriptionHtml)}`;
+    const perks = new Set<EventPerk>();
+    const food = FOOD.test(words);
+    if (ev.kind === "SOCIAL") {
+      if (r.chance(food ? 0.55 : 0.18)) perks.add("FREE_FOOD");
+    } else if (ev.isSeries) {
+      if (r.chance(0.12)) perks.add("FREE_FOOD");
+    } else if (food) perks.add("FREE_FOOD");
+    if (SWAG.test(words) || (!ev.isSeries && ev.kind !== "TRAINING" && ev.kind !== "MEETING" && r.chance(0.08))) perks.add("FREE_STUFF");
+    ev.perks = (["FREE_FOOD", "FREE_STUFF"] as const).filter((p) => perks.has(p));
+  }
+
+  // Hybrid: in person with an online link too (check-in stays in the room).
+  const workshops = r.shuffle(
+    ctx.clubs.flatMap((c) => c.events).filter((e) => e.kind === "WORKSHOP" && !e.isSeries && e.status === "SCHEDULED" && e.startsAt && (e.locationType === "CAMPUS" || e.locationType === "ADDRESS") && !e.virtualUrl && e.visibility !== "MEMBERS"),
+  );
+  const upcoming = workshops.filter((e) => e.startsAt! > addDays(ctx.NOW, 1)).slice(0, 4);
+  const past = workshops.filter((e) => e.startsAt! < addDays(ctx.NOW, -3)).slice(0, 2);
+  const meet = () => `https://meet.google.com/${r.string("abcdefghijkmnopqrstuvwxyz", 3)}-${r.string("abcdefghijkmnopqrstuvwxyz", 4)}-${r.string("abcdefghijkmnopqrstuvwxyz", 3)}`;
+  for (const ev of [...upcoming, ...past]) ev.virtualUrl = meet();
+  ctx.refs.hybridWorkshopId = upcoming[0]?.id ?? "";
+
+  weekendFreeFood(ctx, r);
+}
+
+/**
+ * A free-food social this weekend (Friday 5 PM through Sunday, as the Events
+ * page's "This weekend" counts it) in Hiking and Outdoors Club, one of Maya's
+ * clubs: Saturday at 11:30, else Sunday at noon or 5 PM, whichever is at least
+ * two hours away. Seeded late on a Sunday, it moves to next Saturday.
+ */
+function weekendFreeFood(ctx: Ctx, r: ReturnType<typeof createRng>) {
+  const { NOW } = ctx;
+  const club = ctx.club("climbing");
+  const fri = local(shortcutRange("weekend", NOW).start);
+  const at = (days: number, H: number, M = 0) => {
+    const d = calAdd(fri.y, fri.m, fri.d, days);
+    return campusDate(d.y, d.m, d.d, H, M);
+  };
+  const startsAt = [at(1, 11, 30), at(2, 12), at(2, 17)].find((s) => s.getTime() > NOW.getTime() + 2 * HOUR) ?? at(8, 11, 30);
+  const spot = OFFSITE.outdoors.find((s) => s.address.startsWith("Waterfall Canyon")) ?? OFFSITE.outdoors[0];
+  const ev = newEvent(ctx, {
+    clubId: club.id,
+    title: "Trailhead Cookout & Easy Hike",
+    descriptionHtml:
+      "<p>Free burgers, veggie dogs and s'mores at the Waterfall Canyon trailhead, then an easy group hike for anyone who wants one. New hikers are welcome.</p><ul><li>Bring water and a layer; it cools off fast in the canyon.</li><li>Check in with the QR code when you arrive.</li></ul>",
+    kind: "SOCIAL",
+    visibility: "PUBLIC",
+    startsAt,
+    durationMinutes: 120,
+    locationType: "ADDRESS",
+    address: spot.address,
+    lat: spot.lat,
+    lng: spot.lng,
+    perks: ["FREE_FOOD"],
+    createdById: ctx.leaderAt(club, addDays(NOW, -8)),
+    createdAt: addDays(NOW, -8.2),
+    termId: ctx.termFor(NOW).id,
+  });
+  let code = "";
+  do code = r.string("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+  while (ctx.usedCodes.has(code));
+  addOccurrences(ctx, ev, [{ startsAt, endsAt: addMin(startsAt, 120) }], { code });
+  club.events.push(ev);
+  ctx.refs.weekendFoodEventId = ev.id;
+}
+
+/**
+ * Covers, once the files exist (call after buildFiles): an event's first
+ * attached image from its own club's files that's public, as the Events
+ * Builder allows (lib/events/rules coverProblem). Everything else keeps no
+ * cover and shows its club's color and logo.
+ */
+export function assignCovers(ctx: Ctx) {
+  const files = new Map(ctx.rows.files.map((f) => [f.id as string, f]));
+  const lookup = (id: string) => {
+    const f = files.get(id);
+    return f ? { parentId: (f.parentId as string | null) ?? null, visibility: f.visibility ?? "INHERIT" } : undefined;
+  };
+  const memo = new Map<string, "PUBLIC" | "MEMBERS" | "LEADERS">();
+  const events = new Map(allEvents(ctx).map((e) => [e.id, e]));
+  for (const a of ctx.rows.attachments) {
+    const ev = events.get(a.eventId as string);
+    const f = files.get(a.fileId as string);
+    if (!ev || !f || ev.coverUrl || !ev.clubId) continue;
+    if (f.isFolder || f.clubId !== ev.clubId || !String(f.mimeType ?? "").startsWith("image/")) continue;
+    if (resolveVisibility(f.id as string, lookup, memo) !== "PUBLIC") continue;
+    ev.coverUrl = `/api/files/${f.id}`;
+  }
 }
 
 export function allEvents(ctx: Ctx): Ev[] {

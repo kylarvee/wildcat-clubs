@@ -30,9 +30,11 @@ export function routeForHref(href: string): Href | null {
   if (parts[0] === 'clubs' && parts.length === 2) return { pathname: '/club/[slug]', params: { slug: parts[1] } };
   // The event screen takes a meeting id, or an event id (it opens the next meeting).
   if (parts[0] === 'events' && parts[1] && parts.length === 2) return { pathname: '/event/[id]', params: { id: url.searchParams.get('o') || parts[1] } };
-  if (path === '/calendar') return '/calendar';
+  // The web's Events page (and the old /calendar) is the Events tab, whose route is still `calendar`.
+  if (path === '/events' || path === '/calendar') return '/calendar';
   if (path === '/notifications') return '/inbox';
-  if (path === '/me/attendance') return '/me';
+  // My involvement (and the old My attendance address, which redirects there) is the Me tab.
+  if (path === '/me/involvement' || path === '/me/attendance') return '/me';
   // Your open tasks; "Done" and "Assigned by you" (?view=…) are only on the web.
   if (path === '/tasks' && !url.searchParams.has('view')) return '/tasks';
   return null;

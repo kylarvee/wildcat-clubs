@@ -16,17 +16,22 @@ import type { CalendarEventProps } from "@/lib/events/types";
 
 /**
  * CONTRACT (owner: events builder). Read-only calendar fed by
- * GET /api/calendar?scope=club&clubId=…  |  scope=me  |  scope=university
- * (JSON events built from EventOccurrence). Google-Calendar-like month/week/list
- * views; clicking an event opens its details. The Events Builder has its own
- * editable calendar.
+ * GET /api/calendar?scope=club&clubId=…  |  scope=me  |  scope=all  |  scope=university
+ * (JSON events built from EventOccurrence), optionally with the Events page's
+ * filters (lib/events/browse-params filterSearchParams). Google-Calendar-like
+ * month/week/list views; clicking an event opens its details. The Events
+ * Builder has its own editable calendar.
  *
  * Times always show in campus time (America/Denver), wherever the viewer is.
  */
-export type CalendarSource = { scope: "club"; clubId: string } | { scope: "me" } | { scope: "university" } | { scope: "trainings" };
+export type CalendarSource = { scope: "club"; clubId: string } | { scope: "me" } | { scope: "all" } | { scope: "university" } | { scope: "trainings" };
 
 export type CalendarViewProps = {
   source: CalendarSource;
+  /** The Events page's filters as a query string ("food=1&type=SOCIAL"). */
+  filters?: string;
+  /** Campus date to open on ("2026-10-24"). */
+  initialDate?: string;
   initialView?: "dayGridMonth" | "timeGridWeek" | "listMonth";
   /** Smaller toolbar and list-first layout for sidebars and the club hero. */
   compact?: boolean;
@@ -42,7 +47,7 @@ function sourceQuery(s: CalendarSource) {
   return s.scope === "club" ? `scope=club&clubId=${encodeURIComponent(s.clubId)}` : `scope=${s.scope}`;
 }
 
-export function CalendarView({ source, initialView, compact, height = "auto", className, emptyMessage, refreshKey }: CalendarViewProps) {
+export function CalendarView({ source, filters, initialDate, initialView, compact, height = "auto", className, emptyMessage, refreshKey }: CalendarViewProps) {
   const isClient = useIsClient();
   const [api, setApi] = useState<CalendarApi | null>(null);
   // Stable callback ref: runs only on mount/unmount, so a remount hands us the new calendar.
@@ -53,7 +58,7 @@ export function CalendarView({ source, initialView, compact, height = "auto", cl
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ title: string; p: CalendarEventProps } | null>(null);
 
-  const query = sourceQuery(source);
+  const query = filters ? `${sourceQuery(source)}&${filters}` : sourceQuery(source);
   const events = useMemo(() => calendarSource(query, setError), [query]);
   const views: ViewName[] = compact ? ["listMonth", "dayGridMonth"] : ["dayGridMonth", "timeGridWeek", "listMonth"];
   const startView: ViewName = initialView ?? (compact || isNarrowScreen() ? "listMonth" : "dayGridMonth");
@@ -91,6 +96,7 @@ export function CalendarView({ source, initialView, compact, height = "auto", cl
               ref={calendarRef}
               plugins={[dayGridPlugin, timeGridPlugin, listPlugin]}
               initialView={startView}
+              initialDate={initialDate}
               headerToolbar={false}
               timeZone="UTC"
               now={campusNow}

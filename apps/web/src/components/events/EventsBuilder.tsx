@@ -418,7 +418,8 @@ function QuickCreateDialog({
         buildingId: l.buildingId || null,
         room: l.room,
         address: l.address,
-        virtualUrl: l.virtualUrl.trim(),
+        // Quick create has no online-link field for in-person events (no hidden hybrid from an earlier tab).
+        virtualUrl: l.locationType === "VIRTUAL" ? l.virtualUrl.trim() : "",
         createMeetLink: l.createMeetLink,
       });
       if (!res.ok) return setError(res.error);

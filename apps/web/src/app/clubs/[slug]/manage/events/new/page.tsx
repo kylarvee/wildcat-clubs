@@ -41,6 +41,7 @@ export default async function NewClubEventPage({
         terms={data.terms}
         googleLive={data.googleLive}
         defaultFundingSource={defaultFundingSource(club)}
+        coverFolderId={data.coverFolderId}
       />
     </div>
   );

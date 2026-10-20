@@ -388,8 +388,8 @@ export function NetworkPreview() {
             Explore the network <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </ButtonLink>
         </div>
-        <div className="min-w-0 overflow-hidden rounded-2xl bg-white p-1.5 shadow-2xl ring-1 ring-white/10">
-          <NetworkGraph compact height={420} />
+        <div className="min-w-0 overflow-hidden rounded-2xl shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          <NetworkGraph compact height={440} />
         </div>
       </div>
     </section>

@@ -3,13 +3,16 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getClubAccess } from "@/lib/authz";
 import { feedOccurrences, toCalendarJson, viewerContext, type FeedScope } from "@/lib/events/feed";
+import { eventFilter } from "@/lib/events/browse";
+import { parseEventParams } from "@/lib/events/browse-params";
 
 /**
- * GET /api/calendar?scope=club&clubId=… | scope=me | scope=university | scope=trainings
- *   &start=ISO&end=ISO
- * FullCalendar events for occurrences in range that the viewer may see.
- * `start`/`end` in the response are campus wall clock (no offset); the real
- * instants are in extendedProps.startsAt/endsAt. See lib/events/feed.
+ * GET /api/calendar?scope=club&clubId=… | scope=me | scope=all | scope=university | scope=trainings
+ *   &start=ISO&end=ISO  [&q=&type=&category=&food=1&stuff=1&service=1&online=1&following=1]
+ * FullCalendar events for occurrences in range that the viewer may see, with
+ * the Events page's filters when given (its Month view). `start`/`end` in the
+ * response are campus wall clock (no offset); the real instants are in
+ * extendedProps.startsAt/endsAt. See lib/events/feed.
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
@@ -36,6 +39,9 @@ export async function GET(req: NextRequest) {
       if (!actor) return Response.json({ error: "Sign in to see your calendar." }, { status: 401 });
       scope = { scope: "me" };
       break;
+    case "all":
+      scope = { scope: "all" };
+      break;
     case "university":
       scope = { scope: "university" };
       break;
@@ -47,7 +53,10 @@ export async function GET(req: NextRequest) {
   }
 
   const ctx = await viewerContext(actor);
-  const rows = await feedOccurrences(ctx, scope, { start, end });
+  const filter = await eventFilter(ctx, parseEventParams(q));
+  // A search that matched nothing.
+  if (!filter) return Response.json([], { headers: { "cache-control": "private, no-store" } });
+  const rows = await feedOccurrences(ctx, scope, { start, end }, { filter });
   const events = await toCalendarJson(ctx, scope, rows);
   return Response.json(events, { headers: { "cache-control": "private, no-store" } });
 }

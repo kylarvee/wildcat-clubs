@@ -6,6 +6,7 @@ import { getConfig } from "@/lib/config";
 import { currentOrLastTerm, getTerms, previousActivityTerm } from "@/lib/terms";
 import { DAY_MS, TZ } from "@/lib/time";
 import * as P from "./pure";
+import { summarizeService, totalsByTerm } from "./service";
 import type {
   ClubActivity,
   ClubListMetrics,
@@ -19,6 +20,9 @@ import type {
   RetentionPeriod,
   RetentionPoint,
   RetentionSummary,
+  ServiceSummary,
+  ServiceTermTotal,
+  ServiceTotal,
 } from "./types";
 
 /**
@@ -84,6 +88,14 @@ import type {
  *   Node size = check-ins at the club's events. Centrality emerges from the
  *   force layout; nothing is placed by hand.
  *
+ * SERVICE HOURS — every check-in at a date of an event whose serviceMinutes
+ *   is set earns those minutes, however it was recorded. Totals are summed
+ *   from attendance every time (never stored), so removing a check-in or
+ *   editing the event's hours changes them at once. A person's hours sit
+ *   under the event's host club; a club's total counts every check-in at
+ *   events it hosted or co-hosted. The rule is in ./service.ts (pure,
+ *   client-safe), which also says hours the one way ("2 service hours").
+ *
  * The rules themselves live in ./pure.ts (unit-tested); this file gathers the
  * facts they decide on with batched SQL. Signatures here are a contract.
  *
@@ -124,6 +136,7 @@ export {
   type ClubRisk,
   type Standing,
 } from "./pure";
+export { earnedMinutes, fmtServiceHours, serviceEventsLabel, serviceHours, serviceHoursLabel, serviceLine } from "./service";
 
 // ─── SQL building blocks ─────────────────────────────────────────────────────
 
@@ -1074,4 +1087,110 @@ export async function platformSummary(at?: Date): Promise<PlatformSummary> {
     });
   }
   return sharedPlatform.data;
+}
+
+// ─── Service hours ───────────────────────────────────────────────────────────
+
+/**
+ * A person's SERVICE HOURS: every check-in of theirs at an event that counts,
+ * summed now, by host club and by term, with each date (the rule is in
+ * ./service.ts). The involvement record and its PDF, the verify page,
+ * profiles, the assistant and the app all read this.
+ */
+export const serviceSummary = cache(async (userId: string): Promise<ServiceSummary> => {
+  const [rows, terms] = await Promise.all([
+    db.attendance.findMany({
+      where: { userId, occurrence: { event: { serviceMinutes: { gt: 0 } } } },
+      select: {
+        id: true,
+        occurrence: {
+          select: {
+            id: true,
+            startsAt: true,
+            event: {
+              select: {
+                id: true,
+                title: true,
+                serviceMinutes: true,
+                club: { select: { id: true, name: true, slug: true } },
+                cohosts: { where: { status: "APPROVED" }, orderBy: { createdAt: "asc" }, select: { club: { select: { id: true, name: true, slug: true } } } },
+              },
+            },
+          },
+        },
+      },
+    }),
+    getTerms(),
+  ]);
+  return summarizeService(
+    rows.map(({ id, occurrence: o }) => ({
+      attendanceId: id,
+      occurrenceId: o.id,
+      eventId: o.event.id,
+      title: o.event.title,
+      startsAt: o.startsAt,
+      serviceMinutes: o.event.serviceMinutes,
+      club: o.event.club,
+      cohosts: o.event.cohosts.map((c) => c.club),
+    })),
+    terms,
+  );
+});
+
+/** Check-ins that earn service hours (date window by event start), with their event, host and minutes. */
+function earnedCheckins(o: { from?: Date; to?: Date }) {
+  const from = o.from ? Prisma.sql`AND o."startsAt" >= ${ts(o.from)}` : Prisma.empty;
+  const to = o.to ? Prisma.sql`AND o."startsAt" <= ${ts(o.to)}` : Prisma.empty;
+  return Prisma.sql`
+    SELECT a.id AS attendance_id, o.id AS occurrence_id, o."startsAt" AS starts_at, e.id AS event_id, e."clubId" AS host_id, e."serviceMinutes" AS minutes
+      FROM "Attendance" a
+      JOIN "EventOccurrence" o ON o.id = a."occurrenceId"
+      JOIN "Event" e ON e.id = o."eventId"
+     WHERE e."serviceMinutes" > 0 ${from} ${to}`;
+}
+
+/**
+ * Service hours earned at each club's events in a window (by the date's
+ * start), hosted or co-hosted, the way held events count for every club
+ * that put one on. Every club asked for is in the map (zeros when none).
+ * Club analytics' "Service hours (this term)".
+ */
+export async function clubServiceTotals(clubIds: string[], opts: { from?: Date; to?: Date } = {}): Promise<Map<string, ServiceTotal>> {
+  const out = new Map<string, ServiceTotal>(clubIds.map((id) => [id, { minutes: 0, events: 0 }]));
+  if (clubIds.length === 0) return out;
+  const rows = await db.$queryRaw<{ club_id: string; minutes: number; events: number }[]>`
+    WITH earned AS (${earnedCheckins(opts)}),
+    credited AS (
+      SELECT host_id AS club_id, minutes FROM earned WHERE host_id IS NOT NULL
+      UNION ALL
+      SELECT c."clubId", earned.minutes
+        FROM earned JOIN "EventCohost" c ON c."eventId" = earned.event_id AND c.status = 'APPROVED' AND c."clubId" IS DISTINCT FROM earned.host_id
+    )
+    SELECT club_id, sum(minutes)::int AS minutes, count(*)::int AS events
+      FROM credited
+     WHERE club_id = ANY(${clubIds}::text[])
+     GROUP BY club_id`;
+  for (const r of rows) out.set(r.club_id, { minutes: r.minutes, events: r.events });
+  return out;
+}
+
+/**
+ * Service hours per term, newest first: everyone's, or only at these clubs'
+ * events (hosted or co-hosted; an event shared by two of them counts once).
+ * Terms follow ./service.ts serviceTermOf, the same as a person's record.
+ */
+export async function serviceTotalsByTerm(opts: { clubIds?: string[] } = {}): Promise<ServiceTermTotal[]> {
+  const clubs = opts.clubIds;
+  const inClubs = clubs
+    ? Prisma.sql`WHERE earned.host_id = ANY(${clubs}::text[]) OR EXISTS (SELECT 1 FROM "EventCohost" c WHERE c."eventId" = earned.event_id AND c.status = 'APPROVED' AND c."clubId" = ANY(${clubs}::text[]))`
+    : Prisma.empty;
+  const [rows, terms] = await Promise.all([
+    db.$queryRaw<{ starts_at: Date; minutes: number; events: number }[]>`
+      WITH earned AS (${earnedCheckins({})})
+      SELECT earned.starts_at, sum(earned.minutes)::int AS minutes, count(*)::int AS events
+        FROM earned ${inClubs}
+       GROUP BY earned.occurrence_id, earned.starts_at`,
+    getTerms(),
+  ]);
+  return totalsByTerm(rows.map((r) => ({ startsAt: r.starts_at, minutes: r.minutes, events: r.events })), terms);
 }

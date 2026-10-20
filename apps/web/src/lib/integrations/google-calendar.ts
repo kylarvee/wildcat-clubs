@@ -6,7 +6,7 @@ import { integrationLive } from "@/lib/config";
 import { CLUB_ACCOUNT_FIELDS, clubGoogleAccount, googleJwt, PLATFORM_SENDER } from "@/lib/integrations/google";
 import { richToText } from "@/lib/rich/sanitize";
 import { splitEventLinks } from "@/lib/events/links";
-import { roomLabel } from "@/lib/events/labels";
+import { isHybrid, roomLabel } from "@/lib/events/labels";
 import { appUrl, campusMapQuery } from "@/lib/events/share";
 import { addDaysToDateInput, campusParts, toDateInput } from "@/lib/events/wallclock";
 import { TZ } from "@/lib/time";
@@ -98,7 +98,8 @@ function locationText(e: Loaded) {
 function eventBody(e: Loaded): calendar_v3.Schema$Event {
   const [first, ...rest] = e.occurrences;
   const { body, links } = splitEventLinks(e.descriptionHtml);
-  const details = [richToText(body, 6000), links.map((l) => `${l.label || "Link"}: ${l.url}`).join("\n"), `Details and check-in: ${appUrl(`/events/${e.id}`)}`]
+  // Hybrid: the place is the location; the link people use from afar goes here (as in the ICS feeds).
+  const details = [isHybrid(e) ? `Join online: ${e.virtualUrl}` : null, richToText(body, 6000), links.map((l) => `${l.label || "Link"}: ${l.url}`).join("\n"), `Details and check-in: ${appUrl(`/events/${e.id}`)}`]
     .filter(Boolean)
     .join("\n\n");
   const start: calendar_v3.Schema$EventDateTime = e.allDay ? { date: toDateInput(first.startsAt) } : { dateTime: first.startsAt.toISOString(), timeZone: TZ };

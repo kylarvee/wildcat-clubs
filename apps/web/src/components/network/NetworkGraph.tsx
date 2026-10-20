@@ -14,9 +14,8 @@
  * Polls every 60 s and updates in place: clubs keep their positions.
  */
 
-import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, BarChart3, Expand, Minus, Network as NetworkIcon, Plus, RefreshCw, Table2 } from "lucide-react";
+import { BarChart3, Expand, Minus, Network as NetworkIcon, Plus, RefreshCw, Table2 } from "lucide-react";
 import {
   DEFAULT_NETWORK_GROUP,
   DEFAULT_NETWORK_WINDOW,
@@ -138,7 +137,7 @@ export function NetworkGraph({ height = 480, compact = false, className, initial
 
   const collegeKey = data?.colleges.map((c) => c.id).join(",") ?? "";
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const colors = useMemo(() => collegeColors(data?.colleges ?? []), [collegeKey]);
+  const colors = useMemo(() => collegeColors(data?.colleges ?? [], compact ? "night" : "light"), [collegeKey, compact]);
 
   const adjacency: Adjacency = useMemo(() => {
     const out: Adjacency = new Map();
@@ -176,14 +175,22 @@ export function NetworkGraph({ height = 480, compact = false, className, initial
     : "Club network";
 
   // ─── compact (landing page) ──────────────────────────────────────────────
+  // A dark "night" map that belongs to the landing page's ink band: the connected clubs fill
+  // the frame, the clubs with no lines yet sit behind them as a quiet field of dots, and a slow
+  // spotlight names one busy club at a time instead of crowding the picture with labels.
   if (compact) {
+    const windowText = data?.windowPhrase.replace(/^in the /, "") ?? "";
     return (
-      <div className={cn("relative overflow-hidden rounded-xl bg-surface", className)} style={{ height }}>
+      <div
+        className={cn("relative overflow-hidden rounded-2xl", className)}
+        style={{ height, background: "radial-gradient(120% 95% at 50% 42%, #2b1a3e 0%, #1a1124 48%, #110b17 100%)" }}
+      >
         {data && data.nodes.length ? (
           <>
             <NetworkCanvas
               data={data}
               compact
+              theme="night"
               height={height}
               selection={null}
               onSelect={() => {}}
@@ -194,24 +201,36 @@ export function NetworkGraph({ height = 480, compact = false, className, initial
               handleRef={canvas}
               ariaLabel={ariaLabel}
             />
-            <div className="pointer-events-none absolute left-2.5 top-2.5 max-w-[62%] rounded-lg bg-surface/85 px-2.5 py-1.5 text-[11px] leading-snug text-ink-2 backdrop-blur-sm">
-              <p>
-                <span className="font-semibold text-ink">Bigger</span> = more check-ins
+            <div className="pointer-events-none absolute left-4 top-4 text-[11px] leading-snug">
+              <p className="flex items-center gap-1.5 font-semibold uppercase tracking-[0.14em] text-white/50">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" aria-hidden="true" />
+                Live · {windowText}
               </p>
-              <p>
-                <span className="font-semibold text-ink">Thicker line</span> = more members visiting
+              <p className="mt-1 text-white/70">
+                <span className="font-semibold text-white">{fmt(data.nodes.length)}</span> clubs ·{" "}
+                <span className="font-semibold text-white">{fmt(data.edges.length)}</span> connections
               </p>
             </div>
-            <ZoomControls onZoom={(f) => canvas.current?.zoom(f)} onFit={() => canvas.current?.fit()} className="right-2.5 top-2.5" small />
-            <Link
-              href="/network"
-              className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-            >
-              Explore the full network <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
+            <ZoomControls onZoom={(f) => canvas.current?.zoom(f)} onFit={() => canvas.current?.fit()} className="right-3 top-3" small dark />
+            <div className="pointer-events-none absolute bottom-4 left-4 space-y-1.5 text-[11px] text-white/55" aria-hidden="true">
+              <p className="flex items-center gap-2">
+                <svg width="26" height="12" viewBox="0 0 26 12" className="shrink-0">
+                  <circle cx="4" cy="6" r="2.5" fill="#c7b6f2" />
+                  <circle cx="18" cy="6" r="5.5" fill="#c7b6f2" />
+                </svg>
+                More check-ins
+              </p>
+              <p className="flex items-center gap-2">
+                <svg width="26" height="12" viewBox="0 0 26 12" className="shrink-0">
+                  <path d="M1 9 Q 7 3 12 6" stroke="#c7b6f2" strokeWidth="1" fill="none" strokeLinecap="round" />
+                  <path d="M14 9 Q 20 3 25 6" stroke="#c7b6f2" strokeWidth="3" fill="none" strokeLinecap="round" />
+                </svg>
+                More members visiting
+              </p>
+            </div>
           </>
         ) : (
-          <CanvasState loading={loading} error={error} empty={Boolean(data && !data.nodes.length)} onRetry={() => load(win, group, false)} />
+          <CanvasState loading={loading} error={error} empty={Boolean(data && !data.nodes.length)} onRetry={() => load(win, group, false)} dark />
         )}
       </div>
     );
@@ -359,7 +378,7 @@ export function NetworkGraph({ height = 480, compact = false, className, initial
         </p>
       ) : null}
       <p id={helpId} className={cn("text-xs text-ink-3", asTable && "hidden")}>
-        Drag to move around, pinch or click the map and scroll to zoom, and drag a circle to pull it. With the keyboard: arrow keys pan, + and − zoom, 0 fits everything, Esc closes details.
+        Drag to move around, pinch or click the map and scroll to zoom, and drag a circle to pull it. With the keyboard: arrow keys pan, + and − zoom, 0 fits the network, Esc closes details.
       </p>
 
       {asTable && data ? (
@@ -385,30 +404,39 @@ export function NetworkGraph({ height = 480, compact = false, className, initial
   );
 }
 
-function ZoomControls({ onZoom, onFit, className, small }: { onZoom: (f: number) => void; onFit: () => void; className?: string; small?: boolean }) {
+function ZoomControls({ onZoom, onFit, className, small, dark }: { onZoom: (f: number) => void; onFit: () => void; className?: string; small?: boolean; dark?: boolean }) {
   const btn = cn(
-    "flex items-center justify-center bg-surface text-ink-2 hover:bg-muted hover:text-ink focus-visible:relative focus-visible:outline-2 focus-visible:outline-brand",
+    "flex items-center justify-center transition-colors focus-visible:relative focus-visible:outline-2",
+    dark ? "text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-white/80" : "bg-surface text-ink-2 hover:bg-muted hover:text-ink focus-visible:outline-brand",
     small ? "h-8 w-8" : "h-9 w-9",
   );
   return (
-    <div className={cn("absolute z-10 flex flex-col divide-y divide-line overflow-hidden rounded-lg border border-line shadow-sm", className)} role="group" aria-label="Zoom">
+    <div
+      className={cn(
+        "absolute z-10 flex flex-col overflow-hidden rounded-lg border",
+        dark ? "divide-y divide-white/10 border-white/10 bg-white/[0.06] backdrop-blur-md" : "divide-y divide-line border-line shadow-sm",
+        className,
+      )}
+      role="group"
+      aria-label="Zoom"
+    >
       <button type="button" className={btn} onClick={() => onZoom(1.35)} aria-label="Zoom in">
         <Plus className="h-4 w-4" aria-hidden="true" />
       </button>
       <button type="button" className={btn} onClick={() => onZoom(1 / 1.35)} aria-label="Zoom out">
         <Minus className="h-4 w-4" aria-hidden="true" />
       </button>
-      <button type="button" className={btn} onClick={onFit} aria-label="Fit everything in view">
+      <button type="button" className={btn} onClick={onFit} aria-label="Fit the network in view">
         <Expand className="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
   );
 }
 
-function CanvasState({ loading, error, empty, onRetry }: { loading: boolean; error: string | null; empty: boolean; onRetry: () => void }) {
+function CanvasState({ loading, error, empty, onRetry, dark }: { loading: boolean; error: string | null; empty: boolean; onRetry: () => void; dark?: boolean }) {
   if (loading)
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-ink-3" role="status">
+      <div className={cn("flex h-full flex-col items-center justify-center gap-3 text-sm", dark ? "text-white/60" : "text-ink-3")} role="status">
         <NetworkIcon className="h-8 w-8 animate-pulse text-brand-200" aria-hidden="true" />
         Loading the club network…
       </div>

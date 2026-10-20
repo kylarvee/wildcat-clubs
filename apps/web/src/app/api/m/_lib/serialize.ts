@@ -6,7 +6,9 @@ import { ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
 import { viewerClubState } from "@/lib/domain/memberships";
 import type { OccurrenceSummary } from "@/lib/attendance/queries";
 import type { FeedOccurrence } from "@/lib/events/feed";
-import { KIND_LABEL, locationText } from "@/lib/events/labels";
+import { isHybrid, KIND_LABEL, locationText } from "@/lib/events/labels";
+import { normalizePerks } from "@/lib/events/rules";
+import { earnedMinutes, serviceHours } from "@/lib/metrics/service";
 import type { AnnouncementView } from "@/lib/domain/announcements";
 import { richToText } from "@/lib/rich/sanitize";
 import { fmtRange, inCampusTime } from "@/lib/time";
@@ -102,10 +104,13 @@ export function feedToMEvent(o: FeedOccurrence, now = new Date()): MEvent {
     cancelled: o.status === "CANCELLED" || e.status === "CANCELLED",
     note: o.note,
     visibility: e.visibility,
-    // The feed's club select has no logoUrl; colored initials are enough in a list.
-    club: e.club ? { id: e.club.id, name: e.club.name, slug: e.club.slug, logoUrl: null, logoColor: e.club.logoColor } : null,
+    club: e.club ? toClubRef(e.club) : null,
     cohostNames: e.cohosts.map((c) => c.club.name),
     happeningNow: o.startsAt <= now && now <= o.endsAt,
+    coverUrl: e.coverUrl,
+    perks: normalizePerks(e.perks),
+    serviceHours: earnedMinutes(e.serviceMinutes) ? serviceHours(earnedMinutes(e.serviceMinutes)) : null,
+    hybrid: isHybrid(e),
   };
 }
 

@@ -6,7 +6,7 @@ import { ArrowRight } from "lucide-react";
 import type { NetworkPayload, NetworkViewNode } from "@/lib/analytics/network-model";
 import { cn } from "@/components/ui/cn";
 import { applyForces, buildLinks, createSimulation, FLOAT_ALPHA, floatForce, lineAlpha, lineWidthScale, radiusScale, seedPositions, type SimLink, type SimNode } from "./layout";
-import { colorOf, HIGHLIGHT, INK, LINE, MINE_GRAY } from "./colors";
+import { CANVAS_THEMES, colorOf, withAlpha, type CanvasThemeName } from "./colors";
 
 /**
  * The drawing surface of the network: a <canvas> fed by a live d3-force
@@ -34,8 +34,54 @@ type Tip = { kind: "node"; key: string; x: number; y: number } | { kind: "link";
 const MIN_K = 0.15;
 const MAX_K = 6;
 const DRAG_SLOP = 5;
+/** How far a line bows to one side, as a share of its length. */
+const BOW = 0.12;
+/** The landing embed's spotlight: a new club every few seconds, crossfading in and out. */
+const SPOT_EVERY_MS = 6500;
+const SPOT_FADE_MS = 800;
+const SPOT_HUBS = 8;
+/** On first paint the map fades and settles in over this long. */
+const APPEAR_MS = 900;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const fmt = (n: number) => n.toLocaleString("en-US");
+const ease = (u: number) => 1 - Math.pow(1 - clamp(u, 0, 1), 3);
+
+/**
+ * A line's control point: the midpoint pushed sideways by BOW of its length,
+ * always to the same side for a given pair, so a dense web reads as strands.
+ */
+function bend(s: SimNode, t: SimNode) {
+  const sign = s.key < t.key ? 1 : -1;
+  const dx = t.x! - s.x!;
+  const dy = t.y! - s.y!;
+  return { x: (s.x! + t.x!) / 2 - dy * BOW * sign, y: (s.y! + t.y!) / 2 + dx * BOW * sign };
+}
+
+function distToSegment(px: number, py: number, x0: number, y0: number, x1: number, y1: number) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len2 = dx * dx + dy * dy || 1;
+  const u = clamp(((px - x0) * dx + (py - y0) * dy) / len2, 0, 1);
+  return Math.hypot(px - (x0 + u * dx), py - (y0 + u * dy));
+}
+
+/** Distance from a point to a bowed line, measured along a dozen short segments of the curve. */
+function distToCurve(px: number, py: number, s: SimNode, t: SimNode) {
+  const c = bend(s, t);
+  let best = Infinity;
+  let x0 = s.x!;
+  let y0 = s.y!;
+  for (let i = 1; i <= 12; i++) {
+    const u = i / 12;
+    const v = 1 - u;
+    const x1 = v * v * s.x! + 2 * v * u * c.x + u * u * t.x!;
+    const y1 = v * v * s.y! + 2 * v * u * c.y + u * u * t.y!;
+    best = Math.min(best, distToSegment(px, py, x0, y0, x1, y1));
+    x0 = x1;
+    y0 = y1;
+  }
+  return best;
+}
 
 export function NetworkCanvas({
   data,
@@ -52,6 +98,7 @@ export function NetworkCanvas({
   refreshing,
   ariaLabel,
   describedBy,
+  theme = "light",
 }: {
   data: NetworkPayload;
   compact: boolean;
@@ -69,6 +116,8 @@ export function NetworkCanvas({
   refreshing?: boolean;
   ariaLabel: string;
   describedBy?: string;
+  /** "night" for the landing page's dark band. */
+  theme?: CanvasThemeName;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,14 +141,20 @@ export function NetworkCanvas({
   const visibleRef = useRef(true);
   const lineWidthRef = useRef<(w: number) => number>(() => 1);
   const maxWeightRef = useRef(1);
+  /** The spotlight's current and previous club (they crossfade from `since`). */
+  const spotRef = useRef<{ key: string | null; prev: string | null; since: number }>({ key: null, prev: null, since: 0 });
+  /** When the map first painted, for the fade-in. */
+  const bornRef = useRef(0);
+  /** One glow image per color, drawn once and reused every frame. */
+  const glowsRef = useRef(new Map<string, HTMLCanvasElement>());
   const [tip, setTip] = useState<Tip | null>(null);
   const [pinned, setPinned] = useState<Tip | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Latest props for the draw loop, which runs outside React renders.
-  const propsRef = useRef({ selection, collegeFocus, minWeight, colors, data, compact, rightInset });
-  propsRef.current = { selection, collegeFocus, minWeight, colors, data, compact, rightInset };
+  const propsRef = useRef({ selection, collegeFocus, minWeight, colors, data, compact, rightInset, theme, adjacency });
+  propsRef.current = { selection, collegeFocus, minWeight, colors, data, compact, rightInset, theme, adjacency };
 
   const leads = useRef(new Set<string>());
   const member = useRef(new Set<string>());
@@ -108,6 +163,23 @@ export function NetworkCanvas({
 
   // ─── drawing ─────────────────────────────────────────────────────────────
 
+  const glowFor = (color: string) => {
+    let g = glowsRef.current.get(color);
+    if (!g) {
+      g = document.createElement("canvas");
+      g.width = g.height = 128;
+      const c = g.getContext("2d")!;
+      const grad = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, withAlpha(color, 0.42));
+      grad.addColorStop(0.3, withAlpha(color, 0.15));
+      grad.addColorStop(1, withAlpha(color, 0));
+      c.fillStyle = grad;
+      c.fillRect(0, 0, 128, 128);
+      glowsRef.current.set(color, g);
+    }
+    return g;
+  };
+
   const draw = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -115,10 +187,13 @@ export function NetworkCanvas({
     const { w, h, dpr } = sizeRef.current;
     if (!w || !h) return;
     const p = propsRef.current;
+    const th = CANVAS_THEMES[p.theme];
     const t = tRef.current;
     const nodes = nodesRef.current;
     const links = linksRef.current;
     const hover = hoverRef.current;
+    const now = performance.now();
+    const appear = reducedRef.current || !bornRef.current ? 1 : ease((now - bornRef.current) / APPEAR_MS);
 
     // What's in focus: a hovered/selected node and its neighbors, or a line and its two ends.
     const activeNode = hover?.kind === "node" ? hover.key : p.selection?.type === "node" ? p.selection.key : null;
@@ -136,6 +211,18 @@ export function NetworkCanvas({
     } else if (activeLink) {
       lit = new Set(activeLink.split("|"));
     }
+
+    // The spotlight (landing embed): its club and the previous one crossfade; pointing at the map wins.
+    const spot = spotRef.current;
+    const spotOn = !lit && spot.key !== null;
+    const spotLevel = spotOn ? ease((now - spot.since) / SPOT_FADE_MS) : 0;
+    const prevLevel = spotOn && spot.prev && spot.prev !== spot.key ? 1 - spotLevel : 0;
+    const around = (key: string | null) => new Set(key ? [key, ...(p.adjacency.get(key) ?? []).map((a) => a.key)] : []);
+    const spotSet = spotOn ? around(spot.key) : null;
+    const prevSet = prevLevel > 0 ? around(spot.prev) : null;
+    const dimBySpot = Math.max(spotLevel, prevLevel) * 0.55;
+    const spotGlowOf = (key: string) => (spotSet?.has(key) ? spotLevel : 0) + (prevSet?.has(key) ? prevLevel : 0);
+
     const inCollege = (n: SimNode) => !p.collegeFocus || (p.collegeFocus === "none" ? !n.node.collegeId : n.node.collegeId === p.collegeFocus);
     const isLead = (n: SimNode) => n.node.clubIds.some((id) => leads.current.has(id));
     const isMember = (n: SimNode) => n.node.clubIds.some((id) => member.current.has(id));
@@ -145,55 +232,104 @@ export function NetworkCanvas({
     ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
     ctx.lineCap = "round";
 
-    // Lines, lightest first so heavy ones sit on top.
+    // Lines, lightest first so heavy ones sit on top. Each bows gently to one side.
     const maxW = maxWeightRef.current;
+    const hair = 0.7 / t.k;
+    const widthScale = p.compact ? 0.75 : 1;
     for (const l of links) {
       if (l.weight < p.minWeight) continue;
       const s = l.source as SimNode;
       const tt = l.target as SimNode;
       if (s.x == null || tt.x == null) continue;
-      const base = lineAlpha(l.weight, maxW);
+      const base = lineAlpha(l.weight, maxW) * th.lineAlpha;
       const touches = activeNode ? s.key === activeNode || tt.key === activeNode : activeLink ? l.key === activeLink || `${tt.key}|${s.key}` === activeLink : false;
       let alpha = base;
-      let color = LINE;
+      let color = th.line;
+      let spotGlow = 0;
       if (lit) {
         if (touches) {
-          alpha = 0.3 + 1.3 * base;
-          color = HIGHLIGHT;
-        } else alpha *= 0.18;
+          alpha = Math.min(1, 0.35 + 1.4 * base);
+          color = th.highlight;
+        } else alpha *= 0.14;
+      } else if (spotOn) {
+        spotGlow = (s.key === spot.key || tt.key === spot.key ? spotLevel : 0) + (spot.prev && (s.key === spot.prev || tt.key === spot.prev) ? prevLevel : 0);
+        if (spotGlow < 0.01) alpha *= 1 - dimBySpot;
       }
       if (p.collegeFocus && !(inCollege(s) && inCollege(tt))) alpha *= 0.2;
-      ctx.globalAlpha = alpha;
+      const c = bend(s, tt);
+      const width = Math.max(hair, lineWidthRef.current(l.weight) * widthScale) * (touches ? 1.15 : 1);
+      ctx.globalAlpha = alpha * appear;
       ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidthRef.current(l.weight) * (touches ? 1.15 : 1);
+      ctx.lineWidth = width;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y!);
-      ctx.lineTo(tt.x, tt.y!);
+      ctx.quadraticCurveTo(c.x, c.y, tt.x, tt.y!);
       ctx.stroke();
+      if (spotGlow > 0.01) {
+        // The spotlight's lines brighten in place rather than snapping to a new color.
+        ctx.globalAlpha = Math.min(1, 0.3 + 1.4 * base) * spotGlow * appear;
+        ctx.strokeStyle = th.highlight;
+        ctx.lineWidth = width * 1.1;
+        ctx.stroke();
+      }
     }
 
-    // Nodes: biggest first, so small clubs stay visible on top.
-    const ring = 1.5 / t.k;
+    const ring = 1.25 / t.k;
+    const quietR = (n: SimNode) => Math.max(1.5 / t.k, n.r * 0.5);
+    const special = (n: SimNode) =>
+      (lit?.has(n.key) ?? false) || isLead(n) || isMember(n) || (p.selection?.type === "node" && p.selection.key === n.key) || (hover?.kind === "node" && hover.key === n.key);
+
+    // Clubs with no lines yet: a quiet field of small dots behind the network.
+    for (const n of nodes) {
+      if (n.strength > 0 || n.x == null || n.y == null || special(n)) continue;
+      const faded = Boolean(lit) || !inCollege(n);
+      ctx.globalAlpha = (faded ? 0.1 : th.quietAlpha * (1 - dimBySpot * 0.5)) * appear;
+      ctx.fillStyle = p.collegeFocus && inCollege(n) ? colorOf(p.colors, n.node.collegeId) : th.quiet;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, quietR(n), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // A soft glow behind the busiest clubs (dark map only).
+    if (th.glow) {
+      let glows = 0;
+      for (const n of nodes) {
+        if (glows >= 28) break;
+        // College clubs glow in their color; university-wide ones don't, or the middle turns to haze.
+        if (n.strength <= 0 || n.x == null || n.y == null || !n.node.collegeId) continue;
+        glows++;
+        const faded = (lit && !lit.has(n.key)) || !inCollege(n);
+        const boost = spotGlowOf(n.key);
+        const a = (faded ? 0.15 : 0.7 + 0.3 * boost) * (1 - (faded ? 0 : dimBySpot * (1 - boost))) * appear;
+        const size = n.r * (4.2 + boost * 1.2);
+        ctx.globalAlpha = a;
+        ctx.drawImage(glowFor(colorOf(p.colors, n.node.collegeId)), n.x - size, n.y - size, size * 2, size * 2);
+      }
+    }
+
+    // Clubs with lines (and anything you point at or belong to): biggest first, so small clubs stay visible on top.
     for (const n of nodes) {
       if (n.x == null || n.y == null) continue;
+      if (n.strength <= 0 && !special(n)) continue;
       const faded = (lit && !lit.has(n.key)) || !inCollege(n);
       const lead = isLead(n);
       const mine = lead || isMember(n);
+      const boost = spotGlowOf(n.key);
       if (faded) {
         // An opaque surface disc first, so faded clubs read as pale circles instead of
         // showing the lines that meet at their centers through a see-through fill.
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#ffffff";
+        ctx.globalAlpha = appear;
+        ctx.fillStyle = th.surface;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.globalAlpha = faded ? 0.24 : 1;
+      ctx.globalAlpha = (faded ? 0.24 : 1 - dimBySpot * (1 - boost) * 0.6) * appear;
       const selected = p.selection?.type === "node" && p.selection.key === n.key;
       const hovered = hover?.kind === "node" && hover.key === n.key;
       if (selected) {
         // The picked club alone gets the glow, so a highlight never reads as a leftover selection.
-        ctx.fillStyle = "rgba(91,45,126,0.16)";
+        ctx.fillStyle = th.selectGlow;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + 10 / t.k, 0, Math.PI * 2);
         ctx.fill();
@@ -204,36 +340,51 @@ export function NetworkCanvas({
       ctx.fill();
       // Surface ring keeps touching nodes apart.
       ctx.lineWidth = ring;
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = th.surface;
       ctx.stroke();
-      // Rings: solid = what you're pointing at or picked; dashed = your clubs (always on, per the spec:
+      // Rings: solid = what you're pointing at, picked, or in the spotlight; dashed = your clubs (always on, per the spec:
       // leaders and advisors see their clubs highlighted — purple for clubs you lead, gray for clubs you're in).
       if (selected || hovered) {
         const width = (selected ? 3 : 2) / t.k;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + ring + width / 2, 0, Math.PI * 2);
         ctx.lineWidth = width;
-        ctx.strokeStyle = selected ? HIGHLIGHT : INK;
+        ctx.strokeStyle = selected ? th.highlight : th.ink;
         ctx.stroke();
       } else if (mine) {
         const width = (lead ? 2.25 : 1.75) / t.k;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + ring + width / 2 + 1 / t.k, 0, Math.PI * 2);
         ctx.lineWidth = width;
-        ctx.strokeStyle = lead ? HIGHLIGHT : MINE_GRAY;
+        ctx.strokeStyle = lead ? th.highlight : th.mineGray;
         ctx.setLineDash([4 / t.k, 3 / t.k]);
         ctx.stroke();
         ctx.setLineDash([]);
+      } else if (n.key === spot.key || n.key === spot.prev) {
+        const level = n.key === spot.key ? spotLevel : prevLevel;
+        if (level > 0.01) {
+          const width = 1.75 / t.k;
+          ctx.globalAlpha = level * appear;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r + ring + width / 2 + 1.5 / t.k, 0, Math.PI * 2);
+          ctx.lineWidth = width;
+          ctx.strokeStyle = th.highlight;
+          ctx.stroke();
+        }
       }
     }
     ctx.globalAlpha = 1;
 
-    // Labels in screen space: always for the focused, selected and "your" clubs, then the
-    // biggest ones that fit without overlapping.
+    // Names, in screen space.
+    //  - The full map: whatever's in focus and your clubs, then the biggest clubs that fit,
+    //    more of them as you zoom in. Dots with no lines stay unnamed until you're close.
+    //  - The landing embed: no resting names at all, only what you point at (and its closest
+    //    neighbors) or the spotlight's club, so the picture stays calm.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.font = `600 12px ${fontRef.current}`;
+    const size = p.compact ? 11 : 11.5;
+    const font = (weight: number, px = size) => `${weight} ${px}px ${fontRef.current}`;
     ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    ctx.textBaseline = "middle";
     const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
     const priority = (n: SimNode) => {
       if (n.key === activeNode || (p.selection?.type === "node" && p.selection.key === n.key)) return 0;
@@ -242,35 +393,100 @@ export function NetworkCanvas({
       if (isMember(n)) return 3;
       return 4;
     };
-    const ranked = [...nodes].sort((a, b) => priority(a) - priority(b) || b.r - a.r);
-    const budget = p.compact ? 7 : Math.max(14, Math.round(nodes.length * 0.45));
-    let count = 0;
-    for (const n of ranked) {
-      if (n.x == null || n.y == null) continue;
-      const pr = priority(n);
-      const sr = n.r * t.k;
-      if (pr === 4 && ((lit && !lit.has(n.key)) || !inCollege(n))) continue;
-      if (pr >= 3 && count >= budget && sr < 16) continue;
-      const sx = n.x * t.k + t.x;
-      const sy = n.y * t.k + t.y + sr + 4;
-      if (sx < -80 || sx > w + 80 || sy < -20 || sy > h + 20) continue;
-      const text = n.node.short.length > 28 ? `${n.node.short.slice(0, 26)}…` : n.node.short;
-      let tw = widthsRef.current.get(text);
+    const measure = (text: string, weight: number, px = size) => {
+      const k = `${weight}|${px}|${text}`;
+      let tw = widthsRef.current.get(k);
       if (tw == null) {
+        ctx.font = font(weight, px);
         tw = ctx.measureText(text).width;
-        widthsRef.current.set(text, tw);
+        widthsRef.current.set(k, tw);
       }
-      const box = { x0: sx - tw / 2 - 3, y0: sy - 1, x1: sx + tw / 2 + 3, y1: sy + 15 };
-      if (pr > 1 && placed.some((b) => !(box.x1 < b.x0 || box.x0 > b.x1 || box.y1 < b.y0 || box.y0 > b.y1))) continue;
+      return tw;
+    };
+    const shorten = (text: string) => (text.length > 28 ? `${text.slice(0, 26)}…` : text);
+    const label = (n: SimNode, alpha: number, strong: boolean, caption?: string) => {
+      const text = shorten(n.node.short);
+      const weight = strong ? 600 : 500;
+      const tw = measure(text, weight);
+      const cw = caption ? measure(caption, 500, size - 1.5) : 0;
+      const padX = th.pill ? 7 : 3;
+      const boxW = Math.max(tw, cw) + padX * 2;
+      const boxH = caption ? 34 : th.pill ? 20 : 15;
+      const sr = n.r * t.k;
+      let cx = n.x! * t.k + t.x;
+      const top = n.y! * t.k + t.y + sr + 5;
+      if (cx < -60 || cx > w + 60 || top < -30 || top > h + 10) return false;
+      cx = clamp(cx, boxW / 2 + 6, w - boxW / 2 - 6);
+      const box = { x0: cx - boxW / 2, y0: top, x1: cx + boxW / 2, y1: top + boxH };
+      if (placed.some((b) => !(box.x1 + 2 < b.x0 || box.x0 > b.x1 + 2 || box.y1 + 2 < b.y0 || box.y0 > b.y1 + 2))) return false;
       placed.push(box);
-      ctx.lineWidth = 3.5;
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "rgba(255,255,255,0.92)";
-      ctx.strokeText(text, sx, sy);
-      ctx.fillStyle = pr <= 2 ? INK : "#4a4453";
-      ctx.fillText(text, sx, sy);
-      count++;
+      ctx.globalAlpha = alpha * appear;
+      if (th.pill) {
+        ctx.beginPath();
+        if (typeof ctx.roundRect === "function") ctx.roundRect(box.x0, box.y0, boxW, boxH, 7);
+        else ctx.rect(box.x0, box.y0, boxW, boxH);
+        ctx.fillStyle = th.pill.fill;
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = th.pill.stroke;
+        ctx.stroke();
+      }
+      const ty = caption ? top + 12 : top + boxH / 2;
+      ctx.font = font(weight);
+      if (!th.pill) {
+        ctx.lineWidth = 3;
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = th.halo;
+        ctx.strokeText(text, cx, ty);
+      }
+      ctx.fillStyle = strong ? th.ink : th.inkSoft;
+      ctx.fillText(text, cx, ty);
+      if (caption) {
+        ctx.font = font(500, size - 1.5);
+        ctx.fillStyle = th.inkSoft;
+        ctx.fillText(caption, cx, top + 25);
+      }
+      return true;
+    };
+
+    const ranked = [...nodes].filter((n) => n.x != null && n.y != null).sort((a, b) => priority(a) - priority(b) || b.r - a.r);
+    if (p.compact) {
+      let neighbors = 0;
+      for (const n of ranked) {
+        const pr = priority(n);
+        // The card beside the pointer already names the club you're on; its neighbors get the labels.
+        if (pr === 0) continue;
+        if (pr === 1 && neighbors < 5) {
+          if (label(n, 0.92, false)) neighbors++;
+        }
+      }
+      if (spotOn) {
+        for (const [key, level] of [
+          [spot.key, spotLevel],
+          [spot.prev, prevLevel],
+        ] as const) {
+          if (!key || level < 0.02) continue;
+          const n = byKeyRef.current.get(key);
+          if (!n || n.x == null) continue;
+          const links = p.adjacency.get(key)?.length ?? 0;
+          label(n, level, true, `Connected to ${links} ${links === 1 ? "club" : "clubs"}`);
+        }
+      }
+    } else {
+      const budget = Math.round(clamp(4 + 7 * t.k, 6, 50));
+      let count = 0;
+      for (const n of ranked) {
+        const pr = priority(n);
+        if (pr === 4 && ((lit && !lit.has(n.key)) || !inCollege(n))) continue;
+        if (pr >= 3) {
+          if (count >= budget) continue;
+          if (n.strength <= 0 && t.k < 1.8) continue;
+          if (n.r * t.k < 6) continue;
+        }
+        if (label(n, 1, pr <= 2)) count++;
+      }
     }
+    ctx.globalAlpha = 1;
   };
 
   const requestDraw = () => {
@@ -285,7 +501,10 @@ export function NetworkCanvas({
 
   const fitTransform = (): Transform => {
     const { w, h } = sizeRef.current;
-    const nodes = nodesRef.current.filter((n) => n.x != null && n.y != null);
+    const all = nodesRef.current.filter((n) => n.x != null && n.y != null);
+    // Frame the connected clubs; the quiet dots beyond them become the backdrop (zoom out to see them all).
+    const core = all.filter((n) => n.strength > 0);
+    const nodes = core.length >= 3 ? core : all;
     const inset = propsRef.current.rightInset;
     if (!nodes.length) return { k: 1, x: (w - inset) / 2, y: h / 2 };
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -412,6 +631,40 @@ export function NetworkCanvas({
     return () => io.disconnect();
   }, []);
 
+  // The landing embed's spotlight: every few seconds one of the busiest clubs lights up its
+  // connections and shows its name, so the map explains itself without a wall of labels. It
+  // waits while someone points at the map or it's off screen, and never runs with reduced motion.
+  useEffect(() => {
+    if (!compact || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    let i = 0;
+    let fade = 0;
+    const advance = () => {
+      if (hoverRef.current || !visibleRef.current || document.visibilityState !== "visible") return;
+      const hubs = nodesRef.current.filter((n) => n.strength > 0).sort((a, b) => b.strength - a.strength).slice(0, SPOT_HUBS);
+      if (!hubs.length) return;
+      const next = hubs[i % hubs.length].key;
+      i++;
+      spotRef.current = { key: next, prev: spotRef.current.key, since: performance.now() };
+      // Keep drawing through the crossfade, even if the layout happens to be still.
+      const until = performance.now() + SPOT_FADE_MS + 50;
+      cancelAnimationFrame(fade);
+      const step = () => {
+        draw();
+        if (performance.now() < until) fade = requestAnimationFrame(step);
+      };
+      fade = requestAnimationFrame(step);
+    };
+    const first = setTimeout(advance, APPEAR_MS + 900);
+    const timer = setInterval(advance, SPOT_EVERY_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+      cancelAnimationFrame(fade);
+      spotRef.current = { key: null, prev: null, since: 0 };
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact]);
+
   // Canvas size follows its box (and the screen's pixel density).
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -483,6 +736,7 @@ export function NetworkCanvas({
     if (firstLoad || reducedRef.current) {
       // Settle before the first paint (bounded, so a big network never blocks the page).
       sim.alpha(firstLoad ? 1 : 0.5);
+      if (firstLoad) bornRef.current = performance.now();
       const start = performance.now();
       for (let i = 0; i < 300 && performance.now() - start < 140; i++) sim.tick();
       if (firstLoad) tRef.current = fitTransform();
@@ -555,11 +809,7 @@ export function NetworkCanvas({
       const s = l.source as SimNode;
       const t = l.target as SimNode;
       if (s.x == null || t.x == null) continue;
-      const dx = t.x - s.x;
-      const dy = t.y! - s.y!;
-      const len2 = dx * dx + dy * dy || 1;
-      const u = clamp(((x - s.x) * dx + (y - s.y!) * dy) / len2, 0, 1);
-      const d = Math.hypot(x - (s.x + u * dx), y - (s.y! + u * dy));
+      const d = distToCurve(x, y, s, t);
       const tol = Math.max(lineWidthRef.current(l.weight) / 2, 5 / tRef.current.k);
       if (d <= tol && (d < bestD - 0.5 || (Math.abs(d - bestD) <= 0.5 && l.weight > (best?.weight ?? 0)))) {
         best = l;
@@ -812,10 +1062,12 @@ export function NetworkCanvas({
         }}
         onKeyDown={onKeyDown}
       />
-      {shown ? <TipCard tip={shown} nodes={nodeByKey} adjacency={adjacency} pinned={compact && pinned !== null} compact={compact} width={sizeRef.current.w} height={sizeRef.current.h} /> : null}
+      {shown ? (
+        <TipCard tip={shown} nodes={nodeByKey} adjacency={adjacency} pinned={compact && pinned !== null} compact={compact} dark={theme === "night"} width={sizeRef.current.w} height={sizeRef.current.h} />
+      ) : null}
       {hint ? (
         <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center" aria-hidden="true">
-          <span className="rounded-full bg-ink/85 px-3 py-1.5 text-xs font-medium text-white shadow-lg">{hint}</span>
+          <span className={cn("rounded-full px-3 py-1.5 text-xs font-medium shadow-lg", theme === "night" ? "bg-white/90 text-ink" : "bg-ink/85 text-white")}>{hint}</span>
         </div>
       ) : null}
     </div>
@@ -828,6 +1080,7 @@ function TipCard({
   adjacency,
   pinned,
   compact,
+  dark,
   width,
   height,
 }: {
@@ -836,9 +1089,14 @@ function TipCard({
   adjacency: Adjacency;
   pinned: boolean;
   compact: boolean;
+  /** On the landing page's dark band the card is dark glass. */
+  dark: boolean;
   width: number;
   height: number;
 }) {
+  const c = dark
+    ? { card: "border-white/10 bg-[#1a1322]/95 shadow-2xl shadow-black/40 backdrop-blur-sm", ink: "text-white", soft: "text-white/75", faint: "text-white/55", rule: "border-white/10", link: "text-brand-200" }
+    : { card: "border-line bg-surface shadow-[var(--shadow-pop)]", ink: "text-ink", soft: "text-ink-2", faint: "text-ink-3", rule: "border-line", link: "text-brand-600" };
   // Flip to the other side of the pointer near the right and bottom edges, so the card never leaves the canvas.
   const style: React.CSSProperties = {};
   if (tip.x > width / 2) style.right = Math.max(8, width - tip.x + 14);
@@ -851,14 +1109,14 @@ function TipCard({
     const b = nodes.get(tip.b);
     if (!a || !b) return null;
     return (
-      <div className="pointer-events-none absolute z-10 w-max max-w-[15rem] rounded-xl border border-line bg-surface px-3 py-2 text-xs shadow-[var(--shadow-pop)]" style={style} role="tooltip">
-        <p className="font-semibold text-ink">
-          {a.label} <span className="font-normal text-ink-3">and</span> {b.label}
+      <div className={cn("pointer-events-none absolute z-10 w-max max-w-[15rem] rounded-xl border px-3 py-2 text-xs", c.card)} style={style} role="tooltip">
+        <p className={cn("font-semibold", c.ink)}>
+          {a.label} <span className={cn("font-normal", c.faint)}>and</span> {b.label}
         </p>
         <p className="mt-1">
-          <span className="text-sm font-semibold text-ink">{fmt(tip.weight)}</span> <span className="text-ink-3">cross-club check-ins</span>
+          <span className={cn("text-sm font-semibold", c.ink)}>{fmt(tip.weight)}</span> <span className={c.faint}>cross-club check-ins</span>
         </p>
-        {!compact ? <p className="mt-1 text-ink-3">Click the line for the breakdown</p> : null}
+        {!compact ? <p className={cn("mt-1", c.faint)}>Click the line for the breakdown</p> : null}
       </div>
     );
   }
@@ -868,36 +1126,33 @@ function TipCard({
   const top = (adjacency.get(n.key) ?? []).slice(0, 3);
   return (
     <div
-      className={cn(
-        "absolute z-10 w-max max-w-[16rem] rounded-xl border border-line bg-surface px-3 py-2 text-xs shadow-[var(--shadow-pop)]",
-        pinned ? "pointer-events-auto" : "pointer-events-none",
-      )}
+      className={cn("absolute z-10 w-max max-w-[16rem] rounded-xl border px-3 py-2 text-xs", c.card, pinned ? "pointer-events-auto" : "pointer-events-none")}
       style={style}
       role={pinned ? "dialog" : "tooltip"}
       aria-label={pinned ? n.label : undefined}
     >
-      <p className="text-sm font-semibold text-ink">{n.label}</p>
-      <p className="text-ink-3">{n.detail}</p>
-      <p className="mt-1.5 text-ink-2">
-        <span className="font-semibold text-ink">{fmt(n.members)}</span> {n.kind === "club" ? "members" : "memberships"} · <span className="font-semibold text-ink">{fmt(n.size)}</span> check-ins
+      <p className={cn("text-sm font-semibold", c.ink)}>{n.label}</p>
+      <p className={c.faint}>{n.detail}</p>
+      <p className={cn("mt-1.5", c.soft)}>
+        <span className={cn("font-semibold", c.ink)}>{fmt(n.members)}</span> {n.kind === "club" ? "members" : "memberships"} · <span className={cn("font-semibold", c.ink)}>{fmt(n.size)}</span> check-ins
       </p>
       {top.length ? (
-        <div className="mt-1.5 border-t border-line pt-1.5">
-          <p className="text-ink-3">Most connected with</p>
+        <div className={cn("mt-1.5 border-t pt-1.5", c.rule)}>
+          <p className={c.faint}>Most connected with</p>
           <ul className="mt-0.5 space-y-0.5">
             {top.map((t) => (
               <li key={t.key} className="flex justify-between gap-3">
-                <span className="truncate text-ink-2">{nodes.get(t.key)?.label ?? "—"}</span>
-                <span className="tabular-nums font-medium text-ink">{fmt(t.weight)}</span>
+                <span className={cn("truncate", c.soft)}>{nodes.get(t.key)?.label ?? "—"}</span>
+                <span className={cn("tabular-nums font-medium", c.ink)}>{fmt(t.weight)}</span>
               </li>
             ))}
           </ul>
         </div>
       ) : (
-        <p className="mt-1.5 text-ink-3">No cross-club check-ins yet</p>
+        <p className={cn("mt-1.5", c.faint)}>No cross-club check-ins yet</p>
       )}
       {pinned && n.href ? (
-        <Link href={n.href} className="mt-2 inline-flex items-center gap-1 font-semibold text-brand-600 hover:underline">
+        <Link href={n.href} className={cn("mt-2 inline-flex items-center gap-1 font-semibold hover:underline", c.link)}>
           Open club page <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       ) : null}

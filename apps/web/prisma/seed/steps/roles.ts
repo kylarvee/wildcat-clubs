@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { RoleEndReason } from "@prisma/client";
 import type { Assignment, ClubM, Ctx, Person } from "../ctx";
 import { addDays, DAY, maxDate, minDate } from "../lib/dates";
+import { seatsFor } from "@/lib/roles/defaults";
 import { addMember, engagement, ensureMemberGraduating } from "./clubs";
 import { decGraduation, fallStartDate, mayGraduation, springStartDate } from "./reference";
 
@@ -653,6 +654,39 @@ function recentSuccessions(ctx: Ctx) {
   }
 }
 
+// ─── Wildcat Investors' line (steps/community buildElections) ───────────────
+
+/**
+ * PERSONAS: Wildcat Investors' Next in line vote needs an officer seated behind
+ * Oscar (Treasurer), so someone behind him can say yes while his answer still
+ * decides it. If the draw left those seats empty, the club's most engaged
+ * member without a seat became Events Coordinator a few days after Oscar took
+ * his seat. This uses no randomness, so nothing else shifts.
+ */
+function ficLine(ctx: Ctx) {
+  const { NOW } = ctx;
+  const club = ctx.club("fic");
+  const line = seatsFor(club.type).filter((s) => s.role !== "AMBASSADOR").map((s) => s.name);
+  const behind = new Set(line.slice(line.indexOf("Treasurer") + 1));
+  const live = club.assignments.filter((a) => !a.endedAt);
+  const seated = (a: Assignment) => a.seatName !== null && behind.has(a.seatName) && ctx.person(a.userId).kind === "STUDENT" && ctx.person(a.userId).status === "ACTIVE";
+  if (live.some(seated)) return;
+  const start = addDays(NOW, -15.6);
+  const busy = new Set(live.map((a) => a.userId));
+  const pick = club.members
+    .filter((m) => {
+      const p = ctx.person(m.userId);
+      return m.status === "ACTIVE" && !m.viaCheckin && m.joinedAt! < addDays(start, -30) && !busy.has(m.userId) && !p.persona && p.kind === "STUDENT" && p.status === "ACTIVE" && (p.gradDate ?? NOW) > addDays(NOW, 150);
+    })
+    .sort((a, b) => b.eng.base - a.eng.base || a.joinedAt!.getTime() - b.joinedAt!.getTime())[0];
+  if (!pick) return;
+  const seat = club.seats.get("Events Coordinator")!;
+  club.assignments.push({
+    id: ctx.id(), clubId: club.id, userId: pick.userId, positionId: seat.id, seatName: seat.name, role: seat.role, permissions: [...seat.defaultPermissions],
+    viaClubId: null, startedAt: start, endedAt: null, endReason: null, assignedById: ctx.leaderAt(club, start), pinned: true,
+  });
+}
+
 // ─── Review trail with WSUSA ─────────────────────────────────────────────────
 
 function decisions(ctx: Ctx) {
@@ -711,6 +745,7 @@ export function buildRoles(ctx: Ctx) {
   }
   placements(ctx);
   recentSuccessions(ctx);
+  ficLine(ctx);
   decisions(ctx);
   // Keep the advisor list current-first for leaderAt().
   for (const club of ctx.clubs) {

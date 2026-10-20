@@ -99,9 +99,24 @@ export async function loadBuilderData(clubId: string | null) {
   return { incoming, outgoing, buildings, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null };
 }
 
+/**
+ * Where an uploaded cover goes: the club's top-level Flyers folder when it has
+ * one (every club starts with "Flyers"), else the top of its files. University
+ * covers go to the top of University files.
+ */
+async function coverFolderId(clubId: string | null): Promise<string | null> {
+  if (!clubId) return null;
+  const folder = await db.fileItem.findFirst({
+    where: { clubId, parentId: null, isFolder: true, trashedAt: null, name: { startsWith: "Flyers", mode: "insensitive" } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return folder?.id ?? null;
+}
+
 /** Everything the full editor needs. Returns null when the event isn't this host's. */
 export async function loadEditorData(clubId: string | null, eventId: string | null) {
-  const [event, buildings, clubs, terms, google] = await Promise.all([
+  const [event, buildings, clubs, terms, google, coverFolder] = await Promise.all([
     eventId
       ? db.event.findUnique({
           where: { id: eventId },
@@ -120,6 +135,7 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       : Promise.resolve([]),
     getTerms(),
     googleCalendarReady(clubId),
+    coverFolderId(clubId),
   ]);
   if (eventId && (!event || event.clubId !== clubId)) return null;
 
@@ -150,6 +166,9 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       room: event.room,
       address: event.address,
       virtualUrl: event.virtualUrl,
+      coverUrl: event.coverUrl,
+      perks: event.perks,
+      serviceMinutes: event.serviceMinutes,
       cohostAllClubs: event.cohostAllClubs,
       cohosts: event.cohosts,
       attachments: event.attachments.filter((a) => !a.file.trashedAt).map((a) => ({ id: a.file.id, name: a.file.name, mimeType: a.file.mimeType, url: fileUrl(a.file.id) })),
@@ -167,5 +186,5 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       requirementName: event.requirements[0]?.name ?? null,
     };
   }
-  return { event: editor, buildings, clubs, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null };
+  return { event: editor, buildings, clubs, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null, coverFolderId: coverFolder };
 }

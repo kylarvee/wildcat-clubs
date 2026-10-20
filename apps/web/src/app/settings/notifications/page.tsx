@@ -114,10 +114,10 @@ export default async function NotificationSettingsPage() {
           <CalendarDays className="h-5 w-5 text-ink-3" aria-hidden /> Calendar
         </h2>
         <p className="mt-3 text-sm text-ink-2">
-          Your calendar shows events from the clubs you&apos;re in and follow. Choose which clubs and whether university events appear, and copy your private link into Google Calendar or Apple Calendar, on the calendar page.
+          Your calendar is Mine on the Events page: the clubs you follow, plus university events if you keep them on. Follow or unfollow a club on its page. Subscribe on the Events page puts it in Google Calendar, Apple Calendar or Outlook with your private link.
         </p>
-        <ButtonLink href="/calendar" variant="outline" className="mt-4">
-          <CalendarDays className="h-4 w-4" aria-hidden /> Open my calendar
+        <ButtonLink href="/events?scope=mine" variant="outline" className="mt-4">
+          <CalendarDays className="h-4 w-4" aria-hidden /> Open Events
         </ButtonLink>
       </Card>
     </div>

@@ -9,11 +9,16 @@ import { rulesFromAnswers } from "@/lib/constitution/rules";
 import { quorumOf, readSelectionRules } from "@/lib/roles/pipeline";
 import { awaitingGrade, requirementState as ruleState } from "@/lib/authz/requirement-rules";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
+import { serviceLine, summarizeService } from "@/lib/metrics/service";
 import { unanimousChoice } from "@/lib/roles/pipeline";
 import { loadRenewalStates } from "@/lib/renewals/facts";
 import { isRequiredCheck, readSnapshot, RENEWAL_SOURCE, renewalSourceId, renewalTaskTitle, renewalTerm, renewalWindow } from "@/lib/renewals/rules";
 import { fmtLongDate } from "@/lib/time";
 import { COST_CATEGORIES } from "@/lib/events/labels";
+import { listWindow, shortcutRange } from "@/lib/events/browse-params";
+import { eventFilterWhere } from "@/lib/events/browse-where";
+import { coverFileId } from "@/lib/events/rules";
+import { resolveVisibility } from "@/lib/files/visibility";
 import { holdsLock, lineStanding } from "@/lib/funding/locks";
 import { lineCents } from "@/lib/funding/math";
 import { followUpKeys, INVOICE_DUE_DAYS, pastReviewTime } from "@/lib/funding/review";
@@ -918,9 +923,78 @@ async function main() {
   console.log("Constitutions and bylaw rules");
   await constitutionChecks();
 
+  console.log("Events page");
+  await eventsPageChecks();
+
+  console.log("Service hours");
+  await serviceChecks();
+
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();
   if (failures) process.exit(1);
+}
+
+/**
+ * Service hours (lib/metrics/service). Seeded events count where they should
+ * (every Service project, and a few university service events), each for
+ * 60–180 minutes in quarter hours and never more than the event lasts.
+ * Totals are derived: the rule's sums over the check-ins match SQL over the
+ * same rows, for Maya and for everyone. Maya has hours already, including
+ * the latest Day of Service and the pantry restock, and the live Care Kit
+ * Assembly she hasn't checked in to is worth 2 more.
+ */
+async function serviceChecks() {
+  const counted = await db.event.findMany({ where: { serviceMinutes: { not: null } }, select: { title: true, kind: true, clubId: true, durationMinutes: true, serviceMinutes: true } });
+  const off = counted.filter((e) => e.serviceMinutes! < 60 || e.serviceMinutes! > 180 || e.serviceMinutes! % 15 !== 0 || e.serviceMinutes! > e.durationMinutes);
+  check(counted.length > 0 && off.length === 0, "Events that count give 60–180 minutes in quarter hours, never more than they last", off.length ? off.slice(0, 3).map((e) => `${e.title}: ${e.serviceMinutes} of ${e.durationMinutes} min`).join(", ") : `${counted.length} events`);
+  const services = await db.event.count({ where: { kind: "SERVICE" } });
+  const servicesCounted = counted.filter((e) => e.kind === "SERVICE").length;
+  check(services > 0 && servicesCounted === services, "Every Service project counts toward service hours", `${servicesCounted} of ${services}`);
+  const university = [...new Set(counted.filter((e) => e.clubId === null).map((e) => e.title))];
+  check(counted.filter((e) => e.clubId === null).length >= 3, "A few university service events count too", university.join(", "));
+
+  // Every check-in at an event that counts, as the rule reads it.
+  const [terms, rows] = await Promise.all([
+    db.term.findMany({ orderBy: { startsOn: "asc" } }),
+    db.attendance.findMany({
+      where: { occurrence: { event: { serviceMinutes: { gt: 0 } } } },
+      select: {
+        id: true,
+        userId: true,
+        occurrence: {
+          select: {
+            id: true,
+            startsAt: true,
+            event: { select: { id: true, title: true, serviceMinutes: true, club: { select: { id: true, name: true, slug: true } }, cohosts: { where: { status: "APPROVED" }, select: { club: { select: { id: true, name: true, slug: true } } } } } },
+          },
+        },
+      },
+    }),
+  ]);
+  const byUser = new Map<string, Parameters<typeof summarizeService>[0][number][]>();
+  for (const r of rows) {
+    const e = r.occurrence.event;
+    const list = byUser.get(r.userId) ?? [];
+    list.push({ attendanceId: r.id, occurrenceId: r.occurrence.id, eventId: e.id, title: e.title, startsAt: r.occurrence.startsAt, serviceMinutes: e.serviceMinutes, club: e.club, cohosts: e.cohosts.map((c) => c.club) });
+    byUser.set(r.userId, list);
+  }
+  const sql = await db.$queryRaw<{ user_id: string; minutes: number; n: number }[]>`
+    SELECT a."userId" AS user_id, sum(e."serviceMinutes")::int AS minutes, count(*)::int AS n
+      FROM "Attendance" a JOIN "EventOccurrence" o ON o.id = a."occurrenceId" JOIN "Event" e ON e.id = o."eventId"
+     WHERE e."serviceMinutes" > 0
+     GROUP BY a."userId"`;
+  const disagree = sql.filter((x) => {
+    const s = summarizeService(byUser.get(x.user_id) ?? [], terms);
+    return s.minutes !== x.minutes || s.events !== x.n || s.byTerm.reduce((m, t) => m + t.minutes, 0) !== s.minutes;
+  });
+  check(sql.length > 0 && byUser.size === sql.length && disagree.length === 0, "Everyone's service hours are their check-ins summed, and add up by term", `${sql.length} people, ${disagree.length} disagree`);
+
+  const maya = await user("maya");
+  const mine = summarizeService(byUser.get(maya.id) ?? [], terms);
+  check(mine.minutes > 0, `Maya has service hours already: ${serviceLine(mine)}`);
+  check(mine.entries.some((e) => e.title === "WSUSA Day of Service") && mine.entries.some((e) => e.title === "Weber Cares Pantry Restock Night"), "…including the latest WSUSA Day of Service and the pantry restock");
+  const careKit = await db.event.findFirst({ where: { title: "Care Kit Assembly for the Weber Cares Pantry" }, select: { serviceMinutes: true } });
+  check(careKit?.serviceMinutes === 120, "The live Care Kit Assembly is worth 2 service hours (Maya's check-in adds them)");
 }
 
 /**
@@ -981,6 +1055,66 @@ async function constitutionChecks() {
   const running = await db.election.findMany({ where: { status: { in: ["NOMINATING", "VOTING", "CLOSED"] } }, select: { title: true, rules: true } });
   const loose = running.filter((e) => !e.rules || typeof e.rules !== "object" || Object.keys(e.rules).length === 0);
   check(loose.length === 0, "Every selection under way froze its club's bylaw rules", loose.map((e) => e.title).join(", "));
+}
+
+/**
+ * The Events page (lib/events/browse): covers are their host club's public
+ * image files, as the Events Builder allows; about 30% of socials, some
+ * meeting series and some events offer free food or free stuff; a few
+ * workshops are hybrid and their check-ins happen in the room; and Maya's
+ * "Free food · This weekend" under Mine finds the trailhead cookout, through
+ * the page's own filter (lib/events/browse-where) and dates.
+ */
+async function eventsPageChecks() {
+  const covered = await db.event.findMany({ where: { coverUrl: { not: null } }, select: { title: true, clubId: true, coverUrl: true } });
+  const fileIds = covered.map((e) => coverFileId(e.coverUrl!)).filter((x): x is string => Boolean(x));
+  const covers = await db.fileItem.findMany({ where: { id: { in: fileIds } }, select: { id: true, clubId: true, mimeType: true, isFolder: true, trashedAt: true } });
+  const folders = await db.fileItem.findMany({ where: { clubId: { in: [...new Set(covers.map((f) => f.clubId).filter((x): x is string => Boolean(x)))] } }, select: { id: true, parentId: true, visibility: true } });
+  const tree = new Map(folders.map((f) => [f.id, f]));
+  const byId = new Map(covers.map((f) => [f.id, f]));
+  const wrong = covered.filter((e) => {
+    const f = byId.get(coverFileId(e.coverUrl!) ?? "");
+    return !f || f.isFolder || f.trashedAt || f.clubId !== e.clubId || !f.mimeType?.startsWith("image/") || resolveVisibility(f.id, (id) => tree.get(id)) !== "PUBLIC";
+  });
+  check(covered.length >= 50 && wrong.length === 0, "Every event cover is one of its host club's public image files", `${covered.length} covers, ${wrong.length} not: ${wrong.slice(0, 3).map((e) => e.title).join(", ")}`);
+
+  const socials = await db.event.findMany({ where: { kind: "SOCIAL", clubId: { not: null } }, select: { perks: true } });
+  const fed = socials.filter((s) => s.perks.includes("FREE_FOOD")).length;
+  check(socials.length > 0 && fed / socials.length >= 0.2 && fed / socials.length <= 0.4, "About 30% of socials offer free food", `${fed} of ${socials.length} (${Math.round((100 * fed) / Math.max(1, socials.length))}%)`);
+  const meetings = await db.event.count({ where: { kind: "MEETING", recurrence: { not: "NONE" }, perks: { has: "FREE_FOOD" } } });
+  const stuff = await db.event.count({ where: { perks: { has: "FREE_STUFF" } } });
+  check(meetings > 0 && stuff > 0, "Some meeting series offer free food, and some events free stuff", `${meetings} meeting series, ${stuff} with free stuff`);
+
+  const hybrid = await db.event.findMany({
+    where: { locationType: { in: ["CAMPUS", "ADDRESS"] }, virtualUrl: { not: null } },
+    select: { kind: true, occurrences: { select: { startsAt: true, attendances: { select: { method: true } } } } },
+  });
+  const checkins = hybrid.flatMap((h) => h.occurrences.flatMap((o) => o.attendances));
+  check(hybrid.filter((h) => h.kind === "WORKSHOP").length >= 3 && hybrid.some((h) => h.occurrences.some((o) => o.startsAt > NOW)), "A few workshops are hybrid (in person with an online link), some still to come", `${hybrid.length} hybrid events`);
+  check(checkins.length > 0 && checkins.every((a) => a.method !== "TAP"), "Hybrid check-ins happen in the room (QR, typed code or a leader), never one-tap", `${checkins.length} check-ins`);
+  const placeless = await db.event.count({ where: { locationType: "TBD", virtualUrl: { not: null } } });
+  check(placeless === 0, "No event without a place keeps an online link");
+
+  // Maya, Events → Mine → Free food · This weekend (the page's filter and dates, as lib/events/feed scope "me" uses them).
+  const maya = await user("maya");
+  const follows = (await db.calendarSubscription.findMany({ where: { userId: maya.id }, select: { clubId: true } })).map((s) => s.clubId);
+  const window = listWindow(shortcutRange("weekend", NOW), NOW);
+  const found = await db.eventOccurrence.findMany({
+    where: {
+      startsAt: { lt: window.end },
+      endsAt: { gt: window.start },
+      event: {
+        AND: [
+          { status: { in: ["SCHEDULED", "CANCELLED"] } },
+          { OR: [{ clubId: { in: follows } }, { cohosts: { some: { status: "APPROVED", clubId: { in: follows } } } }, ...(maya.subscribeUniversity ? [{ clubId: null }] : [])] },
+          eventFilterWhere({ type: null, category: null, food: true, stuff: false, service: false, online: false, following: false }, { followedClubIds: follows }),
+        ],
+      },
+    },
+    select: { startsAt: true, event: { select: { title: true, club: { select: { name: true } } } } },
+  });
+  const cookout = found.find((o) => o.event.title === "Trailhead Cookout & Easy Hike");
+  check(Boolean(cookout), "Maya's Free food · This weekend (Mine) finds the Trailhead Cookout & Easy Hike, Hiking and Outdoors Club", found.map((o) => `${o.event.title} (${o.event.club?.name ?? "Weber State"}, ${fmtDate(o.startsAt, "EEE h:mm a")})`).join("; ") || "nothing");
 }
 
 main().catch(async (e) => {

@@ -14,6 +14,7 @@ import type {
   MClubList,
   MDecisionResponse,
   MEventDetail,
+  MEventFilter,
   MHome,
   MManualCheckinResult,
   MMe,
@@ -59,6 +60,15 @@ export const Api = {
     if (to) q.set('to', to);
     const qs = q.toString();
     return api<MCalendar>(`/calendar${qs ? `?${qs}` : ''}`);
+  },
+  /** The Events tab: everything you may see, one filter at a time ("following" = your calendar). Works signed out. */
+  events: (filter: MEventFilter, from?: string, to?: string) => {
+    const q = new URLSearchParams();
+    if (filter !== 'all') q.set('filter', filter);
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    const qs = q.toString();
+    return api<MCalendar>(`/events${qs ? `?${qs}` : ''}`);
   },
   notifications: () => api<MNotifications>('/notifications'),
   markRead: (body: MReadRequest) => api<MReadResponse>('/notifications/read', { method: 'POST', body }),

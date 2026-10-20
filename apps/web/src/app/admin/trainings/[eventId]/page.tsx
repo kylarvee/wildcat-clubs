@@ -44,6 +44,7 @@ export default async function EditTrainingPage({ params }: { params: Promise<{ e
         terms={data.terms}
         googleLive={data.googleLive}
         defaultFundingSource="UNIVERSITY"
+        coverFolderId={data.coverFolderId}
       />
     </div>
   );

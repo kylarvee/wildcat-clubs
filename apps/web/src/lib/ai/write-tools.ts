@@ -93,7 +93,7 @@ const joinClubTool = writeTool({
           data: { result: r.status === "ACTIVE" ? "joined" : r.status === "PENDING" ? "join request sent" : r.status.toLowerCase().replace("_", " "), club: club.name, link: `/clubs/${club.slug}` },
           outcome,
           href: `/clubs/${club.slug}`,
-          revalidate: ["/clubs", `/clubs/${club.slug}`, "/dashboard", "/calendar"],
+          revalidate: ["/clubs", `/clubs/${club.slug}`, "/dashboard", "/events"],
         };
       },
     };
@@ -119,7 +119,7 @@ const subscribeTool = writeTool({
       },
       async execute() {
         await subscribeCalendar(actor, club.id);
-        return { data: { result: "following", club: club.name }, outcome: `You now follow ${club.name}'s calendar.`, href: "/calendar", revalidate: ["/calendar", `/clubs/${club.slug}`, "/dashboard"] };
+        return { data: { result: "following", club: club.name }, outcome: `You now follow ${club.name}'s calendar.`, href: "/events?scope=mine", revalidate: ["/events", `/clubs/${club.slug}`, "/dashboard"] };
       },
     };
   },
@@ -148,7 +148,7 @@ const unsubscribeTool = writeTool({
       },
       async execute() {
         await unsubscribeCalendar(actor, club.id);
-        return { data: { result: "unfollowed", club: club.name }, outcome: `You no longer follow ${club.name}'s calendar.`, href: "/calendar", revalidate: ["/calendar", `/clubs/${club.slug}`, "/dashboard"] };
+        return { data: { result: "unfollowed", club: club.name }, outcome: `You no longer follow ${club.name}'s calendar.`, href: "/events?scope=mine", revalidate: ["/events", `/clubs/${club.slug}`, "/dashboard"] };
       },
     };
   },
@@ -457,7 +457,7 @@ const createEventTool = writeTool({
           },
           outcome: `Added ${quote(title, 60)} to ${club.name}'s calendar.${google}`,
           href: `/events/${r.id}`,
-          revalidate: [`/clubs/${club.slug}`, `/clubs/${club.slug}/manage/events`, "/calendar", "/dashboard"],
+          revalidate: [`/clubs/${club.slug}`, `/clubs/${club.slug}/manage/events`, "/events", "/dashboard"],
         };
       },
     };

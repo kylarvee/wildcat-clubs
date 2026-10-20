@@ -7,6 +7,8 @@ import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, SectionHeader } from '@/components/Card';
 import { ClubLogo } from '@/components/ClubLogo';
+import { EventBadges } from '@/components/EventBadges';
+import { EventCover } from '@/components/EventCover';
 import { Icon, type IconName } from '@/components/Icon';
 import { LeaderCheckinCard } from '@/components/LeaderCheckinCard';
 import { ScrollScreen } from '@/components/Screen';
@@ -17,7 +19,7 @@ import { openMaps, openWeb } from '@/lib/links';
 import { useApi } from '@/lib/use-api';
 import { space, useColors } from '@/theme';
 
-/** One meeting: when, where (with a map), who's hosting, and the details. */
+/** One meeting: its cover, when, where (with a map, and the online link for hybrid events), who's hosting, and the details. */
 export default function EventScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useSession();
@@ -39,13 +41,15 @@ export default function EventScreen() {
       {error ? <InlineNotice error={error} /> : null}
       {e.cancelled ? <InlineNotice tone="danger">{e.note ? `This meeting is cancelled: ${e.note}` : 'This meeting is cancelled.'}</InlineNotice> : null}
 
+      <EventCover url={e.coverUrl} color={e.club?.logoColor} style={styles.cover} />
       <Text variant="display" accessibilityRole="header" style={e.cancelled ? { textDecorationLine: 'line-through', color: c.ink3 } : undefined}>
         {e.title}
       </Text>
       <View style={styles.badges}>
         {e.happeningNow && !e.cancelled ? <Badge label="Happening now" tone="live" /> : null}
-        <Badge label={e.visibility === 'PUBLIC' ? 'Open to everyone' : e.visibility === 'UNIVERSITY' ? 'Weber State only' : 'Members only'} tone="neutral" />
+        {e.visibility !== 'MEMBERS' ? <Badge label={e.visibility === 'PUBLIC' ? 'Open to everyone' : 'Weber State only'} tone="neutral" /> : null}
       </View>
+      <EventBadges event={e} style={styles.badges} />
 
       {/* Leaders who can run check-in, while it's open (the server decides). */}
       {e.leaderCheckin ? <LeaderCheckinCard item={e.leaderCheckin} showTitle={false} /> : null}
@@ -57,6 +61,9 @@ export default function EventScreen() {
         ) : (
           <Fact icon="place" title={e.location} detail={e.mapQuery ? 'Open in Maps' : undefined} onPress={e.mapQuery ? () => openMaps(e.mapQuery!) : undefined} />
         )}
+        {e.hybrid && e.virtualUrl ? (
+          <Fact icon="video" title="Also online" detail="Tap to watch or join remotely. Check-in is in the room." onPress={() => void Linking.openURL(e.virtualUrl!)} />
+        ) : null}
       </Card>
 
       {e.club ? (
@@ -136,6 +143,7 @@ function Fact({ icon, title, detail, onPress }: { icon: IconName; title: string;
 const styles = StyleSheet.create({
   flex: { flex: 1, gap: 2 },
   badges: { flexDirection: 'row', gap: space.xs, marginTop: space.sm, flexWrap: 'wrap' },
+  cover: { marginBottom: space.md },
   facts: { gap: space.md, marginTop: space.lg },
   fact: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start', minHeight: 44 },
   host: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.md },

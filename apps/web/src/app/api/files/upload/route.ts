@@ -2,13 +2,15 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { apiRoute, assertSignedIn, invalid } from "@/lib/domain/kit";
 import { fileUrl, uploadFile } from "@/lib/domain/files";
 import { readUploadForm } from "@/lib/files/upload";
+import { guessMime } from "@/lib/files/storage";
 import { z } from "zod";
 
 const Visibility = z.enum(["INHERIT", "PUBLIC", "MEMBERS", "LEADERS"]).optional();
 const Scope = z.enum(["club", "user", "university"]).default("club");
 
 /**
- * POST multipart: file, scope (club|user|university), clubId?, parentId?, visibility?, purpose? ("logo" uses the profile capability).
+ * POST multipart: file, scope (club|user|university), clubId?, parentId?, visibility?, purpose?
+ * ("logo" uses the profile capability; "cover", an event's cover image, uses the events capability and takes images only).
  * Returns { id, name, mimeType, url, sizeBytes, parentId }. A same-named file in the folder gets " (2)" added.
  */
 export async function POST(req: Request) {
@@ -22,6 +24,8 @@ export async function POST(req: Request) {
     const scope = Scope.catch("club").parse(form.get("scope") ?? undefined);
     const visibility = Visibility.safeParse(form.get("visibility") || undefined);
     if (!visibility.success) throw invalid("Unknown visibility.");
+    const purpose = form.get("purpose");
+    if (purpose === "cover" && !guessMime(file.name).startsWith("image/")) throw invalid("Cover images can be PNG, JPG, WebP, GIF or SVG.");
     const saved = await uploadFile(
       actor,
       {
@@ -32,7 +36,7 @@ export async function POST(req: Request) {
         parentId: (form.get("parentId") as string) || null,
         visibility: visibility.data,
       },
-      { capability: form.get("purpose") === "logo" ? "profile" : "files" },
+      { capability: purpose === "logo" ? "profile" : purpose === "cover" ? "events" : "files" },
     );
     return { id: saved.id, name: saved.name, mimeType: saved.mimeType, url: fileUrl(saved.id), sizeBytes: saved.sizeBytes, parentId: saved.parentId };
   });

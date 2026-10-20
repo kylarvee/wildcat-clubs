@@ -990,11 +990,12 @@ export type UploadInput = {
 
 /**
  * Upload a file into a scope. Club uploads need the `files` capability — except
- * logo uploads, which callers make with `profile` (opts.capability). People with
+ * logo uploads, which callers make with `profile`, and event cover images,
+ * made with `events` (opts.capability; the upload route allows only images). People with
  * an edit grant on a folder may upload into that folder. Same-named files in a
  * folder get " (2)" added rather than replacing each other.
  */
-export async function uploadFile(actor: Actor | null, input: UploadInput, opts: { capability?: "files" | "profile" } = {}) {
+export async function uploadFile(actor: Actor | null, input: UploadInput, opts: { capability?: "files" | "profile" | "events" } = {}) {
   assertSignedIn(actor);
   const visibility = parse(VisibilitySchema.optional(), input.visibility ?? undefined) ?? "INHERIT";
   if (input.bytes.length === 0) throw invalid("That file is empty.");

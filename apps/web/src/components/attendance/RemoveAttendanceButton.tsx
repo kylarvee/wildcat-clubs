@@ -20,7 +20,7 @@ export function RemoveAttendanceButton({ attendanceId, name, eventTitle }: { att
         </Button>
       }
       title={`Remove ${name}'s check-in?`}
-      description={`They'll no longer count as attending ${eventTitle}. This also affects their attendance rate and review eligibility. You can add them back any time.`}
+      description={`They'll no longer count as attending ${eventTitle}. This also affects their attendance rate, review eligibility and any service hours it earned. You can add them back any time.`}
       confirmLabel="Remove check-in"
       danger
       onConfirm={() =>

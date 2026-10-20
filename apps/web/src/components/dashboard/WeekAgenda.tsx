@@ -7,8 +7,8 @@ import type { AgendaItem } from "@/app/dashboard/data";
 
 /**
  * "Coming up": the next two weeks of your calendar, grouped by day, with the
- * clubs you lead marked. The full calendar has its own page, so this stays
- * a short list. Admins see university events and requirement deadlines for
+ * clubs you lead marked. The Events page has the rest, so this stays a
+ * short list. Admins see university events and requirement deadlines for
  * the same two weeks.
  */
 export function WeekAgenda({ items, now, admin = false }: { items: AgendaItem[]; now: Date; admin?: boolean }) {
@@ -20,7 +20,7 @@ export function WeekAgenda({ items, now, admin = false }: { items: AgendaItem[];
     else days.push({ key, label: agendaDayLabel(it.at, now), items: [it] });
   }
   return (
-    <Panel id="dash-week" title="Coming up" icon={<CalendarDays />} link={{ href: "/calendar", label: "Calendar" }}>
+    <Panel id="dash-week" title="Coming up" icon={<CalendarDays />} link={{ href: "/events", label: "Events" }}>
       {days.length ? (
         <div className="space-y-4">
           {days.map((d) => (

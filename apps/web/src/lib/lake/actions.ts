@@ -261,6 +261,12 @@ export const ACTIONS = {
   "details.updated": { label: "Updated their member details", phrase: "updated their member details", public: false },
   "details.confirmed": { label: "Confirmed their member details", phrase: "confirmed their member details", public: false },
   "details.emergency_viewed": { label: "Opened a member's emergency contact", phrase: "opened a member's emergency contact", public: false },
+  /** The person's own download, or an admin's from People (data.self false). Private: it says who looked at whose record. */
+  "record.downloaded": {
+    label: "Downloaded an involvement record",
+    phrase: (d) => (d.self === false ? "downloaded someone's involvement record" : "downloaded their involvement record"),
+    public: false,
+  },
   "device.push_added": { label: "Turned on push notifications on a device", phrase: "turned on push notifications on a device", public: false },
   "device.push_moved": { label: "Moved a device's push notifications to their account", phrase: "moved a device's push notifications to their account", public: false },
   "device.push_removed": { label: "Turned off push notifications on a device", phrase: "turned off push notifications on a device", public: false },

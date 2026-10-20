@@ -38,7 +38,7 @@ export async function ClubAttendanceRecord({ clubId, userId, showLivePrompt = tr
       <Card className="p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-ink">Your attendance</h2>
-          <Link href={`/me/attendance?club=${clubId}#history`} className="flex items-center gap-0.5 text-xs font-medium text-brand-600 hover:underline">
+          <Link href={`/me/involvement?club=${clubId}#history`} className="flex items-center gap-0.5 text-xs font-medium text-brand-600 hover:underline">
             Full record <ChevronRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
         </div>

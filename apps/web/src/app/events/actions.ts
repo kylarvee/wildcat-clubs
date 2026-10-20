@@ -3,17 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { act } from "@/lib/domain/kit";
 import * as events from "@/lib/domain/events";
+import { resetCalendarToken, setUniversityCalendar } from "@/lib/domain/memberships";
 
 /**
  * Server actions for every event surface: the Events Builder (club and
- * university mode), the full editor, and the event page. One file so club and
- * admin tools share the exact same calls.
+ * university mode), the full editor, the event page, and the Events page's
+ * Subscribe menu. One file so club and admin tools share the exact same calls.
  */
 
 function refresh(eventId?: string) {
   revalidatePath("/clubs/[slug]", "layout");
   revalidatePath("/admin/trainings", "layout");
-  revalidatePath("/calendar");
+  revalidatePath("/events");
   if (eventId) revalidatePath(`/events/${eventId}`);
 }
 
@@ -57,6 +58,22 @@ export async function restoreOccurrenceAction(occurrenceId: string) {
 
 export async function setOccurrenceRoomAction(occurrenceId: string, room: string | null) {
   return run((a) => events.setOccurrenceRoom(a, occurrenceId, room));
+}
+
+// ─── Subscribe menu (calendar feeds) ─────────────────────────────────────────
+
+/** A new private calendar link; the old one stops working. */
+export async function resetCalendarLinkAction() {
+  const r = await act((a) => resetCalendarToken(a));
+  if (r.ok) revalidatePath("/events");
+  return r;
+}
+
+/** University events on your calendar ("Mine" and your private feed), or not. */
+export async function setUniversityCalendarAction(on: boolean) {
+  const r = await act((a) => setUniversityCalendar(a, on));
+  if (r.ok) revalidatePath("/events");
+  return r;
 }
 
 export async function decideCohostAction(cohostId: string, approve: boolean) {

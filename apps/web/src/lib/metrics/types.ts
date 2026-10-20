@@ -146,3 +146,54 @@ export type PlatformSummary = {
   /** The term the "this term" numbers cover, when the academic calendar has one. */
   termName?: string | null;
 };
+
+// ─── Service hours ───────────────────────────────────────────────────────────
+
+/** A club as service records name it. */
+export type ServiceClub = { id: string; name: string; slug: string };
+
+/**
+ * Service hours earned and the service events they came from. `events`
+ * counts dates checked in (each check-in once), the way "Events attended"
+ * counts check-ins.
+ */
+export type ServiceTotal = { minutes: number; events: number };
+
+export type ServiceClubTotal = ServiceTotal & {
+  /** A club that hosted or co-hosted the events; null for university events. */
+  club: ServiceClub | null;
+};
+
+export type ServiceTermTotal = ServiceTotal & {
+  /** The term the dates fall in (lib/metrics/service serviceTermOf); null for dates before the academic calendar starts. */
+  term: string | null;
+};
+
+/** One check-in that earned service hours. */
+export type ServiceEntry = {
+  attendanceId: string;
+  occurrenceId: string;
+  eventId: string;
+  title: string;
+  startsAt: Date;
+  /** What this check-in earned: the event's serviceMinutes as it is now. */
+  minutes: number;
+  /** The host club; null for university events. */
+  club: ServiceClub | null;
+  /** Approved co-hosts, after the host. */
+  cohosts: ServiceClub[];
+  term: string | null;
+};
+
+/**
+ * SERVICE HOURS for one person (lib/metrics serviceSummary): the total, by
+ * club (most hours first) and by term (newest first), and every date that
+ * earned them (newest first). byTerm adds up to the total; in byClub a
+ * co-hosted event counts for every club that put it on (as attendance does),
+ * so byClub can add up to more.
+ */
+export type ServiceSummary = ServiceTotal & {
+  byClub: ServiceClubTotal[];
+  byTerm: ServiceTermTotal[];
+  entries: ServiceEntry[];
+};

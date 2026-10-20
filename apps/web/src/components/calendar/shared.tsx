@@ -7,6 +7,7 @@ import { CalendarClock, ChevronLeft, ChevronRight, MapPin, Users, Video, Wallet 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { EventBadges } from "@/components/events/EventBadges";
 import { fmtMoney, fmtRange } from "@/lib/time";
 import { KIND_LABEL, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { campusParts, fromFakeUtc } from "@/lib/events/wallclock";
@@ -135,8 +136,9 @@ export function OccurrenceDetails({ p, title, showCost = true }: { p: CalendarEv
           <div className="mt-1 flex flex-wrap gap-1.5">
             {p.cancelled ? <Badge tone="danger">Cancelled</Badge> : null}
             <Badge>{KIND_LABEL[p.kind]}</Badge>
-            {p.visibility !== "PUBLIC" ? <Badge tone="brand">{VISIBILITY_LABEL[p.visibility]}</Badge> : null}
+            {p.visibility === "UNIVERSITY" ? <Badge tone="brand">{VISIBILITY_LABEL[p.visibility]}</Badge> : null}
           </div>
+          <EventBadges badges={p.badges ?? []} className="mt-1.5" />
         </div>
       </div>
       {p.cancelled && p.note ? <p className="rounded-lg bg-danger-50 px-3 py-2 text-danger">{p.note}</p> : null}
@@ -153,7 +155,7 @@ export function OccurrenceDetails({ p, title, showCost = true }: { p: CalendarEv
           {p.location}
           {p.virtualUrl ? (
             <a href={p.virtualUrl} target="_blank" rel="noopener noreferrer" className="ml-1.5 font-medium text-brand-600 hover:underline">
-              Join link
+              {p.locationType === "VIRTUAL" ? "Join link" : "Join online"}
             </a>
           ) : null}
         </span>

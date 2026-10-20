@@ -61,8 +61,8 @@ export default async function Home() {
         title="Coming up in the next two weeks"
         className={clubs.length ? "pt-4" : undefined}
         action={
-          <Link href="/calendar" className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline">
-            Full calendar <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          <Link href="/events" className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline">
+            All events <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
         }
       >

@@ -185,7 +185,7 @@ function SignedInHome({ userId }: { userId: string }) {
         <EmptyView icon="clubs" title="No clubs yet" body="Find one you like and tap Register — its events land on your calendar." action="Browse clubs" onAction={() => router.push('/clubs')} />
       )}
 
-      <SectionHeader title="Coming up" action="Calendar" onAction={() => router.push('/calendar')} />
+      <SectionHeader title="Coming up" action="Events" onAction={() => router.push('/calendar')} />
       {data.upcoming.length ? (
         <Card style={styles.flush}>
           {data.upcoming.map((e, i) => (

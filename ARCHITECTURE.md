@@ -39,7 +39,7 @@ web app (`apps/web`) plus a simplified mobile app (`apps/mobile`), one server, o
 | Rich text | TipTap 3 (one editor component everywhere) — HTML sanitized on write |
 | Calendar | FullCalendar 6 |
 | Charts / network | Recharts; d3-force canvas |
-| PDF | @react-pdf/renderer (constitutions, invoices) |
+| PDF | @react-pdf/renderer (constitutions, invoices, involvement records; shared pieces in `lib/documents`) |
 | AI | Anthropic SDK — Claude Haiku / Sonnet with dynamic routing; off by default |
 | Google | Workspace OAuth sign-in; service account (domain-wide delegation) for Calendar/Drive/Chat/Gmail |
 | Mobile | Expo (React Native, expo-router, expo-camera, expo-notifications) |
@@ -58,7 +58,7 @@ OFFICER    the capabilities on their seat (chosen when promoted; defaults per se
 AMBASSADOR like an officer; no capabilities unless the club grants them. In a regular club, only
            the college's ambassador program fills this seat (clubs ask for one)
 MEMBER     member features (calendar, chat, reviews once eligible)
-PUBLIC     clubs list, club pages (public parts), network canvas, public calendar, policies
+PUBLIC     clubs list, club pages (public parts), network canvas, the Events page, policies
 ```
 
 * **Role rule:** you may assign only roles ranked below yours; the President may also name a
@@ -92,12 +92,12 @@ PUBLIC     clubs list, club pages (public parts), network canvas, public calenda
 | Club profile, logo, docs list | Club Profile editor (`/clubs/[slug]/manage/profile`) | clubs list, club page, network, admin |
 | Constitution & bylaws | Constitution Builder (or custom upload → admin approval) | club page Resources, profile |
 | Membership | Register button (web/mobile) **or** check-in auto-enroll — both call `memberships.joinClub()`; roster tool approves | everywhere |
-| Calendar subscriptions | Subscribe toggle (club pages, dashboard) | united calendar, ICS feeds |
+| Calendar subscriptions | Subscribe toggle (club pages, dashboard) | the Events page's **Mine**, ICS feeds |
 | Roles & seats | Org Chart tool (`roles.assignRole`); elections & hand-offs apply through it | org chart, profiles, role history |
 | College Ambassador placements | The program's Ambassador placements page (`roles.placeAmbassador`); clubs ask with **Request a college ambassador** (`ambassadors.requestAmbassador`) | org charts, the program's placements, inboxes |
 | An ambassador program's advisor | Admin → Club approvals → Ambassador programs (`ambassadors.setAmbassadorAdvisor`) | the program's org chart and settings |
-| Events, schedule, location, co-hosts, **event costs** | Events Builder | calendars, ICS, club page, budget, attendance |
-| Attendance | Attendance Tool only (QR scan, the code shown at the event, one-tap for online events, leader manual add) | tracker, activity, reviews gate, network, clubs list |
+| Events, schedule, location, co-hosts, cover, perks, service hours, **event costs** | Events Builder | the Events page, ICS, club page, budget, attendance, service hours |
+| Attendance | Attendance Tool only (QR scan, the code shown at the event, one-tap for online events, leader manual add) | tracker, activity, reviews gate, network, clubs list, service hours, My involvement |
 | General costs & funding requests | Funding & Budgeting tool | admin approvals, invoices |
 | Files | Club Files (explorer) | file picker everywhere, Resources |
 | Policies | Policy editor (admin) | `<PolicyNotices placement=…>` across the app, policy library |
@@ -137,6 +137,13 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 * **Attendance rate:** member check-ins ÷ members at the time; non-members are "guests".
 * **Interconnection:** cross-club physical attendance (a member of club A checking in at an event
   hosted or co-hosted by club B). Drives line weight; centrality emerges from the layout.
+* **Service hours:** every check-in at a date of an event with `serviceMinutes` earns those minutes,
+  summed from attendance every time (never stored), so a removed check-in or an edited event changes
+  every total at once. An event's hours count for each club that put it on; a person's total counts
+  each check-in once. Profiles show the total to signed-in accounts; only the person and admins see
+  which events. One involvement record (`lib/documents/record`: roles, service hours, attendance,
+  WSUSA trainings) backs My involvement, its PDF and the public `/verify/[token]` page, whose link is
+  an HMAC over (kind, subject, issued at) with `DOCUMENT_SECRET` (no table).
 
 ## 6. Decisions on contradictions and gaps
 
@@ -156,6 +163,9 @@ Exact formulas live in `src/lib/metrics/index.ts` (doc comment). Summary:
 | Auto-enroll on check-in vs. membership gates | Check-in always records attendance. Open clubs: you become a member. Gated clubs: a join request is filed. |
 | Ambassador role "set up at the college level" | Each college may have a **College Ambassadors** org (a club of type `COLLEGE_AMBASSADORS`), started only by an admin (Admin → Club approvals → Ambassador programs; students can't found one). The admin also appoints its **advisor** there: one faculty/staff member per program, the college's point person, who runs its elections and leadership pipeline with its President (`ambassadors.setAmbassadorAdvisor`; programs take no advisor invitations). Its leaders place Club Representative Ambassadors into the college's clubs; placements are `AMBASSADOR` role assignments with `viaClubId`. A club can't fill its own College Ambassador seat: its leaders press **Request a college ambassador** on the org chart, which files an APPROVAL task in the program's inbox (`sourceType` `ambassadorRequest`, `sourceId` = the club, one open at a time). It closes when the program places someone, declines with a note, or the club withdraws it. |
 | Calendar subscription vs. registration | Separate. Registering subscribes you; you can subscribe without registering (once signed in). |
+| A calendar page *and* an events list | One **Events page** (`/events`; the URL holds every filter, so any view can be shared): **All of Weber State** or **Mine** (the clubs you subscribe to), as a list or a month. `/calendar` redirects to Mine as a month. Filters: Today, Tomorrow, This weekend (Friday 5 PM through Sunday), Next 7 days or a date; type, category, free food, free stuff, service hours, online or hybrid, clubs you follow. Rules in `lib/events/rules`, parsing in `lib/events/browse-params`, the one query in `lib/events/browse`. |
+| Event covers, perks and hybrid events | Set in the Events Builder only. A cover is one of the host club's own **public** images (a university event's comes from University files); uploading one there files it in the club's Flyers folder. Perks are badges and filters (free food, free stuff). An in-person event with an online link is **hybrid**; check-in stays in person (QR or typed code), and only online events get one-tap. |
+| Service hours: logged vs. earned | Earned only by checking in. The event creator turns on **Counts toward service hours** and enters the hours each attendee earns per date (whole quarter hours, never more than the event's length; Service projects start on, at the event's length up to 8 hours). Nobody logs hours by hand, so there's nothing to approve, and fixing attendance fixes the totals. |
 | Club "college" field (some independent / university-wide / sports) | `scope` = College · University-wide · Independent · Sports; `collegeId` only for College. |
 | Department "Other" | Founder types it (`requestedDepartmentName`); an admin task adds it to the list and links the club. |
 | Advisor must accept | Invite by name + @weber.edu email → email + in-app request (task). Accepting makes them ADVISOR. Submission for review requires an accepted advisor. |
@@ -188,7 +198,10 @@ lib/roles/pipeline.ts     leadership pipeline order and the four selection modes
 lib/lake/activity.ts      the activity stream
 lib/integrations/         Google, email, push, Anthropic adapters (mock when off)
 lib/events/recurrence.ts  recurrence expansion (semester-aware)
+lib/events/rules.ts       covers, perks, hybrid links, service hours (pure); browse-params / browse: the Events page
+lib/metrics/service.ts    service hours, from attendance (a person's record, club and term totals)
 lib/attendance/token.ts   check-in codes & rotating QR tokens
+lib/documents/            PDF kit (page, header, tiles, tables, verification QR), signed verify links, the involvement record
 lib/rich/sanitize.ts      HTML sanitizer for every rich text input
 lib/terms.ts, lib/time.ts academic calendar & campus-time formatting
 prisma/                   schema + seed

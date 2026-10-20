@@ -36,6 +36,8 @@ export type ClubRole = "MEMBER" | "AMBASSADOR" | "OFFICER" | "VP" | "PRESIDENT" 
 export type MembershipStatus = "PENDING" | "ACTIVE" | "LEFT" | "ALUMNI" | "REMOVED" | "DECLINED";
 export type JoinPolicy = "OPEN" | "APPROVAL";
 export type Visibility = "PUBLIC" | "UNIVERSITY" | "MEMBERS";
+/** What an event offers: "Free food", "Free stuff". */
+export type EventPerk = "FREE_FOOD" | "FREE_STUFF";
 /** QR scan · SELF typed code · TAP one-tap at an online event · MANUAL added by a leader. Show `methodLabel` when a response has one. */
 export type CheckInMethod = "QR" | "SELF" | "TAP" | "MANUAL";
 export type WindowState = "NOT_OPEN" | "OPEN" | "CLOSED";
@@ -114,6 +116,14 @@ export type MEvent = {
   club: MClubRef | null;
   cohostNames: string[];
   happeningNow: boolean;
+  /** The event's cover image, site-relative ("/api/files/…"; resolve against the API base URL); null = show the club's color. */
+  coverUrl: string | null;
+  /** In badge order: "Free food", then "Free stuff". */
+  perks: EventPerk[];
+  /** Service hours each attendee earns per date they check in (1.5 = an hour and a half); null = doesn't count. Badge: "Service hours · 1.5". */
+  serviceHours: number | null;
+  /** In person with an online link too ("Hybrid"). Check-in still happens in the room: the QR code or the typed code. */
+  hybrid: boolean;
 };
 
 /** An occurrence you could check in to (live pop-up, scan result). */
@@ -145,6 +155,7 @@ export type MEventDetail = MEvent & {
   links: { label: string; url: string }[];
   /** What a maps app should search for (campus building or street address). */
   mapQuery: string | null;
+  /** The online link: online events, and hybrid ones (in person with a link too). */
   virtualUrl: string | null;
   /** How the event repeats ("Weekly on Tuesdays…"); null for a one-time meeting. */
   scheduleLabel: string | null;
@@ -549,6 +560,17 @@ export type MAnnouncementPage = { items: MAnnouncement[]; nextCursor: string | n
 /** GET /api/m/calendar?from=ISO&to=ISO — your calendar (subscribed clubs + university events if you follow them). */
 export type MCalendar = { from: string; to: string; events: MEvent[] };
 
+/**
+ * GET /api/m/events?filter=&from=ISO&to=ISO → MCalendar: the Events tab, the
+ * same events as the web Events page. "all" (the default) is every event you
+ * may see (signed out: public events); "free-food" and "service" narrow it;
+ * "following" (sign-in needed) is the web's Mine: the clubs you follow, plus
+ * university events if you keep them on. Defaults to today (campus time)
+ * through six weeks out; at most about a year at a time. Cancelled meetings
+ * are included and marked.
+ */
+export type MEventFilter = "all" | "free-food" | "service" | "following";
+
 // ─── Notifications ───────────────────────────────────────────────────────────
 
 export type MNotification = {
@@ -591,6 +613,20 @@ export type MAttendanceItem = {
   asMember: boolean | null;
 };
 
+/**
+ * Service hours from your check-ins (lib/metrics/service): every check-in at
+ * an event that counts adds its hours, so a removed check-in takes them away.
+ */
+export type MServiceSummary = {
+  minutes: number;
+  /** minutes ÷ 60 (exact quarter hours), e.g. 42.5. */
+  hours: number;
+  /** Dates you checked in to serve. */
+  events: number;
+  /** "42.5 service hours · 12 service events", as the web says it. */
+  label: string;
+};
+
 /** GET /api/m/attendance */
 export type MAttendance = {
   totalCheckins: number;
@@ -599,4 +635,7 @@ export type MAttendance = {
   history: MAttendanceItem[];
   /** More check-ins exist than `history` holds; the web page has them all. */
   more: boolean;
+  service: MServiceSummary;
+  /** Your involvement record as a PDF on the web (open with openWeb; the web asks you to sign in once). */
+  recordPath: string;
 };

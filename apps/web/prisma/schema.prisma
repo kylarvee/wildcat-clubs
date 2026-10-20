@@ -685,6 +685,11 @@ enum LocationType {
   TBD
 }
 
+enum EventPerk {
+  FREE_FOOD
+  FREE_STUFF
+}
+
 enum EventKind {
   MEETING
   PRACTICE
@@ -732,7 +737,13 @@ model Event {
   address            String?
   lat                Float?
   lng                Float?
-  virtualUrl         String? // Google Meet or other link
+  virtualUrl         String? // Google Meet or other link (also allowed on in-person events: hybrid)
+  /// A cover image for event cards and pages: one of the host club's files (like Club.logoUrl).
+  coverUrl           String?
+  /// What's offered to attendees, shown as badges and filters on the Events page.
+  perks              EventPerk[]
+  /// Service hours each attendee earns per date they check in, in minutes. Null = doesn't count.
+  serviceMinutes     Int?
 
   cohostAllClubs     Boolean      @default(false)
   googleEventId      String?

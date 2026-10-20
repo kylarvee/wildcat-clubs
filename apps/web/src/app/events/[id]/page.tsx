@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cache } from "react";
 import { notFound } from "next/navigation";
-import { CalendarClock, CalendarPlus, Download, FileText, Link2, MapPin, Pencil, QrCode, Repeat, Users, Video, Wallet } from "lucide-react";
+import { CalendarClock, Cast, FileText, Link2, MapPin, Pencil, QrCode, Repeat, Users, Video, Wallet } from "lucide-react";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { can, getClubAccess } from "@/lib/authz";
@@ -10,9 +10,9 @@ import { canManageEvent, canSeeEventCosts, canViewEvent, eventCostSummary } from
 import { canViewFile, fileUrl } from "@/lib/domain/files";
 import { richToText } from "@/lib/rich/sanitize";
 import { splitEventLinks, linkLabel } from "@/lib/events/links";
-import { KIND_LABEL, locationText, roomLabel, VISIBILITY_LABEL } from "@/lib/events/labels";
+import { eventBadges, isHybrid, KIND_LABEL, locationText, roomLabel, UNIVERSITY_COLOR, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { describeRecurrence } from "@/lib/events/summary";
-import { appUrl, campusMapQuery, googleCalendarTemplateUrl } from "@/lib/events/share";
+import { appUrl, campusMapQuery, eventGoogleCalendarUrl } from "@/lib/events/share";
 import { codeClubsPhrase } from "@/lib/attendance/rules";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { fmtDate, fmtMoney, fmtRange, fmtTime } from "@/lib/time";
@@ -24,6 +24,10 @@ import { Callout, Container, PageHeader } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { MapEmbed } from "@/components/embeds/MapEmbed";
 import { RichContent } from "@/components/rich/RichContent";
+import { SubscribeToggle } from "@/components/clubs/MembershipControls";
+import { AddToCalendarMenu } from "@/components/events/AddToCalendarMenu";
+import { EventBadges } from "@/components/events/EventBadges";
+import { EventCover } from "@/components/events/EventCover";
 
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ o?: string }> };
 
@@ -58,13 +62,15 @@ export default async function EventPage({ params, searchParams }: Props) {
   const now = new Date();
   // A date in another (campus) year shows it, so a 2024 meeting doesn't read as upcoming.
   const dayLabel = (d: Date) => fmtDate(d, fmtDate(d, "yyyy") === fmtDate(now, "yyyy") ? "EEE, MMM d" : "EEE, MMM d, yyyy");
-  const [upcoming, pastCount, requested, manage, seeCosts, hostAccess] = await Promise.all([
+  const [upcoming, pastCount, requested, manage, seeCosts, hostAccess, following] = await Promise.all([
     db.eventOccurrence.findMany({ where: { eventId: id, endsAt: { gte: now } }, orderBy: { startsAt: "asc" }, take: 12 }),
     db.eventOccurrence.count({ where: { eventId: id, endsAt: { lt: now } } }),
     o ? db.eventOccurrence.findFirst({ where: { id: o, eventId: id } }) : Promise.resolve(null),
     canManageEvent(viewer, event),
     canSeeEventCosts(viewer, event),
     event.clubId && viewer ? getClubAccess(viewer, event.clubId) : Promise.resolve(null),
+    // The host club's Follow button.
+    event.clubId && viewer ? db.calendarSubscription.findUnique({ where: { userId_clubId: { userId: viewer.id, clubId: event.clubId } }, select: { clubId: true } }) : Promise.resolve(null),
   ]);
   const lastPast = upcoming.length === 0 ? await db.eventOccurrence.findFirst({ where: { eventId: id }, orderBy: { startsAt: "desc" } }) : null;
   const occ = requested ?? upcoming.find((x) => x.status === "SCHEDULED") ?? upcoming[0] ?? lastPast;
@@ -92,27 +98,34 @@ export default async function EventPage({ params, searchParams }: Props) {
   const where = locationText({ ...event, roomOverride: occ?.roomOverride });
   const mapQuery = event.locationType === "CAMPUS" && event.building ? campusMapQuery(event.building.name) : event.locationType === "ADDRESS" ? event.address : null;
   const schedule = event.startsAt && event.recurrence !== "NONE" ? describeRecurrence({ startsAt: event.startsAt, recurrence: event.recurrence, interval: event.recurrenceInterval, weekdays: event.recurrenceWeekdays, until: event.recurrenceUntil, count: event.recurrenceCount }) : null;
+  // Hybrid: in person, with an online link too. Check-in still happens in the room.
+  const hybrid = isHybrid(event);
+  const badges = eventBadges(event);
   const gcal = occ
-    ? googleCalendarTemplateUrl({
-        title: `${event.title} (${hostName})`,
+    ? eventGoogleCalendarUrl({
+        title: event.title,
+        hostName,
         start: occ.startsAt,
         end: occ.endsAt,
         allDay: event.allDay,
-        details: [richToText(body, 800), `Details: ${appUrl(`/events/${event.id}?o=${occ.id}`)}`].filter(Boolean).join("\n\n"),
-        location: event.locationType === "CAMPUS" && event.building ? `${where}, ${INSTITUTION.mapsSuffix}` : event.locationType === "VIRTUAL" ? event.virtualUrl : event.address,
+        about: richToText(body, 800),
+        pageUrl: appUrl(`/events/${event.id}?o=${occ.id}`),
+        place: event.locationType === "CAMPUS" && event.building ? `${where}, ${INSTITUTION.mapsSuffix}` : event.locationType === "ADDRESS" ? event.address : null,
+        onlineUrl: event.locationType === "VIRTUAL" || hybrid ? event.virtualUrl : null,
       })
     : null;
 
   return (
     <Container size="lg">
       <PageHeader
-        breadcrumbs={[{ href: "/calendar", label: "Calendar" }, ...(event.club ? [{ href: `/clubs/${event.club.slug}`, label: event.club.name }] : []), { label: event.title }]}
+        breadcrumbs={[{ href: "/events", label: "Events" }, ...(event.club ? [{ href: `/clubs/${event.club.slug}`, label: event.club.name }] : []), { label: event.title }]}
         title={<span className={cn(event.status === "CANCELLED" && "line-through decoration-2")}>{event.title}</span>}
         description={
           <span className="flex flex-wrap items-center gap-1.5">
             <Badge>{KIND_LABEL[event.kind]}</Badge>
-            {event.visibility !== "PUBLIC" ? <Badge tone="brand">{VISIBILITY_LABEL[event.visibility]}</Badge> : null}
+            {event.visibility === "UNIVERSITY" ? <Badge tone="brand">{VISIBILITY_LABEL[event.visibility]}</Badge> : null}
             {event.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
+            <EventBadges badges={badges} inline />
             <span className="text-sm text-ink-3">
               Hosted by{" "}
               {event.club ? (
@@ -141,6 +154,18 @@ export default async function EventPage({ params, searchParams }: Props) {
           </>
         }
       />
+
+      {event.coverUrl ? (
+        <EventCover
+          src={event.coverUrl}
+          color={event.club?.logoColor ?? UNIVERSITY_COLOR}
+          name={hostName}
+          logoUrl={event.club?.logoUrl}
+          size="lg"
+          eager
+          className="mb-6 aspect-video max-h-96 w-full rounded-[var(--radius-card)] border border-line sm:aspect-[5/2]"
+        />
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-6">
@@ -172,16 +197,10 @@ export default async function EventPage({ params, searchParams }: Props) {
                   {occ?.note ?? "Check back for the next one."}
                 </Callout>
               ) : null}
-              {occ && !occCancelled ? (
-                <div className="flex flex-wrap gap-2">
-                  {gcal ? (
-                    <a href={gcal} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-2 bg-surface px-3 text-sm font-medium text-ink hover:bg-muted">
-                      <CalendarPlus className="h-4 w-4" /> Add to Google Calendar
-                    </a>
-                  ) : null}
-                  <a href={`/api/ics/occurrence/${occ.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-2 bg-surface px-3 text-sm font-medium text-ink hover:bg-muted" download>
-                    <Download className="h-4 w-4" /> Download .ics
-                  </a>
+              {(occ && !occCancelled && gcal) || (event.club && viewer) ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {occ && !occCancelled && gcal ? <AddToCalendarMenu googleUrl={gcal} icsUrl={`/api/ics/occurrence/${occ.id}`} /> : null}
+                  {event.club && viewer ? <SubscribeToggle clubId={event.club.id} clubName={event.club.name} slug={event.club.slug} subscribed={Boolean(following)} signedIn /> : null}
                 </div>
               ) : null}
             </CardBody>
@@ -290,6 +309,20 @@ export default async function EventPage({ params, searchParams }: Props) {
                 ) : (
                   <p className="text-sm text-ink-3">The join link will be posted here before the event.</p>
                 )
+              ) : null}
+              {hybrid && event.virtualUrl ? (
+                <div className="space-y-2 border-t border-line pt-3">
+                  <p className="flex gap-2 text-sm text-ink">
+                    <Cast className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
+                    <span>
+                      Also online
+                      <span className="block text-xs text-ink-3">Watch or join from anywhere. Check-in is in the room.</span>
+                    </span>
+                  </p>
+                  <ButtonLink href={event.virtualUrl} target="_blank" rel="noopener noreferrer" variant="outline" className="w-full">
+                    <Video className="h-4 w-4" /> Join online
+                  </ButtonLink>
+                </div>
               ) : null}
             </CardBody>
           </Card>

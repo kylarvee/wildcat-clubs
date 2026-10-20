@@ -49,6 +49,7 @@ export default async function EditClubEventPage({ params }: { params: Promise<{ 
         terms={data.terms}
         googleLive={data.googleLive}
         defaultFundingSource={defaultFundingSource(club)}
+        coverFolderId={data.coverFolderId}
       />
     </div>
   );

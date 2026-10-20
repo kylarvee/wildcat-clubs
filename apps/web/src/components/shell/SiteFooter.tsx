@@ -15,8 +15,8 @@ export function SiteFooter() {
             The home for student clubs at {INSTITUTION.name}. Run with {INSTITUTION.studentGovernment}.
           </p>
         </div>
-        <FooterCol title="Explore" links={[["Clubs", "/clubs"], ["Calendar", "/calendar"], ["Club network", "/network"], ["Start a club", "/clubs/new"]]} />
-        <FooterCol title="For members" links={[["Dashboard", "/dashboard"], ["My attendance", "/me/attendance"], ["Get the app", "/get-the-app"], ["Report a concern", "/report"]]} />
+        <FooterCol title="Explore" links={[["Clubs", "/clubs"], ["Events", "/events"], ["Club network", "/network"], ["Start a club", "/clubs/new"]]} />
+        <FooterCol title="For members" links={[["Dashboard", "/dashboard"], ["My involvement", "/me/involvement"], ["Get the app", "/get-the-app"], ["Report a concern", "/report"]]} />
         {/* Topic anchors in the library, not policy slugs: an archived policy would make a slug link 404 on every page. */}
         <FooterCol title="Policy" links={[["Policy library", "/policies"], ["Review policy", "/policies#reviews"], ["Reporting policy", "/policies#complaints"]]} />
       </div>

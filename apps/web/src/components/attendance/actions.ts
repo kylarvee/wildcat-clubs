@@ -12,7 +12,7 @@ import { addManual, checkIn, removeAttendance, searchCheckinCandidates, type Che
  */
 
 function refreshAttendanceViews() {
-  revalidatePath("/me/attendance");
+  revalidatePath("/me/involvement");
   revalidatePath("/clubs/[slug]/manage/attendance", "layout");
 }
 

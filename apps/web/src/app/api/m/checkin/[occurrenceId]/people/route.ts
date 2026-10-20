@@ -23,7 +23,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ occurre
   return mobile(async () => {
     const r = await manualCheckin(await mobileActor(req), decodeURIComponent(occurrenceId), await readJson(req));
     // The same pages the web's manual add refreshes.
-    revalidatePath("/me/attendance");
+    revalidatePath("/me/involvement");
     revalidatePath("/clubs/[slug]/manage/attendance", "layout");
     return r;
   });

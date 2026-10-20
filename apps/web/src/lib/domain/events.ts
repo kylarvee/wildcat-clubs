@@ -1,5 +1,5 @@
 import "server-only";
-import { Prisma, type BudgetItem, type Event, type FundingStatus, type Term } from "@prisma/client";
+import { Prisma, type BudgetItem, type Event, type EventPerk, type FundingStatus, type Term } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
@@ -20,7 +20,7 @@ import {
   noticeRoom,
   snapshotEvent,
 } from "@/lib/domain/event-notices";
-import { canViewFile } from "@/lib/domain/files";
+import { canViewFile, effectiveVisibility } from "@/lib/domain/files";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { expandOccurrences, MAX_OCCURRENCES, type OccurrenceTimes } from "@/lib/events/recurrence";
 import { generateCheckinCode, generateCheckinSecret } from "@/lib/attendance/token";
@@ -30,6 +30,7 @@ import { ACTIVE_REQUEST_STATUSES } from "@/lib/funding/math";
 import { holdsLock } from "@/lib/funding/locks";
 import { removeEventFromGoogle, syncEventToGoogle, type GoogleSyncResult } from "@/lib/integrations/google-calendar";
 import { isHttpUrl, joinEventLinks, splitEventLinks } from "@/lib/events/links";
+import { coverFileId, coverProblem, normalizePerks, onlineLinkFor, resolveServiceMinutes } from "@/lib/events/rules";
 import { campusParts, toDateInput } from "@/lib/events/wallclock";
 import { campusDate } from "@/lib/time";
 import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
@@ -58,6 +59,15 @@ import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
  * Notices: co-host leaders hear about new times and cancellations
  * (tellCohostsAboutChange); the event's followers hear when a date in the next
  * 14 days is cancelled, back on, moved or re-placed (lib/domain/event-notices).
+ *
+ * Cover, perks, service hours and hybrid (rules in lib/events/rules): the
+ * cover is one of the host club's public image files (University files for a
+ * university event), stored as its link like Club.logoUrl. Perks are badges
+ * and filters ("Free food", "Free stuff"). serviceMinutes is what each attendee
+ * earns per date they check in, in quarter hours and never more than the
+ * event's length; Service projects count by default, any kind may. An
+ * in-person event may keep an online link too, which makes it hybrid; check-in
+ * rules don't change (lib/attendance/rules).
  */
 
 // ─── Input schemas ───────────────────────────────────────────────────────────
@@ -67,6 +77,7 @@ const VISIBILITY = z.enum(["PUBLIC", "UNIVERSITY", "MEMBERS"]);
 const RECURRENCE = z.enum(["NONE", "DAILY", "WEEKLY", "MONTHLY", "SEMESTERLY", "ACADEMIC_YEARLY", "YEARLY"]);
 const LOCATION = z.enum(["CAMPUS", "ADDRESS", "VIRTUAL", "TBD"]);
 const FUNDING = z.enum(["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"]);
+const PERK = z.enum(["FREE_FOOD", "FREE_STUFF"]);
 
 const optText = (max: number) =>
   z
@@ -126,6 +137,12 @@ const DetailsShape = {
   cohostAllClubs: z.boolean().default(false),
   /** Omit to leave the event's costs as they are. */
   costs: z.array(CostSchema).max(100).optional(),
+  /** One of the host's public image files ("/api/files/<id>"); null removes it. Omit to leave it as it is. */
+  coverUrl: z.string().trim().max(300).nullish(),
+  /** Omit to leave the perks as they are. */
+  perks: z.array(PERK).max(10).optional(),
+  /** Minutes each attendee earns per date they check in (quarter hours); null = doesn't count. Omit to leave it (new Service projects count). */
+  serviceMinutes: z.coerce.number({ error: "Enter the service hours as a number." }).int().nullish(),
 };
 
 const EventSchema = z.object({ ...DetailsShape, ...ScheduleShape, ...LocationShape });
@@ -259,7 +276,8 @@ async function normalizeLocation(l: {
   virtualUrl?: string | null;
   createMeetLink: boolean;
 }): Promise<NormalizedLocation> {
-  const none: NormalizedLocation = { locationType: l.locationType, buildingId: null, room: null, address: null, lat: null, lng: null, virtualUrl: null };
+  // In person, on or off campus, may keep an online link too (hybrid); a place not decided yet has none.
+  const none: NormalizedLocation = { locationType: l.locationType, buildingId: null, room: null, address: null, lat: null, lng: null, virtualUrl: onlineLinkFor(l.locationType, l.virtualUrl) };
   switch (l.locationType) {
     case "CAMPUS": {
       if (!l.buildingId) throw invalid("Pick the campus building.");
@@ -272,7 +290,7 @@ async function normalizeLocation(l: {
       return { ...none, address: l.address, lat: l.lat ?? null, lng: l.lng ?? null };
     case "VIRTUAL":
       if (!l.virtualUrl && !l.createMeetLink) throw invalid("Add the link people use to join, or ask for a Google Meet link.");
-      return { ...none, virtualUrl: l.virtualUrl || null };
+      return none;
     default:
       return none;
   }
@@ -643,6 +661,12 @@ type EventFields = {
   cohosts?: { all: boolean; clubIds: string[] };
   attachmentFileIds?: string[];
   costs?: CostRow[];
+  /** Undefined = leave as it is (a new event has none); null removes it. */
+  coverUrl?: string | null;
+  /** Undefined = leave as they are (a new event has none). */
+  perks?: EventPerk[];
+  /** Undefined = keep (trimmed to fit a shorter event); a new Service project counts by default. See lib/events/rules. */
+  serviceMinutes?: number | null;
 };
 
 /** The meetings an event's saved rule produces (null when it has no start yet). */
@@ -657,11 +681,31 @@ function savedTimes(e: Event, terms: Term[]): OccurrenceTimes[] | null {
 const sameTimes = (a: OccurrenceTimes[], b: OccurrenceTimes[]) =>
   a.length === b.length && a.every((o, i) => o.startsAt.getTime() === b[i].startsAt.getTime() && o.endsAt.getTime() === b[i].endsAt.getTime());
 
+/**
+ * A cover must be one of the host's own public image files (lib/events/rules
+ * coverProblem). A cover that didn't change is left alone, like a club logo.
+ */
+async function normalizeCover(url: string | null | undefined, club: HostClub | null, existing: Event | null): Promise<string | null> {
+  if (url === undefined) return existing?.coverUrl ?? null;
+  if (!url) return null;
+  if (existing?.coverUrl === url) return url;
+  const id = coverFileId(url);
+  if (!id) throw invalid("Choose the cover again. That image link isn't valid.");
+  const file = await db.fileItem.findUnique({ where: { id } });
+  const problem = coverProblem(file ? { ...file, effective: await effectiveVisibility(file) } : null, club);
+  if (problem) throw invalid(problem);
+  return `/api/files/${id}`;
+}
+
 /** The one place events are written. Create (existing = null), update, or move. */
 async function writeEvent(actor: Actor, club: HostClub | null, existing: Event | null, f: EventFields, action: string): Promise<EventWriteResult> {
   const terms = await getTerms();
   const desired = expandSchedule(f.schedule, terms);
   if (!club && f.costs?.length) throw invalid("University events don't carry club costs.");
+  const coverUrl = await normalizeCover(f.coverUrl, club, existing);
+  const perks = f.perks ? normalizePerks(f.perks) : (existing?.perks ?? []);
+  const service = resolveServiceMinutes(f.serviceMinutes, { durationMinutes: f.schedule.durationMinutes, kind: f.kind, existing });
+  if (!service.ok) throw invalid(service.error);
   // University events have no members list, so "members only" means signed-in accounts.
   const visibility = !club && f.visibility === "MEMBERS" ? "UNIVERSITY" : f.visibility;
   const costTermId = club && f.costs !== undefined ? (f.costs.some((c) => !c.id) ? requireBudgetTerm(terms, desired[0].startsAt) : (budgetTermFor(terms, desired[0].startsAt)?.id ?? null)) : null;
@@ -691,6 +735,9 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
           setupMinutes: f.setupMinutes,
           cleanupMinutes: f.cleanupMinutes,
           descriptionHtml: f.descriptionHtml,
+          coverUrl,
+          perks,
+          serviceMinutes: service.minutes,
           status,
           ...f.schedule,
           ...f.location,
@@ -783,6 +830,9 @@ function fieldsFromInput(d: z.output<typeof EventSchema>, schedule: NormalizedSc
     cohosts: { all: d.cohostAllClubs, clubIds: d.cohostClubIds },
     attachmentFileIds: d.attachmentFileIds,
     costs: d.costs,
+    coverUrl: d.coverUrl,
+    perks: d.perks,
+    serviceMinutes: d.serviceMinutes,
   };
 }
 

@@ -1,4 +1,4 @@
-import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, Gender, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
+import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, EventPerk, Gender, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
 import { createIdFactory, createRng, type Rng } from "./lib/rng";
 import type { ClubDef } from "./data/clubs";
 import type { CollegeKey } from "./data/reference";
@@ -104,7 +104,11 @@ export type Ev = {
   address: string | null;
   lat: number | null;
   lng: number | null;
+  /** Online events' link; an in-person event with one is hybrid. */
   virtualUrl: string | null;
+  /** One of the host club's public image files ("/api/files/<id>"), set after the files step (steps/events assignCovers). */
+  coverUrl: string | null;
+  perks: EventPerk[];
   createdById: string;
   createdAt: Date;
   termId: string | null;
@@ -113,6 +117,8 @@ export type Ev = {
   occurrences: Occ[];
   /** Planned cost lines for the Events Builder (turned into BudgetItems). */
   cost?: [string, number, number];
+  /** Service hours each attendee earns per date they check in, in minutes (Event.serviceMinutes); null = doesn't count. */
+  serviceMinutes: number | null;
 };
 
 export type ClubM = {

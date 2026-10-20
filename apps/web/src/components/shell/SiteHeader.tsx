@@ -31,13 +31,13 @@ export async function SiteHeader() {
     ? [
         { href: "/dashboard", label: "Dashboard" },
         { href: "/clubs", label: "Clubs" },
-        { href: "/calendar", label: "Calendar" },
+        { href: "/events", label: "Events" },
         { href: "/network", label: "Network" },
         ...(can(user, "admin.access") ? [{ href: "/admin", label: "Admin" }] : []),
       ]
     : [
         { href: "/clubs", label: "Clubs" },
-        { href: "/calendar", label: "Calendar" },
+        { href: "/events", label: "Events" },
         { href: "/network", label: "Network" },
       ];
 

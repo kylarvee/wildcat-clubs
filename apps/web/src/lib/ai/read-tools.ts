@@ -8,7 +8,7 @@ import { listClubs, clubUpcomingEvents, type ClubListItem } from "@/lib/clubs/qu
 import { clubListHref, SORT_DEFAULT_DIR, type ClubListParams } from "@/components/clubs/list-params";
 import { CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL, STANDING_LABEL, standingOf } from "@/lib/labels/clubs";
 import { MEMBERSHIP_STATUS_LABEL } from "@/components/admin/users/labels";
-import { clubActivity, clubListMetrics, clubsAtRisk, memberClubSummaries, noRetentionText, reviewEligibility, type ClubListMetrics } from "@/lib/metrics";
+import { clubActivity, clubListMetrics, clubsAtRisk, memberClubSummaries, noRetentionText, reviewEligibility, serviceHours, serviceSummary, type ClubListMetrics } from "@/lib/metrics";
 import { feedOccurrences, viewerContext } from "@/lib/events/feed";
 import { canManageEvent, canSeeEventCosts, canViewEvent, eventCostSummary } from "@/lib/domain/events";
 import { foundingChecklist } from "@/lib/domain/clubs";
@@ -449,7 +449,7 @@ const myCalendar = readTool({
         range: `${fmtDate(now, "EEE, MMM d")} – ${fmtDate(new Date(now.getTime() + days * 86_400_000), "EEE, MMM d")}`,
         ...(club
           ? { calendar_of: club.name }
-          : { follows_club_calendars: ctx.subscribedClubIds.length, includes_university_events: ctx.subscribeUniversity, calendar_page: "/calendar" }),
+          : { follows_club_calendars: ctx.subscribedClubIds.length, includes_university_events: ctx.subscribeUniversity, events_page: "/events?scope=mine" }),
         events,
         ...(events.length === 0 && !club && ctx.subscribedClubIds.length === 0 ? { hint: "They don't follow any club calendars yet — registering for a club or following its calendar adds its events." } : {}),
       },
@@ -464,11 +464,24 @@ const myAttendance = readTool({
   name: "my_attendance",
   running: "Checking your attendance",
   description:
-    "The person's own attendance: per club, events attended, attendance rate since joining, last check-in, whether they count as active, and review eligibility; plus their most recent check-ins. Optionally for one club.",
+    "The person's own attendance and service hours: per club, events attended, attendance rate since joining, last check-in, whether they count as active, and review eligibility; their service hours (total, by term and club, and recent dates); plus their most recent check-ins. Optionally for one club.",
   schema: z.object({ club: clubRef.optional().describe("Only this club") }),
   async run({ actor }, input) {
     const club = input.club ? await resolveClub(actor, input.club) : null;
-    const [summaries, history] = await Promise.all([memberClubSummaries(actor.id), loadPersonAttendance(actor.id)]);
+    const [summaries, history, service] = await Promise.all([memberClubSummaries(actor.id), loadPersonAttendance(actor.id), serviceSummary(actor.id)]);
+    const atClub = club ? service.byClub.find((c) => c.club?.id === club.id) : null;
+    const serviceHoursData = {
+      total_hours: serviceHours(service.minutes),
+      service_events: service.events,
+      ...(club ? { at_this_club: { hours: serviceHours(atClub?.minutes ?? 0), service_events: atClub?.events ?? 0 } } : {}),
+      by_term: service.byTerm.map((t) => ({ term: t.term ?? "before the academic calendar", hours: serviceHours(t.minutes), service_events: t.events })),
+      by_club: service.byClub.map((c) => ({ club: c.club?.name ?? "University events", hours: serviceHours(c.minutes), service_events: c.events })),
+      recent: service.entries
+        .filter((e) => !club || e.club?.id === club.id || e.cohosts.some((c) => c.id === club.id))
+        .slice(0, 8)
+        .map((e) => ({ event: e.title, host: e.club?.name ?? "Weber State (university event)", when: fmtDate(e.startsAt, "EEE, MMM d, yyyy"), hours: serviceHours(e.minutes) })),
+      how_hours_count: "Each check-in at an event that counts toward service hours adds that event's hours; a removed check-in takes them away. Co-hosted events count for each club that put them on.",
+    };
     const per = summaries
       .filter((s) => !club || s.club.id === club.id)
       .map((s) => ({
@@ -492,7 +505,14 @@ const myAttendance = readTool({
       .slice(0, 8)
       .map((r) => ({ event: r.title, host: r.club?.name ?? "Weber State", when: fmtDate(r.startsAt, "EEE, MMM d, yyyy"), as: r.asMember === false ? "guest" : "member" }));
     return {
-      data: { total_check_ins: history.rows.length, clubs: per, recent_check_ins: recent, attendance_page: "/me/attendance" },
+      data: {
+        total_check_ins: history.rows.length,
+        clubs: per,
+        recent_check_ins: recent,
+        service_hours: serviceHoursData,
+        involvement_page: "/me/involvement",
+        involvement_record_pdf: "/me/involvement/record.pdf",
+      },
       label: club ? `Checked your attendance at ${club.name}` : "Checked your attendance",
     };
   },

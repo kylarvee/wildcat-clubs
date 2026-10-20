@@ -28,6 +28,7 @@ export default async function NewTrainingPage({ searchParams }: { searchParams: 
         terms={data.terms}
         googleLive={data.googleLive}
         defaultFundingSource="UNIVERSITY"
+        coverFolderId={data.coverFolderId}
       />
     </div>
   );

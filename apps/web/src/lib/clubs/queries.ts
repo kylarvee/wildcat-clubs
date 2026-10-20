@@ -9,7 +9,7 @@ import { visibleEventsWhere } from "@/lib/authz/events";
 import { canViewFile } from "@/lib/domain/files";
 import { clubListMetrics, type ClubListMetrics } from "@/lib/metrics";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL } from "@/components/clubs/labels";
-import { shortLocationText } from "@/lib/events/labels";
+import { eventBadges, shortLocationText, type EventBadge } from "@/lib/events/labels";
 import { describeRepeat } from "@/lib/events/summary";
 import { fmtTime } from "@/lib/time";
 import type { ClubListParams } from "@/components/clubs/list-params";
@@ -422,6 +422,9 @@ const occurrenceSelect = {
       room: true,
       address: true,
       virtualUrl: true,
+      coverUrl: true,
+      perks: true,
+      serviceMinutes: true,
       building: { select: { name: true, code: true } },
       club: { select: { id: true, name: true, slug: true, logoUrl: true, logoColor: true } },
       cohosts: { where: { status: "APPROVED" }, select: { club: { select: { id: true, name: true, slug: true } } } },
@@ -444,6 +447,10 @@ export type UpcomingEvent = {
   host: { id: string; name: string; slug: string; logoUrl: string | null; logoColor: string } | null;
   cohosts: { id: string; name: string; slug: string }[];
   happeningNow: boolean;
+  /** The event's cover image (one of the host's public image files), for a thumbnail. */
+  coverUrl: string | null;
+  /** lib/events/labels eventBadges: perks, service hours, online/hybrid, members only. */
+  badges: EventBadge[];
 };
 
 function locationLabel(o: OccurrenceRow): { label: string; virtual: boolean } {
@@ -476,6 +483,8 @@ function toUpcoming(o: OccurrenceRow, now: Date): UpcomingEvent {
     host: o.event.club,
     cohosts: o.event.cohosts.map((c) => c.club),
     happeningNow: o.startsAt <= now && now <= o.endsAt,
+    coverUrl: o.event.coverUrl,
+    badges: eventBadges(o.event),
   };
 }
 

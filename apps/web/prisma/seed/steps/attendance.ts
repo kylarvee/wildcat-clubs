@@ -1,6 +1,7 @@
 import type { EventKind } from "@prisma/client";
 import type { ClubM, Ctx, Ev, Member, Occ } from "../ctx";
 import { addDays, addMin, DAY, MIN, WEEK } from "../lib/dates";
+import { createRng } from "../lib/rng";
 
 /**
  * Attendance for past occurrences only. Each member has an engagement level
@@ -21,16 +22,42 @@ function checkinAt(ctx: Ctx, occ: Occ): Date {
 }
 
 /**
+ * Each person's check-ins so far, as occurrence windows, so the draw doesn't
+ * put anyone at two events at the same time (it would also count service
+ * hours twice for one morning).
+ */
+const busyByCtx = new WeakMap<Ctx, Map<string, Occ[]>>();
+const busyOf = (ctx: Ctx, userId: string) => {
+  let people = busyByCtx.get(ctx);
+  if (!people) busyByCtx.set(ctx, (people = new Map()));
+  let occs = people.get(userId);
+  if (!occs) people.set(userId, (occs = []));
+  return occs;
+};
+const atAnother = (ctx: Ctx, userId: string, occ: Occ) => busyOf(ctx, userId).some((o) => o !== occ && o.startsAt < occ.endsAt && occ.startsAt < o.endsAt);
+function checkIn(ctx: Ctx, occ: Occ, userId: string, row: { at: Date; method: "QR" | "SELF" | "TAP" | "MANUAL"; recordedById: string | null }) {
+  occ.attendees.set(userId, { id: ctx.id(), ...row });
+  busyOf(ctx, userId).push(occ);
+}
+
+type RecordOpts = {
+  at?: Date;
+  joining?: boolean;
+  /** Skip it if they're already checked in at an event at the same time. The draws still happen, so the rest of the seed stays where it was. */
+  notIfBusy?: boolean;
+};
+
+/**
  * One check-in, by the platform's rules (lib/attendance/rules decideMethod).
  * The typed code (SELF) and the one-tap prompt (TAP) are only for members of
  * the host or an approved co-host club, so never at a university event, which
  * has no host club; everyone else scans the QR code. Someone joining by
  * checking in wasn't a member yet, so they scanned it too. Online events have
  * nothing to scan in the room, so members there use the one-tap prompt. Now
- * and then a leader adds someone by hand (MANUAL).
+ * and then a leader adds someone by hand (MANUAL). Returns whether it was kept.
  */
-function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, at?: Date, joining = false) {
-  if (occ.attendees.has(userId)) return;
+function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, { at, joining = false, notIfBusy = false }: RecordOpts = {}): boolean {
+  if (occ.attendees.has(userId)) return false;
   const { rng } = ctx;
   const r = rng.next();
   // Explicit times (live meetings, trainings) can land after NOW; nobody checks in from the future.
@@ -46,7 +73,9 @@ function record(ctx: Ctx, club: ClubM | null, ev: Ev, occ: Occ, userId: string, 
     if (holders.length) recordedById = rng.pick(holders);
     else method = member && online ? "TAP" : "QR";
   }
-  occ.attendees.set(userId, { id: ctx.id(), at: when, method, recordedById });
+  if (notIfBusy && atAnother(ctx, userId, occ)) return false;
+  checkIn(ctx, occ, userId, { at: when, method, recordedById });
+  return true;
 }
 
 function memberP(m: Member, at: Date) {
@@ -88,7 +117,7 @@ export function buildAttendance(ctx: Ctx) {
       m.joinedAt = at;
       m.requestedAt = at;
       if (m.endedAt && m.endedAt <= at) m.endedAt = addDays(at, 21);
-      record(ctx, club, hit.e, hit.o, m.userId, at, true);
+      record(ctx, club, hit.e, hit.o, m.userId, { at, joining: true });
     }
   }
 
@@ -113,7 +142,7 @@ export function buildAttendance(ctx: Ctx) {
             else if (roles.some((r) => r.role === "AMBASSADOR")) p = Math.max(p, 0.4);
             if (ev.visibility === "MEMBERS") p *= 1.05;
           }
-          if (rng.chance(Math.min(0.97, p))) record(ctx, club, ev, occ, m.userId);
+          if (rng.chance(Math.min(0.97, p))) record(ctx, club, ev, occ, m.userId, { notIfBusy: true });
         }
         // Guests from co-hosting clubs.
         for (const ch of ev.cohosts.filter((c) => c.status === "APPROVED")) {
@@ -123,7 +152,7 @@ export function buildAttendance(ctx: Ctx) {
             if (club.byUser.get(m.userId)?.joinedAt && ctx.memberAt(club, m.userId, t)) continue;
             if (ctx.person(m.userId).kind !== "STUDENT") continue;
             const p = memberP(m, t) * 0.55 * KIND_FACTOR[ev.kind] * seasonal(ctx, t);
-            if (rng.chance(Math.min(0.85, p))) record(ctx, club, ev, occ, m.userId);
+            if (rng.chance(Math.min(0.85, p))) record(ctx, club, ev, occ, m.userId, { notIfBusy: true });
           }
         }
       }
@@ -163,6 +192,33 @@ export function buildAttendance(ctx: Ctx) {
     }
   }
 
+  // 3b. University service events (Day of Service, the pantry restock): students from across
+  // campus. Their own random generator keeps the rest of this step's choices where they were.
+  // They scan the QR code: university events have no host club, so no typed code or one tap.
+  const serviceRng = createRng(20261021);
+  const students = ctx.people.filter((p) => p.kind === "STUDENT");
+  for (const ev of ctx.universityEvents.filter((e) => e.serviceMinutes)) {
+    for (const occ of ev.occurrences.filter((o) => o.status === "SCHEDULED" && o.startsAt < NOW)) {
+      const pool = students.filter((p) => p.createdAt <= occ.startsAt && p.enrollStart <= occ.startsAt && (!p.gradDate || p.gradDate > occ.startsAt));
+      const n = Math.min(pool.length, ev.durationMinutes >= 240 ? serviceRng.int(28, 46) : serviceRng.int(8, 14));
+      for (const p of serviceRng.weightedOrder(pool, (x) => x.propensity).slice(0, n)) {
+        const at = new Date(occ.startsAt.getTime() + serviceRng.int(-10, 25) * MIN);
+        if (atAnother(ctx, p.id, occ)) continue;
+        checkIn(ctx, occ, p.id, { at: at > NOW ? new Date(NOW.getTime() - 60_000) : at, method: "QR", recordedById: null });
+      }
+    }
+  }
+  // Maya already has a few service hours: the latest Day of Service and the pantry restock.
+  const mayaId = ctx.p("maya").id;
+  const pastService = ctx.universityEvents
+    .filter((e) => e.serviceMinutes)
+    .flatMap((e) => e.occurrences.filter((o) => o.status === "SCHEDULED" && o.startsAt < NOW).map((o) => ({ e, o })));
+  const dayOfService = pastService.filter((x) => x.e.title === "WSUSA Day of Service").sort((a, b) => b.o.startsAt.getTime() - a.o.startsAt.getTime())[0];
+  const restockNight = pastService.find((x) => x.e.id === ctx.refs.pantryRestockEventId);
+  for (const x of [dayOfService, restockNight]) {
+    if (x && !x.o.attendees.has(mayaId)) checkIn(ctx, x.o, mayaId, { at: addMin(x.o.startsAt, 4), method: "QR", recordedById: null });
+  }
+
   // 4. Events happening right now: some people already checked in.
   const liveCheckins = (clubKey: string, eventId: string, n: number, exclude: string[]) => {
     const club = ctx.club(clubKey);
@@ -171,7 +227,7 @@ export function buildAttendance(ctx: Ctx) {
     const pool = club.members.filter((m) => m.status === "ACTIVE" && m.joinedAt && !exclude.includes(m.userId) && ctx.person(m.userId).kind === "STUDENT");
     for (const m of rng.weightedOrder(pool, (x) => x.eng.base).slice(0, n)) {
       const span = Math.max(60_000, NOW.getTime() - occ.startsAt.getTime() - 60_000);
-      record(ctx, club, ev, occ, m.userId, new Date(occ.startsAt.getTime() + rng.next() * span));
+      record(ctx, club, ev, occ, m.userId, { at: new Date(occ.startsAt.getTime() + rng.next() * span) });
     }
   };
   liveCheckins("service", ctx.refs.liveEventId, 9, [ctx.p("maya").id, ctx.p("frank").id]);
@@ -191,8 +247,7 @@ export function buildAttendance(ctx: Ctx) {
     for (const x of rng.shuffle(occs)) {
       if (count >= 5) break;
       if (x.o.attendees.has(maya)) continue;
-      record(ctx, club, x.e, x.o, maya);
-      count++;
+      if (record(ctx, club, x.e, x.o, maya, { notIfBusy: true })) count++;
     }
   }
   // Active in Psi Chi (psych): at one of the last two meetings.

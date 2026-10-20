@@ -23,11 +23,12 @@ export type HistoryRow = {
   cohosts: string[];
 };
 
-function ClubCell({ r }: { r: HistoryRow }) {
+/** `wrap`: the phone layout, where the name wraps under the event instead of widening the table. */
+function ClubCell({ r, wrap = false }: { r: HistoryRow; wrap?: boolean }) {
   return r.club ? (
     <Link href={`/clubs/${r.club.slug}`} className="flex min-w-0 items-center gap-2 hover:text-brand-600">
-      <ClubLogo name={r.club.name} src={r.club.logoUrl} color={r.club.logoColor} size="sm" className="h-6 w-6 rounded-md text-[10px]" />
-      <span className="truncate">{r.club.name}</span>
+      <ClubLogo name={r.club.name} src={r.club.logoUrl} color={r.club.logoColor} size="sm" className="h-6 w-6 shrink-0 rounded-md text-[10px]" />
+      <span className={wrap ? "min-w-0 [overflow-wrap:anywhere]" : "truncate"}>{r.club.name}</span>
       {r.cohosts.length ? (
         <span className="shrink-0 text-xs text-ink-3" title={`With ${r.cohosts.join(", ")}`}>
           +{r.cohosts.length}
@@ -42,7 +43,7 @@ function ClubCell({ r }: { r: HistoryRow }) {
 }
 
 /**
- * The /me/attendance history. A client component on purpose: the page sends
+ * My involvement's attendance history. A client component on purpose: the page sends
  * the rows as data and they render here, instead of hundreds of server
  * component instances per page (the cost that made this page slow).
  * On phones the club and method fold under the event so nothing scrolls sideways.
@@ -75,7 +76,7 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
               <span className="font-medium text-ink">{r.title}</span>
               {r.asGuest ? <span className="ml-2 align-middle text-xs text-ink-3">as a guest</span> : null}
               <div className="mt-1.5 text-sm md:hidden">
-                <ClubCell r={r} />
+                <ClubCell r={r} wrap />
               </div>
               <div className="mt-1.5 sm:hidden">
                 <MethodBadge method={r.method} />

@@ -40,7 +40,7 @@ export function UserMenu({
           <Link href="/files"><FolderOpen className="h-4 w-4" /> My files</Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/me/attendance"><CalendarCheck className="h-4 w-4" /> My attendance</Link>
+          <Link href="/me/involvement"><CalendarCheck className="h-4 w-4" /> My involvement</Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/tests"><BadgeCheck className="h-4 w-4" /> Tests &amp; forms</Link>

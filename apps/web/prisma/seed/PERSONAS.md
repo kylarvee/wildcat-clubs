@@ -80,14 +80,17 @@ Outdoors Club (fall 2025, approval gate) and Wildcat Service Club (joined two
 weeks ago, one check-in). She has three or more check-ins in the first three,
 so she can review them; she already gave the Hiking and Outdoors Club 5★. She
 follows ISMN's calendar without joining. Her member details are complete and
-confirmed for this year.
+confirmed for this year. She has service hours already: service projects in
+her clubs, the latest *WSUSA Day of Service* (3 hours) and the *Weber Cares
+Pantry Restock Night* about a week ago (2 hours), both university events.
 
 1. **Check in, live now.**
    - In person: Wildcat Service Club's *Care Kit Assembly for the Weber Cares
      Pantry* started 15 minutes before the seed ran and ends 105 minutes after
      it. In-person events have no pop-up: scan the QR code, or, as a member,
      type **HERE26** (it shows as "Typed code"). About nine people are already
-     checked in.
+     checked in. It counts toward service hours, so the confirmation says
+     **+2 service hours** and My involvement's total goes up by 2.
    - Online: Pre-Med Club's *Online MCAT Study Hall* (Google Meet) started 10
      minutes before the seed ran and runs two hours. Online events are the
      only ones with the check-in pop-up: open Pre-Med Club's page (web or
@@ -115,13 +118,43 @@ confirmed for this year.
      way** (that ends this vote until you reseed).
 4. **Review** Pre-Med Club or Psi Chi. Her Hiking and Outdoors Club review can
    be edited or deleted.
-5. **Attendance tracker** (`/me/attendance`) and her record on each club page.
-6. **United calendar:** four clubs, ISMN (followed only) and university
-   events.
+5. **My involvement** (`/me/involvement`, account menu; the old
+   `/me/attendance` address redirects there): her leadership roles (none yet),
+   service hours by term and by club with every date, and her attendance
+   history, plus her record on each club page.
+   - **Download involvement record**: a PDF built fresh on each download, with
+     the four summary numbers, Leadership, Service hours, Clubs and attendance
+     by term, and WSUSA trainings and requirements. Its footer has a QR code and
+     a `/verify/…` link: open it (signed in or not) to see her record as it
+     stands now and when the PDF was issued. Change one character of the link
+     and the page says *This link isn't valid*.
+   - **Try it:** check in to the Care Kit Assembly, then, as Alex, open Wildcat
+     Service Club → Attendance → the live event and remove her check-in. Her
+     total drops back by 2 hours, and so does a fresh download of the record.
+6. **Events** (the header's Events, or the app's Events tab): *Mine* is her
+   four clubs, ISMN (followed only) and university events.
+   - **Free food** + **This weekend** (Friday 5 PM through Sunday) finds
+     Hiking and Outdoors Club's *Trailhead Cookout & Easy Hike*, Saturday at
+     11:30 AM at the Waterfall Canyon trailhead (seeded later on a Saturday
+     it's on Sunday; seeded late on a Sunday it's next Saturday, so use
+     **Next 7 days**). In the app it's the **Free food** chip.
+   - **All of Weber State** shows everything she may see. Covers come from
+     clubs' flyers (cards without one show the club's color and logo), and
+     badges say *Free food*, *Free stuff*, *Service hours · 2*, *Online*,
+     *Hybrid* or *Members only*. **Online or hybrid** finds a few workshops
+     that are in person with a Meet link too. Search looks at event names,
+     descriptions and host clubs.
+   - **Month** is the calendar grid with the same filters; **Subscribe** has
+     her private feed link (and the university events switch). An event page's
+     **Add to calendar** offers Google Calendar or an .ics file. The old
+     `/calendar` address opens Mine in Month view.
 7. **Messages:** an unread DM from Priya; three unread messages in the
    Psi Chi chat.
 8. **Profile** (`/u/mayachen`): barista job, summer research internship,
-   education, club roles (none — she's a member).
+   education, club roles (none — she's a member). The header shows her
+   service hours as one line (*… service hours · … service events*) to every
+   signed-in account; only she and WSUSA see which events (the *Service hours*
+   card beside it).
 9. **Notifications** (the bell, or the app's Notifications tab):
    - ISMN, whose calendar she follows without joining, moved one of its next
      *Screening Night*s to another room: *Screening Night on Fri, … moves to …*.
@@ -265,6 +298,14 @@ The club runs its own *Event Safety Quiz*.
    **Withdraw request**.
 5. **Events:** upcoming co-hosted *Wrecker Bots × CSWS: Intro to Embedded
    Programming* and *Girls in STEM Robot Day*.
+   - **Try it:** open a *Build Night* in the Events Builder. Under **Basics**,
+     pick **Free food** or **Free stuff**. Under **Cover image**, **Choose from
+     club files** (Flyers & Photos has public flyers) or **Upload an image**;
+     the cover must be one of the club's public images. Under **Where**, add an
+     **Online link** and it reads *Hybrid* (check-in still happens in the
+     room). Under **Service hours**, any event can count: *Hours per attendee*
+     starts at the event's length and can't go over it. *Girls in STEM Robot
+     Day*, a Service project, counts already.
 6. **Budget:** *Combat robotics competition travel* is approved with an open
    invoice.
 7. **Club tests:** results for the Event Safety Quiz.
@@ -474,6 +515,12 @@ about a real club.
   any note, and **Download CSV** exports the list. Nothing pauses or retires
   on its own. The Overview's *Where clubs stand* has the count. The three
   clubs approved this fall renew starting next year.
+
+- **Service hours:** People → Maya Chen → **Involvement record (PDF)** downloads
+  her record (each download is logged, privately, as *Downloaded an
+  involvement record*). Club analytics has a *Service hours (this term)*
+  column, in the CSV too: every check-in at a club's hosted or co-hosted
+  service events this term.
 
 Also try: policies (eleven published, one draft, one shown from a PDF),
 trainings, university-wide announcements, analytics, directory and people.

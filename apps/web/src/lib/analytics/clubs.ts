@@ -1,7 +1,7 @@
 import "server-only";
 import type { ClubRole, FundingSource, FundingStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { clubActivityMany, clubAverageAttendance, clubListMetrics, type OccurrenceAttendance } from "@/lib/metrics";
+import { clubActivityMany, clubAverageAttendance, clubListMetrics, clubServiceTotals, type OccurrenceAttendance, type ServiceTotal } from "@/lib/metrics";
 import { lastBuckets } from "@/lib/metrics/pure";
 import { academicYearAt, currentOrLastTerm, getTerms } from "@/lib/terms";
 import { orgChartData } from "@/lib/roles/queries";
@@ -44,12 +44,14 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
   const ids = clubs.map((c) => c.id);
   // Founding clubs have no events; only clubs that could have run one this term go in the attendance query.
   const withEvents = clubs.filter((c) => c.status === "APPROVED" || c.status === "RETIRED").map((c) => c.id);
-  const [activity, list, links, rateBy, leaders] = await Promise.all([
+  const [activity, list, links, rateBy, service, leaders] = await Promise.all([
     clubActivityMany(ids),
     clubListMetrics(ids),
     connectionCounts(),
     // The tracker's "Avg. attendance" for every club at once (lib/metrics; the same figure as averageRate above).
     term ? clubAverageAttendance(withEvents, { from: term.from, to: term.to }) : Promise.resolve(new Map<string, number | null>()),
+    // Service hours earned at each club's events this term, hosted or co-hosted (lib/metrics).
+    term ? clubServiceTotals(withEvents, { from: term.from, to: term.to }) : Promise.resolve(new Map<string, ServiceTotal>()),
     // Current Presidents and advisors, for the No President and No advisor filters.
     db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null, role: { in: ["PRESIDENT", "ADVISOR"] } }, _count: { _all: true } }),
   ]);
@@ -77,6 +79,7 @@ export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubA
       retentionSummary: m?.retention ?? null,
       avgAttendance: rateBy.get(c.id) ?? null,
       heldEvents: a?.heldEventsCurrentTerm ?? 0,
+      serviceMinutes: service.get(c.id)?.minutes ?? 0,
       rating: m?.avgRating ?? null,
       reviews: m?.reviewCount ?? 0,
       connections: l?.clubs ?? 0,

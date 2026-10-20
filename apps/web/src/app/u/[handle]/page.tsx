@@ -3,9 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canDirectMessage } from "@/lib/domain/messaging";
 import { MessageButton } from "@/components/messages/MessageButton";
-import { Briefcase, CalendarCheck, FolderKanban, GraduationCap, Link2, Lock, Pencil, Sparkles, Users } from "lucide-react";
+import { Briefcase, CalendarCheck, FolderKanban, GraduationCap, HandHeart, Link2, Lock, Pencil, Sparkles, Users } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { INSTITUTION } from "@/lib/institution";
+import { fmtDate } from "@/lib/time";
+import { fmtServiceHours, serviceLine } from "@/lib/metrics/service";
 import { loadProfile, profileUser, type ProfileData } from "@/lib/profiles/queries";
 import { fmtExperienceRange, fmtGraduated, fmtYearSpan, shortName } from "@/lib/profiles/format";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
@@ -169,11 +171,46 @@ export default async function ProfilePage({ params, searchParams }: Props) {
           {data.isSelf ? (
             <Card className="p-5">
               <div className="flex items-center gap-2 font-semibold text-ink">
-                <Lock className="h-4 w-4 text-ink-3" aria-hidden /> Your attendance
+                <Lock className="h-4 w-4 text-ink-3" aria-hidden /> Your involvement
               </div>
-              <p className="mt-2 text-sm text-ink-2">Your check-ins aren&apos;t on your profile. Only you, your clubs&apos; attendance leaders, advisors and WSUSA can see them.</p>
-              <Link href="/me/attendance" className="mt-3 inline-flex text-sm font-medium text-brand-600 hover:underline">
-                See my attendance
+              <p className="mt-2 text-sm text-ink-2">
+                Your check-ins aren&apos;t on your profile: only you, your clubs&apos; attendance leaders, advisors and WSUSA see them. Signed-in Wildcats see your service hours as a
+                total, never which events.
+              </p>
+              <div className="mt-3 flex flex-col items-start gap-1.5 text-sm font-medium">
+                <Link href="/me/involvement" className="text-brand-600 hover:underline">
+                  See my involvement
+                </Link>
+                <a href="/me/involvement/record.pdf" download className="text-brand-600 hover:underline">
+                  Download involvement record
+                </a>
+              </div>
+            </Card>
+          ) : null}
+
+          {data.service.entries?.length ? (
+            <Card className="p-5">
+              <h2 className="flex items-center gap-2 font-semibold text-ink">
+                <HandHeart className="h-4 w-4 text-ink-3" aria-hidden /> Service hours
+              </h2>
+              <p className="mt-1 text-xs text-ink-3">{data.isSelf ? "Only you and WSUSA see which events." : "You see which events because you're WSUSA staff."}</p>
+              <ul className="mt-3 space-y-2.5">
+                {data.service.entries.slice(0, 5).map((e) => (
+                  <li key={e.attendanceId} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-ink">{e.title}</span>
+                      <span className="block truncate text-xs text-ink-3">
+                        {fmtDate(e.startsAt, "MMM d, yyyy")} · {e.club?.name ?? "University event"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-ink-2">
+                      {fmtServiceHours(e.minutes)} {e.minutes === 60 ? "hour" : "hours"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Link href={data.isSelf ? "/me/involvement#service" : `/admin/users/${user.id}`} className="mt-4 inline-flex text-sm font-medium text-brand-600 hover:underline">
+                {data.isSelf ? "All my service hours" : "Their involvement record on People"}
               </Link>
             </Card>
           ) : null}
@@ -254,6 +291,11 @@ function ProfileHeader({ data }: { data: ProfileData }) {
             <p>Class of {user.classYear}</p>
           ) : null}
         </div>
+        {data.service.minutes > 0 ? (
+          <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-ink-2">
+            <HandHeart className="h-4 w-4 shrink-0 text-brand" aria-hidden /> {serviceLine(data.service)}
+          </p>
+        ) : null}
         {user.linkedinUrl ? (
           <a href={user.linkedinUrl} target="_blank" rel="noopener noreferrer nofollow" className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline">
             <Link2 className="h-4 w-4" aria-hidden /> LinkedIn profile<span className="sr-only"> (opens in a new tab)</span>

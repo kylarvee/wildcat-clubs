@@ -3,7 +3,7 @@ import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { Api } from '@/api/endpoints';
-import type { MAttendanceItem, MClubAttendance } from '@/api/types';
+import type { MAttendanceItem, MClubAttendance, MServiceSummary } from '@/api/types';
 import { useSession } from '@/auth/session';
 import { API_URL } from '@/config';
 import { Badge } from '@/components/Badge';
@@ -30,7 +30,7 @@ export default function MeScreen() {
   if (!user) {
     return (
       <ScrollScreen>
-        <SignInPrompt icon="me" title="Your Wildcat Clubs" body="Sign in to see your attendance in every club, your roles, and your settings." />
+        <SignInPrompt icon="me" title="Your Wildcat Clubs" body="Sign in to see your attendance in every club, your service hours, your roles and your settings." />
         <WebRow />
         <AppInfo />
       </ScrollScreen>
@@ -123,7 +123,10 @@ function Me({ userId }: { userId: string }) {
         </>
       ) : null}
 
-      <SectionHeader title="Attendance" action="Full record" onAction={() => void openWeb('/me/attendance')} />
+      {/* An older server sends no service hours; the card waits for one that does. */}
+      {data?.service ? <ServiceCard service={data.service} recordPath={data.recordPath} /> : null}
+
+      <SectionHeader title="Attendance" action="Full record" onAction={() => void openWeb('/me/involvement')} />
       {loading && !data ? (
         <LoadingView label="Loading your attendance" />
       ) : !data ? (
@@ -159,7 +162,7 @@ function Me({ userId }: { userId: string }) {
                 <Text tone="ink3">No check-ins in this list.</Text>
               )}
               {history.length > shown ? <Button title="Show more" variant="ghost" onPress={() => setShown((n) => n + PAGE)} style={styles.more} /> : null}
-              {data.more && history.length <= shown ? <Button title="See everything on the web" variant="ghost" icon="external" onPress={() => void openWeb('/me/attendance')} style={styles.more} /> : null}
+              {data.more && history.length <= shown ? <Button title="See everything on the web" variant="ghost" icon="external" onPress={() => void openWeb('/me/involvement#history')} style={styles.more} /> : null}
             </>
           )}
         </>
@@ -171,6 +174,35 @@ function Me({ userId }: { userId: string }) {
       <Button title="Sign out" variant="danger" icon="signOut" onPress={() => void onSignOut()} loading={signingOut} style={styles.signOut} />
       <AppInfo />
     </ScrollScreen>
+  );
+}
+
+/** Service hours from your check-ins, and your involvement record (a PDF the web builds fresh, with a QR code to verify it). */
+function ServiceCard({ service, recordPath }: { service: MServiceSummary; recordPath: string }) {
+  const hours = String(service.hours);
+  return (
+    <>
+      <SectionHeader title="Service hours" />
+      <Card style={styles.service}>
+        <View style={styles.serviceFacts} accessible accessibilityLabel={service.events ? service.label : 'No service hours yet'}>
+          <Text variant="display" tone="brand">
+            {hours}
+          </Text>
+          <Text variant="small" tone="ink2" style={styles.flex}>
+            {service.events
+              ? `service ${service.hours === 1 ? 'hour' : 'hours'} from ${plural(service.events, 'service event')}`
+              : 'No service hours yet. Check in at an event that counts toward service hours and they add up here.'}
+          </Text>
+        </View>
+        <Button
+          title="Download involvement record"
+          variant="secondary"
+          icon="external"
+          onPress={() => void openWeb(recordPath)}
+          accessibilityHint="Opens a PDF of your roles, service hours and attendance on the web"
+        />
+      </Card>
+    </>
   );
 }
 
@@ -314,6 +346,8 @@ const styles = StyleSheet.create({
   tasks: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg },
   flush: { padding: 0, overflow: 'hidden' },
   summary: { marginBottom: space.md },
+  service: { gap: space.md },
+  serviceFacts: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   clubCards: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   clubCard: { flexGrow: 1, flexBasis: 150, maxWidth: '100%', borderWidth: 1.5, borderRadius: radius.md, padding: space.md, gap: space.sm },
   clubHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },

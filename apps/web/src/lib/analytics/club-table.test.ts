@@ -18,6 +18,7 @@ const row = (p: Partial<ClubAnalyticsRow>): ClubAnalyticsRow => ({
   retentionSummary: { from: "Sep 2026", to: "Oct 2026", rate: 0.5, retained: 5, previousAttendees: 10, months: "Sep → Oct", label: "Sep → Oct: 50% came back" },
   avgAttendance: 0.6,
   heldEvents: 3,
+  serviceMinutes: 270,
   rating: 4,
   reviews: 2,
   connections: 3,
@@ -91,6 +92,11 @@ describe("sortRows", () => {
   it("orders stages active → pilot → inactive → founding", () => {
     expect(sortRows(rows, "stage", "asc").map((r) => r.stage)).toEqual(["active", "active", "pilot", "inactive", "founding"]);
   });
+  it("sorts by service hours this term, most first", () => {
+    const withHours = [row({ name: "A", serviceMinutes: 60 }), row({ name: "B", serviceMinutes: 600 }), row({ name: "C", serviceMinutes: 0 })];
+    expect(sortRows(withHours, "service", "desc").map((r) => r.name)).toEqual(["B", "A", "C"]);
+    expect(parseTableFilters({ sort: "service" })).toMatchObject({ sort: "service", dir: "desc" });
+  });
 });
 
 describe("csvRows", () => {
@@ -99,11 +105,12 @@ describe("csvRows", () => {
     expect(header).toContain("Average attendance rate (Fall 2026) (%)");
     expect(header.slice(6, 8)).toEqual(["Retention (%)", "Retention months"]);
     expect(header.slice(-3)).toEqual(["Presidents", "Advisors", "Club page"]);
-    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, "Sep 2026 → Oct 2026", 60, 3, 4, 2, 3, 40, 1, 1, "https://clubs.example/clubs/club"]);
+    expect(header.slice(9, 11)).toEqual(["Events held (Fall 2026)", "Service hours (Fall 2026)"]);
+    expect(first).toEqual(["Astronomy Club", "Registered", "College of Science", "Active", 8, 5, 90, "Sep 2026 → Oct 2026", 60, 3, 4.5, 4, 2, 3, 40, 1, 1, "https://clubs.example/clubs/club"]);
     const draft = csvRows([rows[3]], null)[1];
     expect(draft[3]).toBe("Draft");
     expect(draft[6]).toBe("");
     expect(draft[7]).toBe("");
-    expect(draft[10]).toBe("");
+    expect(draft[11]).toBe("");
   });
 });

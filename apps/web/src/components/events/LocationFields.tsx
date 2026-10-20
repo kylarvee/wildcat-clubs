@@ -41,7 +41,9 @@ function useDebounced<T>(value: T, ms: number) {
 /**
  * Where an event happens. Campus buildings pin the building on a map;
  * off-campus addresses pin through Google Maps; online events take a link or a
- * Google Meet request (created only while Google Calendar sync is on).
+ * Google Meet request (created only while Google Calendar sync is on). An
+ * in-person event may add an online link too, which makes it hybrid (the
+ * full editor only; quick create keeps to the basics).
  */
 export function LocationFields({
   value,
@@ -60,6 +62,27 @@ export function LocationFields({
   const set = (patch: Partial<LocationValue>) => onChange({ ...value, ...patch });
   const building = buildings.find((b) => b.id === value.buildingId) ?? null;
   const address = useDebounced(value.address.trim(), 700);
+
+  // Hybrid: people can watch or join remotely. Check-in still happens in the room (lib/attendance/rules).
+  const onlineLink = compact ? null : (
+    <div className="space-y-1.5">
+      <Label htmlFor={`${id}-ol`}>
+        Online link <span className="font-normal text-ink-3">(optional)</span>
+      </Label>
+      <Input
+        id={`${id}-ol`}
+        type="url"
+        inputMode="url"
+        value={value.virtualUrl}
+        placeholder="https://meet.google.com/… or a Zoom / Teams link"
+        aria-describedby={`${id}-olh`}
+        onChange={(e) => set({ virtualUrl: e.target.value })}
+      />
+      <p id={`${id}-olh`} className="text-xs text-ink-3">
+        Lets people watch or join remotely, which makes it a hybrid event. Check-in still happens in the room.
+      </p>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
@@ -106,6 +129,7 @@ export function LocationFields({
           </div>
           {buildings.length === 0 ? <p className="text-sm text-ink-3">The campus building list is empty. An administrator adds buildings under Admin → Directory.</p> : null}
           {building && !compact ? <MapEmbed query={campusMapQuery(building.name)} height={220} /> : null}
+          {onlineLink}
         </div>
       ) : null}
 
@@ -118,6 +142,7 @@ export function LocationFields({
             <Input id={`${id}-a`} value={value.address} maxLength={300} placeholder="Street, city — or a place name" autoComplete="street-address" onChange={(e) => set({ address: e.target.value })} />
           </div>
           {address.length > 4 && !compact ? <MapEmbed query={address} height={220} /> : null}
+          {onlineLink}
         </div>
       ) : null}
 

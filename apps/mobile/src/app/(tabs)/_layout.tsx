@@ -12,7 +12,7 @@ function tabIcon(name: IconName) {
   return TabIcon;
 }
 
-/** Six tabs: Home, Scan, Clubs, Calendar, Notifications (the `inbox` route), Me. */
+/** Six tabs: Home, Scan, Clubs, Events (the `calendar` route), Notifications (the `inbox` route), Me. */
 export default function TabsLayout() {
   const c = useColors();
   const { me, status } = useSession();
@@ -41,7 +41,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen name="scan" options={{ title: 'Scan', headerTitle: 'Scan to check in', tabBarIcon: tabIcon('scan') }} />
       <Tabs.Screen name="clubs" options={{ title: 'Clubs', tabBarIcon: tabIcon('clubs') }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Calendar', headerTitle: 'My calendar', tabBarIcon: tabIcon('calendar') }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Events', headerTitle: 'Events', tabBarIcon: tabIcon('calendar') }} />
       <Tabs.Screen
         name="inbox"
         options={{

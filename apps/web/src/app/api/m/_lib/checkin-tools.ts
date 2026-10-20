@@ -7,7 +7,7 @@ import { assertSignedIn, parse } from "@/lib/domain/kit";
 import { addManual, canManageOccurrence, checkinScreen, liveOccurrencesForClub, searchCheckinCandidates } from "@/lib/domain/attendance";
 import { occurrenceById, toOccurrenceSummary } from "@/lib/attendance/queries";
 import { codeClubsPhrase, METHOD_LABEL } from "@/lib/attendance/rules";
-import { qrRows } from "./qr";
+import { qrRows } from "@/lib/documents/qr";
 import { toMOccurrence } from "./serialize";
 import type { MCheckinCandidates, MCheckinQr, MLeaderCheckin, MManualCheckinResult } from "../_types";
 

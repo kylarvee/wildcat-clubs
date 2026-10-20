@@ -31,6 +31,7 @@ export const occurrenceInclude = {
       room: true,
       address: true,
       building: { select: { name: true, code: true } },
+      serviceMinutes: true,
       club: { select: { ...clubRefSelect, status: true } },
       cohosts: { where: { status: "APPROVED" }, select: { club: { select: clubRefSelect } } },
     },
@@ -61,6 +62,8 @@ export type OccurrenceSummary = {
   /** Host club; null for university (admin) events such as officer trainings. */
   club: ClubRef | null;
   cohosts: ClubRef[];
+  /** Service hours a check-in here earns, in minutes (Event.serviceMinutes; lib/metrics/service); null when it doesn't count. */
+  serviceMinutes: number | null;
 };
 
 export type WindowConfig = Pick<Config, "checkin.opensMinutesBefore" | "checkin.closesMinutesAfter">;
@@ -108,6 +111,7 @@ export function toOccurrenceSummary(o: OccurrenceRow, cfg: WindowConfig, now: Da
     windowState: windowState(w, now),
     club: o.event.club ? toClubRef(o.event.club) : null,
     cohosts: o.event.cohosts.map((c) => toClubRef(c.club)),
+    serviceMinutes: o.event.serviceMinutes,
   };
 }
 

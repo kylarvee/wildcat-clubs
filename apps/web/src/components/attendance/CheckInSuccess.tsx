@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { BadgeCheck, Check, ChevronRight, PartyPopper, Smartphone, Star, UserPlus } from "lucide-react";
+import { BadgeCheck, Check, ChevronRight, HandHeart, PartyPopper, Smartphone, Star, UserPlus } from "lucide-react";
 import type { CheckInResult } from "@/lib/domain/attendance";
 import { METHOD_LABEL } from "@/lib/attendance/rules";
+import { earnedMinutes, serviceHoursLabel } from "@/lib/metrics/service";
 import { fmtTime } from "@/lib/time";
 import { buttonClasses } from "@/components/ui/button";
 import { ProgressBar } from "@/components/ui/layout";
@@ -11,8 +12,8 @@ import { cn } from "@/components/ui/cn";
 
 /**
  * What someone sees right after checking in: the confirmation, what happened
- * with their membership, how close they are to leaving a review, and (for
- * people without the app yet) where to get it.
+ * with their membership, the service hours it earned, how close they are to
+ * leaving a review, and (for people without the app yet) where to get it.
  */
 export function CheckInSuccess({
   result,
@@ -32,6 +33,8 @@ export function CheckInSuccess({
   // re-rendered from the server after the action (it then sees the row as existing).
   const fresh = result.status === "CHECKED_IN" || Date.now() - new Date(result.checkedInAt).getTime() < 120_000;
   const review = result.reviewProgress;
+  // The same rule as the involvement record (lib/metrics/service): a check-in here earns the event's service minutes.
+  const earned = earnedMinutes(occurrence.serviceMinutes);
 
   return (
     <div className={cn(compact ? "space-y-3" : "space-y-5", className)} role="status" aria-live="polite">
@@ -69,6 +72,14 @@ export function CheckInSuccess({
           This counts for {result.requirementsMet.join(", ")}.
         </Outcome>
       ) : null}
+      {earned ? (
+        <Outcome icon={<HandHeart />} tone="success" title={fresh ? `+${serviceHoursLabel(earned)}` : `${serviceHoursLabel(earned)} on your record`}>
+          {fresh ? "They're on your involvement record now. " : "This check-in already counts toward your service hours. "}
+          <Link href="/me/involvement#service" className="font-medium underline underline-offset-2">
+            See your hours
+          </Link>
+        </Outcome>
+      ) : null}
 
       {club && review ? (
         review.eligible ? (
@@ -98,8 +109,8 @@ export function CheckInSuccess({
               Go to {club.name.length > 24 ? "the club" : club.name}
             </Link>
           ) : null}
-          <Link href="/me/attendance" className={buttonClasses(club ? "outline" : "primary", "lg", "w-full sm:w-auto sm:flex-1")}>
-            My attendance
+          <Link href="/me/involvement" className={buttonClasses(club ? "outline" : "primary", "lg", "w-full sm:w-auto sm:flex-1")}>
+            My involvement
           </Link>
         </div>
       ) : null}

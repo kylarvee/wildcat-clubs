@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { isAdmin, ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
 import { canViewFile } from "@/lib/domain/files";
+import { serviceSummary } from "@/lib/metrics";
+import type { ServiceEntry } from "@/lib/metrics/types";
 import { profileActivity, type ActivityItem } from "@/lib/profiles/activity";
 
 /**
@@ -39,6 +41,8 @@ export type ProfileRole = {
   projects: ProfileProject[];
 };
 export type ProfileRoleGroup = { club: ProfileClub; current: boolean; start: Date; end: Date | null; roles: ProfileRole[] };
+/** Service hours (lib/metrics): the totals for every signed-in viewer; which events only for the person and admins. */
+export type ProfileService = { minutes: number; events: number; entries: ServiceEntry[] | null };
 
 const clubSelect = { id: true, name: true, slug: true, logoUrl: true, logoColor: true, status: true } as const;
 const fileSelect = { id: true, name: true, mimeType: true, sizeBytes: true, clubId: true, ownerId: true, parentId: true, visibility: true, createdById: true, trashedAt: true, isFolder: true } as const;
@@ -88,6 +92,7 @@ export type ProfileData = {
   clubs: (ProfileClub & { roleLabel: string | null })[];
   activity: ActivityItem[];
   activityHasMore: boolean;
+  service: ProfileService;
 };
 
 async function toProject(
@@ -107,14 +112,15 @@ async function toProject(
 /**
  * Everything the profile page shows, filtered for this viewer: files they
  * may open, founding clubs only for the person and admins, check-ins only
- * where attendance privacy allows.
+ * where attendance privacy allows, and service hours as a total (which
+ * events only for the person and admins).
  */
 export async function loadProfile(user: ProfileUser, viewer: Actor, opts: { activityTake?: number } = {}): Promise<ProfileData> {
   const isSelf = viewer.id === user.id;
   const seesAll = isSelf || isAdmin(viewer);
   const clubVisible = (c: { status: ClubStatus } | null) => !c || seesAll || LISTED.includes(c.status);
 
-  const [assignments, experiences, educations, looseProjects, memberships, activity] = await Promise.all([
+  const [assignments, experiences, educations, looseProjects, memberships, activity, service] = await Promise.all([
     db.roleAssignment.findMany({
       where: { userId: user.id, role: { not: "MEMBER" } },
       orderBy: { startedAt: "desc" },
@@ -134,6 +140,7 @@ export async function loadProfile(user: ProfileUser, viewer: Actor, opts: { acti
       orderBy: { club: { name: "asc" } },
     }),
     profileActivity(user, viewer, { take: opts.activityTake }),
+    serviceSummary(user.id),
   ]);
 
   // ── Club roles, grouped by club (current clubs first, then most recent). ──
@@ -193,6 +200,7 @@ export async function loadProfile(user: ProfileUser, viewer: Actor, opts: { acti
     clubs,
     activity: activity.items,
     activityHasMore: activity.hasMore,
+    service: { minutes: service.minutes, events: service.events, entries: seesAll ? service.entries : null },
   };
 }
 

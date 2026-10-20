@@ -1,4 +1,5 @@
 import type { EventKind, LocationType, Recurrence, Visibility } from "@prisma/client";
+import type { EventBadge, EventMode } from "@/lib/events/labels";
 
 /**
  * Shapes shared by the calendar feed (GET /api/calendar), CalendarView and the
@@ -22,7 +23,11 @@ export type CalendarEventProps = {
   locationType: LocationType;
   /** What a map pin searches for (campus building or address). */
   mapQuery: string | null;
+  /** The online link: online events, and hybrid ones (in person with a link). */
   virtualUrl: string | null;
+  coverUrl: string | null;
+  /** lib/events/labels eventBadges: perks, service hours, online/hybrid, members only. */
+  badges: EventBadge[];
   kind: EventKind;
   visibility: Visibility;
   cancelled: boolean;
@@ -53,6 +58,31 @@ export type CalendarEventJson = {
   editable: boolean;
   classNames: string[];
   extendedProps: CalendarEventProps;
+};
+
+/** One date of an event as an Events page card (lib/events/browse). Times are real instants (ISO). */
+export type EventCardData = {
+  occurrenceId: string;
+  eventId: string;
+  title: string;
+  kind: EventKind;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  /** Campus date "2026-10-23", for grouping by day. */
+  dayKey: string;
+  /** "Shepherd Union Building, Room 404", "Online", "Location to be decided". */
+  location: string;
+  mode: EventMode;
+  coverUrl: string | null;
+  /** Null for university events. */
+  club: { name: string; slug: string; logoUrl: string | null; logoColor: string } | null;
+  cohostNames: string[];
+  badges: EventBadge[];
+  cancelled: boolean;
+  /** Why a cancelled date was cancelled, when the club said. */
+  note: string | null;
+  happeningNow: boolean;
 };
 
 /** Serialized term for client-side recurrence previews (expandOccurrences needs Term rows). */

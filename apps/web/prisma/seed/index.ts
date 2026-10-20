@@ -18,7 +18,7 @@ import { buildReference } from "./steps/reference";
 import { buildPeople, markConcurrentEnrollment } from "./steps/people";
 import { buildClubs, buildMemberships } from "./steps/clubs";
 import { buildRoles } from "./steps/roles";
-import { buildEvents } from "./steps/events";
+import { assignCovers, buildEvents } from "./steps/events";
 import { buildAttendance } from "./steps/attendance";
 import { buildGovernance, choosePastGrace } from "./steps/governance";
 import { buildAnnouncements, buildElections, buildMessaging, buildReviews, buildSubscriptions } from "./steps/community";
@@ -64,6 +64,7 @@ async function main() {
     buildElections(ctx);
     buildFunding(ctx);
     buildFiles(ctx);
+    assignCovers(ctx);
     buildInbox(ctx, users);
     log(`Built in ${((Date.now() - started) / 1000).toFixed(1)}s — writing…`);
 

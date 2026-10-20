@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { ClubLogo } from "@/components/ui/avatar";
 import { cn } from "@/components/ui/cn";
 import { EVENT_KIND_LABEL, safeHex } from "@/components/clubs/labels";
+import { EventBadges } from "@/components/events/EventBadges";
+import { EventCover } from "@/components/events/EventCover";
 
 type ClubLink = { id: string; name: string; slug: string };
 
@@ -26,10 +28,11 @@ function ClubLinks({ clubs, className }: { clubs: ClubLink[]; className?: string
 }
 
 /**
- * Upcoming events as date-tile rows (landing page and club pages). Each row
- * opens the event page. On a club's page (`clubId`) the host line names the
- * other clubs: "Co-hosted with …" when this club hosts, "Hosted by …" when
- * it's a co-host.
+ * Upcoming events as date-tile rows (landing page and club pages), with the
+ * event's badges and, when it has a cover image, a thumbnail. Each row opens
+ * the event page. On a club's page (`clubId`) the host line names the other
+ * clubs: "Co-hosted with …" when this club hosts, "Hosted by …" when it's a
+ * co-host.
  */
 export function EventList({ events, showHost = true, clubId, className }: { events: UpcomingEvent[]; showHost?: boolean; clubId?: string; className?: string }) {
   return (
@@ -67,6 +70,7 @@ export function EventList({ events, showHost = true, clubId, className }: { even
                 {e.isVirtual ? <Video className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" /> : <MapPin className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" />}
                 <span className="truncate">{e.location}</span>
               </p>
+              <EventBadges badges={e.badges} className="mt-2" />
               {showHost ? (
                 <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-ink-3">
                   {e.host ? (
@@ -100,6 +104,9 @@ export function EventList({ events, showHost = true, clubId, className }: { even
                 </p>
               ) : null}
             </div>
+            {e.coverUrl ? (
+              <EventCover src={e.coverUrl} color={color} name={e.host?.name ?? "Weber State"} size="sm" className="hidden h-20 w-28 shrink-0 self-start rounded-xl border border-line sm:block" />
+            ) : null}
           </li>
         );
       })}

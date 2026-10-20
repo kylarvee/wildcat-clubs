@@ -1,5 +1,6 @@
 import type { ClubScope, ClubStatus, ClubType } from "@prisma/client";
 import type { RetentionSummary } from "@/lib/metrics/types";
+import { serviceHours } from "@/lib/metrics/service";
 import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL, CLUB_TYPES, STANDING_HINT, STANDING_LABEL, STANDING_TONE } from "@/lib/labels/clubs";
 import { GAP_LABEL } from "@/lib/staffing/rules";
 
@@ -37,6 +38,8 @@ export type ClubAnalyticsRow = {
   avgAttendance: number | null;
   /** Held events this term (≥1 check-in), hosted or co-hosted. */
   heldEvents: number;
+  /** Service hours earned at the club's events this term, in minutes: every check-in at a hosted or co-hosted event that counts (lib/metrics clubServiceTotals). */
+  serviceMinutes: number;
   rating: number | null;
   reviews: number;
   /** Clubs it shares cross-club attendance with in the last 12 months, and the total of those lines. */
@@ -101,7 +104,7 @@ export function missingLeaders(row: Pick<ClubAnalyticsRow, "status" | "president
 
 // ─── Filters & sorting ──────────────────────────────────────────────────────
 
-export type SortKey = "name" | "stage" | "registered" | "active" | "retention" | "attendance" | "events" | "rating" | "connections";
+export type SortKey = "name" | "stage" | "registered" | "active" | "retention" | "attendance" | "events" | "service" | "rating" | "connections";
 export type SortDir = "asc" | "desc";
 /** "approved" = active + pilot + inactive. */
 export type StageFilter = ClubStage | "approved";
@@ -118,7 +121,7 @@ export type TableFilters = {
   dir: SortDir;
 };
 
-export const SORT_KEYS: SortKey[] = ["name", "stage", "registered", "active", "retention", "attendance", "events", "rating", "connections"];
+export const SORT_KEYS: SortKey[] = ["name", "stage", "registered", "active", "retention", "attendance", "events", "service", "rating", "connections"];
 const WORD_SORTS: SortKey[] = ["name", "stage"];
 const TYPES: ClubType[] = CLUB_TYPES;
 const STAGE_FILTERS: StageFilter[] = ["approved", "active", "pilot", "inactive", "founding", "retired", "rejected"];
@@ -200,6 +203,8 @@ function value(r: ClubAnalyticsRow, key: SortKey): string | number | null {
       return r.avgAttendance;
     case "events":
       return r.heldEvents;
+    case "service":
+      return r.serviceMinutes;
     case "rating":
       return r.rating;
     case "connections":
@@ -242,6 +247,7 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       "Retention months",
       `Average attendance rate${term} (%)`,
       `Events held${term}`,
+      `Service hours${term}`,
       "Average rating",
       "Reviews",
       "Connected clubs (12 months)",
@@ -261,6 +267,7 @@ export function csvRows(rows: ClubAnalyticsRow[], termName: string | null, link:
       r.retentionSummary ? `${r.retentionSummary.from} → ${r.retentionSummary.to}` : "",
       pctCell(r.avgAttendance),
       r.heldEvents,
+      serviceHours(r.serviceMinutes),
       r.rating === null ? "" : Math.round(r.rating * 10) / 10,
       r.reviews,
       r.connections,

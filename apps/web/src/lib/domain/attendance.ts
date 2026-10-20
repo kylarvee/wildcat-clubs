@@ -14,7 +14,7 @@ import { joinClub } from "@/lib/domain/memberships";
 import { notify } from "@/lib/domain/notify";
 import { reopenRequirementTasks, requirementSourceId } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
-import { reviewEligibility } from "@/lib/metrics";
+import { earnedMinutes, reviewEligibility, serviceHoursLabel } from "@/lib/metrics";
 import { reminderKeys, reviewUnlockedNotice } from "@/lib/jobs/reminder-rules";
 import { checkinPass, checkinPath, checkinToken, isCheckinPass, tokenWindow, verifyCheckinToken, verifyScanProof } from "@/lib/attendance/token";
 import { allowsTapCheckIn, blockMessage, codeNotFoundMessage, decideMethod, normalizeCode, publicShortName, whenLabel, windowMessage, type WindowState } from "@/lib/attendance/rules";
@@ -415,8 +415,8 @@ export async function addManual(actor: Actor | null, occurrenceId: string, userI
     exceptUserId: leader.id,
     kind: "attendance.added",
     title: `You're checked in to ${occ.event.title}`,
-    body: `${leader.name} added you to the attendance${occurrence.club ? ` for ${occurrence.club.name}` : ""}.${requirementsMet.length ? ` This counts toward ${requirementsMet.join(", ")}.` : ""}`,
-    href: "/me/attendance",
+    body: `${leader.name} added you to the attendance${occurrence.club ? ` for ${occurrence.club.name}` : ""}.${requirementsMet.length ? ` This counts toward ${requirementsMet.join(", ")}.` : ""}${earnedMinutes(occurrence.serviceMinutes) ? ` It adds ${serviceHoursLabel(earnedMinutes(occurrence.serviceMinutes))} to your record.` : ""}`,
+    href: "/me/involvement",
   });
   tellIfReviewUnlocked(person.id, occ);
   return { attendanceId: attendance.id, name: person.name, requirementsMet };

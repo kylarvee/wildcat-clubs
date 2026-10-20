@@ -2,15 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
-import type { CohostStatus, EventKind, EventStatus, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
-import { AlertTriangle, Ban, CalendarCheck, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import type { CohostStatus, EventKind, EventPerk, EventStatus, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
+import { AlertTriangle, Ban, CalendarCheck, Gift, Loader2, RotateCcw, Trash2, UtensilsCrossed } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
-import { toast } from "@/components/ui/misc";
+import { Switch, toast } from "@/components/ui/misc";
 import { cn } from "@/components/ui/cn";
 import { RichTextEditor } from "@/components/rich/RichTextEditor";
 import type { PickedFile } from "@/components/files/FilePicker";
@@ -19,9 +19,11 @@ import { LocationFields, EMPTY_LOCATION, type BuildingOption, type LocationValue
 import { CostsEditor, costRowsError, newCostKey, type CostRowValue } from "@/components/events/CostsEditor";
 import { CohostPicker, type ClubOption } from "@/components/events/CohostPicker";
 import { AttachmentsField } from "@/components/events/AttachmentsField";
+import { CoverField } from "@/components/events/CoverField";
 import { defaultWhen, previewOccurrences, termsFromJson, toSchedule, whenFrom, whenFromEvent, type WhenValue } from "@/components/events/when";
-import { EVENT_KINDS, KIND_LABEL, VISIBILITY_HINT, VISIBILITY_LABEL } from "@/lib/events/labels";
-import type { EventLink } from "@/lib/events/links";
+import { EVENT_KINDS, EVENT_PERKS, KIND_LABEL, PERK_LABEL, VISIBILITY_HINT, VISIBILITY_LABEL } from "@/lib/events/labels";
+import { isHttpUrl, type EventLink } from "@/lib/events/links";
+import { defaultServiceMinutes, hoursText, QUARTER_HOUR, resolveServiceMinutes } from "@/lib/events/rules";
 import type { TermJson } from "@/lib/events/types";
 import { cancelEventAction, createEventAction, deleteEventAction, restoreEventAction, updateEventAction } from "@/app/events/actions";
 
@@ -49,6 +51,11 @@ export type EditorEvent = {
   room: string | null;
   address: string | null;
   virtualUrl: string | null;
+  /** "/api/files/<id>": one of the host's public image files. */
+  coverUrl: string | null;
+  perks: EventPerk[];
+  /** Minutes each attendee earns per date they check in; null = doesn't count. */
+  serviceMinutes: number | null;
   cohostAllClubs: boolean;
   cohosts: { clubId: string; status: CohostStatus }[];
   attachments: PickedFile[];
@@ -72,12 +79,16 @@ export type EventEditorProps = {
   terms: TermJson[];
   googleLive: boolean;
   defaultFundingSource: FundingSource;
+  /** Where uploaded covers go (the club's Flyers folder), from loadEditorData. */
+  coverFolderId?: string | null;
 };
 
 const SECTIONS = [
   { id: "basics", label: "Basics" },
+  { id: "cover", label: "Cover image" },
   { id: "when", label: "When" },
   { id: "where", label: "Where" },
+  { id: "service", label: "Service hours" },
   { id: "details", label: "Details" },
   { id: "attachments", label: "Attachments" },
   { id: "costs", label: "Costs", club: true },
@@ -101,19 +112,29 @@ function initialLocation(e: EditorEvent | null): LocationValue {
   return { locationType: e.locationType, buildingId: e.buildingId ?? "", room: e.room ?? "", address: e.address ?? "", virtualUrl: e.virtualUrl ?? "", createMeetLink: false };
 }
 
+/** Minutes → the hours box ("1.5"). */
+const toHoursInput = (minutes: number) => String(Math.round((minutes / 60) * 100) / 100);
+
 /**
  * The full Events Builder editor (club and university mode). One Save writes
  * everything — schedule, place, details, attachments, costs and co-hosts —
  * through the events domain functions.
  */
 export function EventEditor(props: EventEditorProps) {
-  const { mode, club, basePath, event, buildings, clubs, terms, googleLive, defaultFundingSource } = props;
+  const { mode, club, basePath, event, buildings, clubs, terms, googleLive, defaultFundingSource, coverFolderId = null } = props;
   const router = useRouter();
   const id = useId();
   const isClub = mode === "club" && club !== null;
 
   const [title, setTitle] = useState(event?.title ?? props.initial?.title ?? "");
   const [kind, setKind] = useState<EventKind>(event?.kind ?? (isClub ? "MEETING" : "TRAINING"));
+  const [coverUrl, setCoverUrl] = useState<string | null>(event?.coverUrl ?? null);
+  const [perks, setPerks] = useState<EventPerk[]>(event?.perks ?? []);
+  // Service hours: what's saved, or on for a new Service project. Until someone flips the switch, it follows the type.
+  const [serviceOn, setServiceOn] = useState(event ? event.serviceMinutes != null : kind === "SERVICE");
+  const [serviceTouched, setServiceTouched] = useState(false);
+  /** The hours box; null follows the event's length. */
+  const [serviceHours, setServiceHours] = useState<string | null>(event?.serviceMinutes != null ? toHoursInput(event.serviceMinutes) : null);
   const [description, setDescription] = useState(event?.descriptionHtml ?? "");
   const [visibility, setVisibility] = useState<Visibility>(event?.visibility ?? (isClub ? "PUBLIC" : "UNIVERSITY"));
   const [setupMinutes, setSetupMinutes] = useState(String(event?.setupMinutes ?? 0));
@@ -147,6 +168,30 @@ export function EventEditor(props: EventEditorProps) {
 
   const termRows = useMemo(() => termsFromJson(terms), [terms]);
   const meetings = useMemo(() => previewOccurrences(when, termRows).length, [when, termRows]);
+  const schedule = useMemo(() => toSchedule(when), [when]);
+  const lengthMinutes = schedule.ok ? schedule.value.durationMinutes : null;
+  const defaultService = lengthMinutes != null ? defaultServiceMinutes(lengthMinutes) : null;
+  const shownHours = serviceHours ?? (defaultService != null ? toHoursInput(defaultService) : "");
+  const service = serviceOut();
+
+  /** The minutes a save sends (null = doesn't count), checked by the same rule the write path uses. */
+  function serviceOut(): { ok: true; minutes: number | null } | { ok: false; error: string } {
+    if (!serviceOn) return { ok: true, minutes: null };
+    const hours = Number(shownHours);
+    if (!shownHours.trim() || !Number.isFinite(hours) || hours <= 0) {
+      return { ok: false, error: lengthMinutes != null && lengthMinutes < QUARTER_HOUR ? "This event is too short to count toward service hours." : "Enter the hours each attendee earns, or turn service hours off." };
+    }
+    const r = resolveServiceMinutes(Math.round(hours * 60), { durationMinutes: lengthMinutes ?? Number.MAX_SAFE_INTEGER, kind, existing: null });
+    return r.ok ? r : { ok: false, error: r.error };
+  }
+
+  function changeKind(k: EventKind) {
+    setKind(k);
+    if (serviceTouched) return;
+    // Service projects count by default; a saved event that already counts keeps its hours.
+    if (k === "SERVICE") setServiceOn(true);
+    else if (!event) setServiceOn(false);
+  }
 
   // Warn before leaving with unsaved changes.
   useEffect(() => {
@@ -177,6 +222,8 @@ export function EventEditor(props: EventEditorProps) {
     if (location.locationType === "CAMPUS" && !location.buildingId) return fail("Pick the campus building.", "where");
     if (location.locationType === "ADDRESS" && !location.address.trim()) return fail("Add the address so people can find it.", "where");
     if (location.locationType === "VIRTUAL" && !location.virtualUrl.trim() && !location.createMeetLink) return fail("Add the link people use to join, or ask for a Google Meet link.", "where");
+    if (location.locationType !== "TBD" && location.virtualUrl.trim() && !isHttpUrl(location.virtualUrl.trim())) return fail("Enter the full online link, starting with https://", "where");
+    if (!service.ok) return fail(service.error, "service");
     if (isClub) {
       const costError = costRowsError(costs);
       if (costError) return fail(costError, "costs");
@@ -184,6 +231,9 @@ export function EventEditor(props: EventEditorProps) {
     const payload = {
       title: title.trim(),
       kind,
+      coverUrl,
+      perks,
+      serviceMinutes: service.minutes,
       descriptionHtml: description,
       links,
       visibility,
@@ -283,7 +333,7 @@ export function EventEditor(props: EventEditorProps) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${id}-kind`}>Type</Label>
-              <Select id={`${id}-kind`} value={kind} onChange={(e) => setKind(e.target.value as EventKind)}>
+              <Select id={`${id}-kind`} value={kind} onChange={(e) => changeKind(e.target.value as EventKind)}>
                 {EVENT_KINDS.map((k) => (
                   <option key={k} value={k}>
                     {KIND_LABEL[k]}
@@ -291,6 +341,37 @@ export function EventEditor(props: EventEditorProps) {
                 ))}
               </Select>
             </div>
+            <fieldset className="sm:col-span-2">
+              <legend className="mb-2 text-sm font-medium text-ink">Perks</legend>
+              <div className="flex flex-wrap gap-2">
+                {EVENT_PERKS.map((p) => {
+                  const on = perks.includes(p);
+                  const Icon = p === "FREE_FOOD" ? UtensilsCrossed : Gift;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => touch(setPerks)(on ? perks.filter((x) => x !== p) : [...perks, p])}
+                      className={cn(
+                        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                        on ? "border-green-300 bg-success-50 text-success" : "border-line-2 bg-surface text-ink-2 hover:bg-muted",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" aria-hidden="true" /> {PERK_LABEL[p]}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-xs text-ink-3">They show as badges, and people can filter the Events page by them.</p>
+            </fieldset>
+          </CardBody>
+        </Card>
+
+        <Card id="cover" className="scroll-mt-20">
+          <CardHeader title="Cover image" description="Shown on event cards and at the top of the event page." />
+          <CardBody>
+            <CoverField clubId={club?.id ?? null} hostName={club?.name ?? "Weber State"} folderId={coverFolderId} value={coverUrl} onChange={touch(setCoverUrl)} />
           </CardBody>
         </Card>
 
@@ -305,6 +386,66 @@ export function EventEditor(props: EventEditorProps) {
           <CardHeader title="Where" />
           <CardBody>
             <LocationFields value={location} onChange={touch(setLocation)} buildings={buildings} googleLive={googleLive} />
+          </CardBody>
+        </Card>
+
+        <Card id="service" className="scroll-mt-20">
+          <CardHeader title="Service hours" description="Each attendee earns these hours for every date they check in." />
+          <CardBody className="space-y-4">
+            <div className="flex items-start gap-3">
+              <Switch
+                id={`${id}-svc`}
+                checked={serviceOn}
+                aria-describedby={`${id}-svc-hint`}
+                onCheckedChange={(on) => {
+                  setDirty(true);
+                  setServiceTouched(true);
+                  setServiceOn(on);
+                }}
+              />
+              <div className="min-w-0">
+                <label htmlFor={`${id}-svc`} className="cursor-pointer text-sm font-medium text-ink">
+                  This event counts toward service hours
+                </label>
+                <p id={`${id}-svc-hint`} className="text-xs text-ink-3">
+                  {kind === "SERVICE" ? "On by default for service projects." : "Any type of event can count, not just service projects."}
+                </p>
+              </div>
+            </div>
+            {serviceOn ? (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${id}-hours`}>Hours per attendee</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id={`${id}-hours`}
+                    type="number"
+                    inputMode="decimal"
+                    min={0.25}
+                    max={lengthMinutes != null ? lengthMinutes / 60 : undefined}
+                    step={0.25}
+                    value={shownHours}
+                    aria-describedby={`${id}-hours-hint`}
+                    aria-invalid={!service.ok || undefined}
+                    onChange={(e) => setServiceHours(e.target.value)}
+                    onBlur={() => {
+                      // Snap to the nearest quarter hour (1.3 → 1.25).
+                      const h = Number(shownHours);
+                      if (shownHours.trim() && Number.isFinite(h) && h > 0) setServiceHours(String(Math.max(0.25, Math.round(h * 4) / 4)));
+                    }}
+                    className="w-28"
+                  />
+                  <span className="text-sm text-ink-2">hours</span>
+                </div>
+                <p id={`${id}-hours-hint`} className="text-xs text-ink-3">
+                  In quarter hours{lengthMinutes != null ? `, up to ${hoursText(lengthMinutes)} (the event's length)` : ""}.
+                </p>
+                {!service.ok ? (
+                  <p className="text-xs text-danger" role="alert">
+                    {service.error}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </CardBody>
         </Card>
 

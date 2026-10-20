@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { MembershipStatus } from "@prisma/client";
-import { Activity, ExternalLink, History, KeyRound, ShieldCheck, Smartphone, Users } from "lucide-react";
+import { Activity, Download, ExternalLink, History, KeyRound, ShieldCheck, Smartphone, Users } from "lucide-react";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
 import { can, CAPABILITIES, isSysadmin, ROLE_LABEL, type Capability } from "@/lib/authz";
 import { db } from "@/lib/db";
@@ -15,6 +15,8 @@ import { EmergencyContactButton } from "@/components/details/EmergencyContactBut
 import { revealEmergencyContactAdminAction } from "@/app/admin/users/actions";
 import { fmtAgo, fmtDate, fmtLongDate } from "@/lib/time";
 import { END_REASON_LABEL } from "@/lib/roles/labels";
+import { serviceSummary } from "@/lib/metrics";
+import { serviceHoursLabel } from "@/lib/metrics/service";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -58,7 +60,7 @@ export default async function PersonPage({ params }: { params: Params }) {
     throw e;
   }
   const { user: person, roles, pastRoles, pastRoleCount, checkins, activity } = data;
-  const [det, lastSeats] = await Promise.all([detailsFor(viewer, person.id), person.status === "DEACTIVATED" ? Promise.resolve([]) : lastLeaderSeats(person.id)]);
+  const [det, lastSeats, service] = await Promise.all([detailsFor(viewer, person.id), person.status === "DEACTIVATED" ? Promise.resolve([]) : lastLeaderSeats(person.id), serviceSummary(person.id)]);
   const detMissing = missingDetails(det, person.kind);
   const none = <span className="text-ink-3">Not given</span>;
   const memberships = [...data.memberships].sort((a, b) => MEMBERSHIP_ORDER[a.status] - MEMBERSHIP_ORDER[b.status]);
@@ -109,11 +111,17 @@ export default async function PersonPage({ params }: { params: Params }) {
             </div>
             {person.headline || person.jobTitle ? <p className="mt-2 text-sm text-ink-2">{person.jobTitle ?? person.headline}</p> : null}
           </div>
-          {person.status !== "DEACTIVATED" ? (
-            <Link href={`/u/${person.handle}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline">
-              Public profile <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-            </Link>
-          ) : null}
+          <div className="flex flex-col items-start gap-1.5 sm:items-end">
+            {person.status !== "DEACTIVATED" ? (
+              <Link href={`/u/${person.handle}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline">
+                Public profile <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            ) : null}
+            {/* A plain link: the PDF comes from a route. Each download is logged (record.downloaded). */}
+            <a href={`/admin/users/${person.id}/record.pdf`} download className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline">
+              Involvement record (PDF) <Download className="h-3.5 w-3.5" aria-hidden />
+            </a>
+          </div>
         </div>
       </Card>
 
@@ -183,7 +191,11 @@ export default async function PersonPage({ params }: { params: Params }) {
           <Card>
             <CardHeader
               title="Clubs"
-              description={memberships.length ? `${activeClubs} current membership${activeClubs === 1 ? "" : "s"} · ${checkins.toLocaleString()} check-in${checkins === 1 ? "" : "s"} in all` : "Hasn't registered for any club yet."}
+              description={
+                memberships.length
+                  ? `${activeClubs} current membership${activeClubs === 1 ? "" : "s"} · ${checkins.toLocaleString()} check-in${checkins === 1 ? "" : "s"} in all${service.minutes ? ` · ${serviceHoursLabel(service.minutes)}` : ""}`
+                  : "Hasn't registered for any club yet."
+              }
             />
             {memberships.length ? (
               <ul className="divide-y divide-line">

@@ -3,6 +3,7 @@ import { DomainError, notFound } from "@/lib/domain/kit";
 import { eventAccess } from "@/lib/authz/events";
 import { OCC_INCLUDE } from "@/lib/events/feed";
 import { splitEventLinks } from "@/lib/events/links";
+import { isHybrid } from "@/lib/events/labels";
 import { campusMapQuery } from "@/lib/events/share";
 import { describeSchedule } from "@/lib/events/summary";
 import { richToText } from "@/lib/rich/sanitize";
@@ -56,7 +57,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ occurren
       description: richToText(body, 4000),
       links,
       mapQuery: e.locationType === "CAMPUS" && e.building ? campusMapQuery(e.building.name) : e.locationType === "ADDRESS" ? e.address : null,
-      virtualUrl: e.locationType === "VIRTUAL" ? e.virtualUrl : null,
+      // Online events, and hybrid ones: in person with a link to watch or join from afar.
+      virtualUrl: e.locationType === "VIRTUAL" || isHybrid(e) ? e.virtualUrl : null,
       scheduleLabel:
         e.recurrence === "NONE"
           ? null

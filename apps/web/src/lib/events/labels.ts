@@ -1,4 +1,5 @@
-import type { EventKind, FundingSource, LocationType, Visibility } from "@prisma/client";
+import type { EventKind, EventPerk, FundingSource, LocationType, Visibility } from "@prisma/client";
+import { earnedMinutes, fmtServiceHours } from "@/lib/metrics/service";
 
 /** Words people see for event enums. Client-safe (no server imports). */
 
@@ -88,6 +89,59 @@ export function locationText(e: {
     default:
       return "Location to be decided";
   }
+}
+
+// ─── Perks, hybrid and badges ────────────────────────────────────────────────
+
+/** What an event offers attendees, in the order chips and badges show them. */
+export const EVENT_PERKS: EventPerk[] = ["FREE_FOOD", "FREE_STUFF"];
+
+export const PERK_LABEL: Record<EventPerk, string> = {
+  FREE_FOOD: "Free food",
+  FREE_STUFF: "Free stuff",
+};
+
+/** In person (on or off campus) with an online link too, so people can watch or join remotely. */
+export function isHybrid(e: { locationType: LocationType; virtualUrl?: string | null }): boolean {
+  return (e.locationType === "CAMPUS" || e.locationType === "ADDRESS") && Boolean(e.virtualUrl?.trim());
+}
+
+/** How people take part: in person, online, both (hybrid), or not decided yet. */
+export type EventMode = "in_person" | "online" | "hybrid" | "tbd";
+
+export function eventMode(e: { locationType: LocationType; virtualUrl?: string | null }): EventMode {
+  if (e.locationType === "VIRTUAL") return "online";
+  if (e.locationType === "TBD") return "tbd";
+  return isHybrid(e) ? "hybrid" : "in_person";
+}
+
+export type EventBadgeKey = "food" | "stuff" | "service" | "online" | "hybrid" | "members";
+export type EventBadge = { key: EventBadgeKey; label: string };
+
+/**
+ * The badges an event wears everywhere it's listed (Events page cards, the
+ * event page, club pages, the month view), in this order: perks, service
+ * hours ("Service hours · 2", from lib/metrics/service), online or hybrid,
+ * members only. One function, so every surface says the same thing.
+ */
+export function eventBadges(e: {
+  perks?: readonly EventPerk[] | null;
+  serviceMinutes?: number | null;
+  locationType: LocationType;
+  virtualUrl?: string | null;
+  visibility: Visibility;
+}): EventBadge[] {
+  const out: EventBadge[] = [];
+  const perks = new Set(e.perks ?? []);
+  if (perks.has("FREE_FOOD")) out.push({ key: "food", label: PERK_LABEL.FREE_FOOD });
+  if (perks.has("FREE_STUFF")) out.push({ key: "stuff", label: PERK_LABEL.FREE_STUFF });
+  const minutes = earnedMinutes(e.serviceMinutes);
+  if (minutes) out.push({ key: "service", label: `Service hours · ${fmtServiceHours(minutes)}` });
+  const mode = eventMode(e);
+  if (mode === "online") out.push({ key: "online", label: "Online" });
+  if (mode === "hybrid") out.push({ key: "hybrid", label: "Hybrid" });
+  if (e.visibility === "MEMBERS") out.push({ key: "members", label: VISIBILITY_LABEL.MEMBERS });
+  return out;
 }
 
 /** Compact location for lists ("NB 220", "Online"): the building's code instead of its name. */

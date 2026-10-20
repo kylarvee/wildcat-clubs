@@ -5,7 +5,7 @@ import type { Actor } from "@/lib/auth/session";
 import { can, getClubAccess, isAdmin } from "@/lib/authz";
 import { eventVisibilityWhere } from "@/lib/authz/events";
 import { eventCostSummaries } from "@/lib/domain/events";
-import { KIND_LABEL, locationText, UNIVERSITY_COLOR } from "@/lib/events/labels";
+import { eventBadges, isHybrid, KIND_LABEL, locationText, UNIVERSITY_COLOR } from "@/lib/events/labels";
 import { describeSchedule } from "@/lib/events/summary";
 import { appUrl, campusMapQuery } from "@/lib/events/share";
 import { splitEventLinks } from "@/lib/events/links";
@@ -22,14 +22,16 @@ import type { CalendarEventJson } from "@/lib/events/types";
  *
  * Scopes:
  *   club        events the club hosts + events it co-hosts (approved)
- *   me          clubs the viewer subscribes to (+ university events if they opted in)
- *   university  public / Weber State events of every club + university events
+ *   me          clubs the viewer follows (+ university events if they keep them on): the Events page's "Mine"
+ *   all         everything the viewer may see: the Events page's "All of Weber State"
+ *   university  public / Weber State events of every club + university events (the public feed)
  *   trainings   university (admin) events only
  * Visibility always applies: PUBLIC anyone · UNIVERSITY signed in · MEMBERS
  * members and leaders of the host or an approved co-host (never in "university").
+ * The Events page's filters (lib/events/browse-where) ride along as `filter`.
  */
 
-export type FeedScope = { scope: "club"; clubId: string } | { scope: "me" } | { scope: "university" } | { scope: "trainings" };
+export type FeedScope = { scope: "club"; clubId: string } | { scope: "me" } | { scope: "all" } | { scope: "university" } | { scope: "trainings" };
 
 export type ViewerContext = {
   actor: Actor | null;
@@ -76,6 +78,7 @@ function scopeWhere(scope: FeedScope, ctx: ViewerContext): Prisma.EventWhereInpu
       return { OR: hostedOrCohosted([scope.clubId]) };
     case "me":
       return { OR: [...hostedOrCohosted(ctx.subscribedClubIds), ...(ctx.subscribeUniversity ? [{ clubId: null }] : [])] };
+    case "all":
     case "university":
       return {};
     case "trainings":
@@ -105,9 +108,12 @@ export const OCC_INCLUDE = {
       lat: true,
       lng: true,
       virtualUrl: true,
+      coverUrl: true,
+      perks: true,
+      serviceMinutes: true,
       updatedAt: true,
       clubId: true,
-      club: { select: { id: true, name: true, slug: true, logoColor: true, status: true } },
+      club: { select: { id: true, name: true, slug: true, logoColor: true, logoUrl: true, status: true } },
       building: { select: { name: true, code: true, lat: true, lng: true } },
       cohosts: { where: { status: "APPROVED" }, select: { club: { select: { id: true, name: true, slug: true } } } },
     },
@@ -116,15 +122,14 @@ export const OCC_INCLUDE = {
 
 export type FeedOccurrence = Prisma.EventOccurrenceGetPayload<{ include: typeof OCC_INCLUDE }>;
 
-/** Occurrences overlapping [start, end) in a scope, filtered by what the viewer may see. */
-export async function feedOccurrences(
+/** The occurrence filter behind every feed: overlapping [start, end), in the scope, visible to the viewer, plus any extra event filter. */
+export function feedWhere(
   ctx: ViewerContext,
   scope: FeedScope,
   range: { start: Date; end: Date },
-  opts: { publicOnly?: boolean; take?: number } = {},
-): Promise<FeedOccurrence[]> {
-  if (scope.scope === "me" && !ctx.actor) return [];
-  const where: Prisma.EventOccurrenceWhereInput = {
+  opts: { publicOnly?: boolean; filter?: Prisma.EventWhereInput } = {},
+): Prisma.EventOccurrenceWhereInput {
+  return {
     startsAt: { lt: range.end },
     endsAt: { gt: range.start },
     event: {
@@ -134,10 +139,22 @@ export async function feedOccurrences(
         { OR: [{ clubId: null }, { club: { status: { in: ["APPROVED", "RETIRED"] } } }] },
         scopeWhere(scope, ctx),
         visibilityWhere(ctx, { allowMembers: scope.scope !== "university", publicOnly: opts.publicOnly }),
+        ...(opts.filter ? [opts.filter] : []),
       ],
     },
   };
-  return db.eventOccurrence.findMany({ where, include: OCC_INCLUDE, orderBy: { startsAt: "asc" }, take: opts.take ?? 2000 });
+}
+
+/** Occurrences overlapping [start, end) in a scope, filtered by what the viewer may see. */
+export async function feedOccurrences(
+  ctx: ViewerContext,
+  scope: FeedScope,
+  range: { start: Date; end: Date },
+  opts: { publicOnly?: boolean; take?: number; filter?: Prisma.EventWhereInput } = {},
+): Promise<FeedOccurrence[]> {
+  if (scope.scope === "me" && !ctx.actor) return [];
+  const where = feedWhere(ctx, scope, range, opts);
+  return db.eventOccurrence.findMany({ where, include: OCC_INCLUDE, orderBy: [{ startsAt: "asc" }, { id: "asc" }], take: opts.take ?? 2000 });
 }
 
 /** What the viewer may do with each host club's events: manage (events) and see costs (events or budget). */
@@ -204,7 +221,10 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
         location: locationText({ ...e, roomOverride: o.roomOverride }),
         locationType: e.locationType,
         mapQuery,
-        virtualUrl: e.locationType === "VIRTUAL" ? e.virtualUrl : null,
+        // Online events, and in-person ones with an online link too (hybrid).
+        virtualUrl: e.locationType === "VIRTUAL" || isHybrid(e) ? e.virtualUrl : null,
+        coverUrl: e.coverUrl,
+        badges: eventBadges(e),
         kind: e.kind,
         visibility: e.visibility,
         cancelled,
@@ -256,6 +276,8 @@ export function toIcsEvents(rows: FeedOccurrence[]): IcsEvent[] {
     const cancelled = o.status === "CANCELLED" || e.status === "CANCELLED";
     const description = [
       cancelled && o.note ? `Cancelled: ${o.note}` : null,
+      // Hybrid: the place is the location; the link people use from afar goes here.
+      isHybrid(e) ? `Join online: ${e.virtualUrl}` : null,
       richToText(body, 3000),
       links.map((l) => `${l.label || "Link"}: ${l.url}`).join("\n"),
       e.cohosts.length ? `Co-hosted with ${e.cohosts.map((c) => c.club.name).join(", ")}` : null,

@@ -160,7 +160,7 @@ export async function noticeDeleted(d: DeletedEvent, ctx: NoticeContext) {
   if (!d) return;
   await guard(async () => {
     const notice = cancelledNotice(noticeEvent(d.e), { dates: d.dates.map((o) => toDate(d.e, o)), repeat: repeatOf(d.e), whole: true, deleted: true, now: ctx.now });
-    send(d.e, notice, ctx, d.e.club ? `/clubs/${d.e.club.slug}` : "/calendar");
+    send(d.e, notice, ctx, d.e.club ? `/clubs/${d.e.club.slug}` : "/events");
   });
 }
 

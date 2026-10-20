@@ -1,25 +1,21 @@
 import "server-only";
-import type { ComponentProps } from "react";
-import { Document, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Page, StyleSheet, View, renderToBuffer } from "@react-pdf/renderer";
 import type { ClubType, FundingSource, FundingStatus, InvoiceStatus } from "@prisma/client";
 import { fmtLongDate, fmtMoney } from "@/lib/time";
 import { INSTITUTION, PLATFORM } from "@/lib/institution";
 import { TYPE_LABEL } from "@/components/founding/copy";
+import { COLORS, Txt, pdfText as t } from "@/lib/documents/kit";
 
 import { earlierFundedCents, lineCents } from "@/lib/funding/math";
 
 /**
- * Funding invoice PDFs (@react-pdf/renderer). Built-in PDF fonts only
- * (Helvetica), so rendering never needs the network; text is reduced to the
- * characters those fonts can draw. WSUSA staff attach this to the transfer in
- * the university finance system, and the club keeps it for its records.
+ * Funding invoice PDFs (@react-pdf/renderer), on the platform's document
+ * pieces (lib/documents/kit: colors, text that the built-in Helvetica can
+ * draw, no hyphenation). WSUSA staff attach this to the transfer in the
+ * university finance system, and the club keeps it for its records.
  */
 
-const BRAND = "#492365";
-const INK = "#17131c";
-const MUTED = "#6b6475";
-const LINE = "#ddd7e3";
-const SOFT = "#f6f3f9";
+const { brand: BRAND, ink: INK, muted: MUTED, line: LINE, soft: SOFT } = COLORS;
 
 const s = StyleSheet.create({
   page: { paddingTop: 48, paddingBottom: 72, paddingHorizontal: 54, fontFamily: "Helvetica", fontSize: 9.5, color: INK, lineHeight: 1.4 },
@@ -63,22 +59,6 @@ const s = StyleSheet.create({
   footLeft: { position: "absolute", bottom: 30, left: 54, fontSize: 7.5, color: MUTED },
   footRight: { position: "absolute", bottom: 30, right: 54, fontSize: 7.5, color: MUTED },
 });
-
-/** Keeps only characters the standard PDF fonts (WinAnsi) can draw. */
-function t(text: string | null | undefined) {
-  return (text ?? "")
-    .normalize("NFC")
-    .replace(/\r\n?/g, "\n")
-    .replace(/[^\x09\x0A\x20-\x7E\xA0-\xFF–—‘’“”•…]/g, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-}
-
-/** Text without hyphenation: names and amounts read better whole than split ("Engi-neering"). */
-const noHyphens = (word: string) => [word];
-function Txt(props: ComponentProps<typeof Text>) {
-  return <Text hyphenationCallback={noHyphens} {...props} />;
-}
 
 const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
