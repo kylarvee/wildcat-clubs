@@ -135,6 +135,7 @@ export function OccurrenceDetails({ p, title, showCost = true }: { p: CalendarEv
           <p className={cn("text-base font-semibold leading-snug text-ink", p.cancelled && "line-through decoration-2")}>{title}</p>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {p.cancelled ? <Badge tone="danger">Cancelled</Badge> : null}
+            {p.review === "PENDING" ? <Badge tone="warning">Waiting for review</Badge> : p.review === "CHANGES_REQUESTED" ? <Badge tone="warning">Changes requested</Badge> : null}
             <Badge>{KIND_LABEL[p.kind]}</Badge>
             {p.visibility === "UNIVERSITY" ? <Badge tone="brand">{VISIBILITY_LABEL[p.visibility]}</Badge> : null}
           </div>

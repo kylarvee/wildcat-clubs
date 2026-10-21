@@ -26,6 +26,8 @@ export type AdminRequestRow = {
   /** dueAt: an open invoice's task due date. */
   invoices: { id: string; number: string; status: InvoiceStatus; dueAt?: Date | null }[];
   _count: { items: number };
+  /** The deciding office's review time (lib/offices), when it isn't the list's. */
+  reviewDays?: number;
 };
 
 function waitingDays(at: Date | null, now: number) {
@@ -34,8 +36,9 @@ function waitingDays(at: Date | null, now: number) {
 
 /**
  * The admin funding queue as rows that wrap on small screens. A request that
- * has waited longer than WSUSA's review time, or an invoice past its due
- * date, is marked late (lib/funding/review, the WSUSA queue's rule).
+ * has waited longer than its deciding office's review time, or an invoice
+ * past its due date, is marked late (lib/funding/review, the office queue's
+ * rule).
  */
 export function AdminRequestList({ rows, reviewDays, now = Date.now() }: { rows: AdminRequestRow[]; reviewDays: number; now?: number }) {
   const at = new Date(now);
@@ -44,7 +47,7 @@ export function AdminRequestList({ rows, reviewDays, now = Date.now() }: { rows:
       {rows.map((r) => {
         const invoice = r.invoices[0];
         const days = r.status === "SUBMITTED" ? waitingDays(r.submittedAt, now) : 0;
-        const late = r.status === "SUBMITTED" && r.submittedAt ? pastReviewTime(r.submittedAt, at, reviewDays) : false;
+        const late = r.status === "SUBMITTED" && r.submittedAt ? pastReviewTime(r.submittedAt, at, r.reviewDays ?? reviewDays) : false;
         const invoiceLate = invoice?.status === "OPEN" && invoice.dueAt ? invoice.dueAt < at : false;
         const approved = r.status === "APPROVED" || r.status === "PARTIALLY_APPROVED";
         const decided = r.amountApprovedCents != null;

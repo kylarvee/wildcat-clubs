@@ -1,6 +1,6 @@
 import "server-only";
 import { toTaskItem } from "@/components/tasks/items";
-import { AWAITING_GRADE_NOTE, REQUIRED_LABEL, SELF_CLOSING_NOTE, taskKindLabel } from "@/components/tasks/labels";
+import { AWAITING_GRADE_NOTE, requiredLabel, SELF_CLOSING_NOTE, taskKindLabel } from "@/components/tasks/labels";
 import type { TaskRow } from "@/lib/domain/tasks";
 import type { MTask, MTaskDecision } from "../_types";
 
@@ -16,7 +16,7 @@ export function toMTask(t: TaskRow, viewerId: string, now: Date, decision: MTask
   return {
     id: item.id,
     kind: item.kind,
-    badge: item.required ? REQUIRED_LABEL : taskKindLabel(item),
+    badge: item.required ? requiredLabel(item.requiredBy) : taskKindLabel(item),
     required: item.required,
     title: item.title,
     description: item.description,

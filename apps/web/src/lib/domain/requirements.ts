@@ -3,9 +3,9 @@ import type { AssignmentStatus, ClubRole, Prisma, RoleRequirement } from "@prism
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { can, getClubAccess, ROLE_RANK } from "@/lib/authz";
+import { adminScope, ALL_CAPABILITIES, can, canAdminClub, CAPABILITIES, getClubAccess, ROLE_RANK, type Capability } from "@/lib/authz";
 import { loadRequirementBatch, periodStartFor, REQUIREMENT_ORDER, requirementStatus, tasksAwaitingGrade, type RequirementBatch } from "@/lib/authz/requirements";
-import { seatDueAt, type RequirementState } from "@/lib/authz/requirement-rules";
+import { heldCapabilities, requirementReaches, seatDueAt, type Holdings, type RequirementState } from "@/lib/authz/requirement-rules";
 import { missingDetails } from "@/lib/details/rules";
 import { logActivity } from "@/lib/lake/activity";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -38,6 +38,14 @@ import { renewalCycle } from "@/lib/tests/cycles";
  * (Ambassador and up, never advisors) are gated: overdue, their capabilities
  * pause — the rule getClubAccess uses. Members have nothing to pause, so an
  * overdue member requirement just stays on their list, marked overdue.
+ *
+ * Who a requirement reaches follows lib/authz/requirement-rules
+ * requirementReaches: an office's requirement only that office's clubs, a
+ * single-permission one only the leaders holding that permission (from their
+ * roles and seat permissions), so gaining or losing the permission — a new
+ * role, an ended one, a seat's permissions changed — opens or cancels the
+ * task on the next sync of that person. Overdue, a single-permission
+ * requirement pauses only its permission.
  */
 export function requirementSourceId(requirementId: string, userId: string) {
   return `${requirementId}:${userId}`;
@@ -50,8 +58,8 @@ export const REQUIREMENT_AUDIENCE: ClubRole[] = ["MEMBER", ...REQUIREMENT_ROLES]
 
 type NotifyMode = "new-role" | "due" | false;
 
-/** One place a requirement can reach someone: a leader role, or (as MEMBER) a membership. */
-type Seat = { role: ClubRole; startedAt: Date; clubId: string; clubApprovedAt: Date | null };
+/** One place a requirement can reach someone: a leader role, or (as MEMBER) a membership, with its club's office and what they hold there. */
+type Seat = { role: ClubRole; startedAt: Date; clubId: string; clubApprovedAt: Date | null; clubOfficeId: string | null; holds: Holdings | null };
 
 /** A requirement someone still owes. */
 type Want = {
@@ -94,7 +102,7 @@ function decideRequirements(batch: RequirementBatch, userId: string, seats: read
   for (const s of seats) {
     const gates = s.role !== "MEMBER";
     for (const r of batch.requirements) {
-      if (!r.appliesTo.includes(s.role)) continue;
+      if (!requirementReaches(r, s)) continue;
       if (batch.fulfillment(userId, r).met) {
         met.add(r.id);
         continue;
@@ -108,7 +116,7 @@ function decideRequirements(batch: RequirementBatch, userId: string, seats: read
   return { met, wants };
 }
 
-type OpenTask = { id: string; assigneeId: string | null; sourceId: string | null; dueAt: Date | null; title: string; href: string | null; clubId: string | null; required: boolean };
+type OpenTask = { id: string; assigneeId: string | null; sourceId: string | null; dueAt: Date | null; title: string; href: string | null; clubId: string | null; required: boolean; officeId: string | null };
 type AssignmentRow = { id: string; testId: string; userId: string; cycleKey: string; status: AssignmentStatus; dueAt: Date; resolvedAt: Date | null };
 
 /** What a sync reads, for some people or for everyone (the sweep), loaded once. */
@@ -125,7 +133,29 @@ type SyncInputs = {
   forms: Set<string>;
   /** This renewal cycle's assignments for requirement tests, by person. */
   assignments: Map<string, AssignmentRow[]>;
+  /** Names of the offices that own requirements (notices name them instead of WSUSA). */
+  officeNames: Map<string, string>;
 };
+
+/** Who's asking, as notices say it: WSUSA, or the office that owns every one of these requirements. Null when they're from different offices. */
+function ownerName(reqs: readonly Pick<RoleRequirement, "officeId">[], officeNames: ReadonlyMap<string, string>): string | null {
+  const ids = [...new Set(reqs.map((r) => r.officeId ?? null))];
+  if (ids.length !== 1) return null;
+  return ids[0] === null ? "WSUSA" : (officeNames.get(ids[0]) ?? "Your club's office");
+}
+
+/** "Events" or "Events and Budget & funding": the permissions single-permission requirements keep on. */
+function capabilityNames(caps: readonly string[]): string {
+  const labels = [...new Set(caps)].map((c) => (c in CAPABILITIES ? CAPABILITIES[c as Capability].label : c));
+  return labels.length <= 2 ? labels.join(" and ") : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
+/** Office names for these requirements' owners (only read when an office owns one). */
+async function loadOfficeNames(reqs: readonly Pick<RoleRequirement, "officeId">[]): Promise<Map<string, string>> {
+  const ids = [...new Set(reqs.map((r) => r.officeId).filter((id): id is string => Boolean(id)))];
+  if (!ids.length) return new Map();
+  return new Map((await db.office.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((o) => [o.id, o.name]));
+}
 
 async function loadSyncInputs(scope: { userIds: readonly string[] } | "everyone", now: Date): Promise<SyncInputs> {
   const requirements = await db.roleRequirement.findMany({ where: { active: true }, orderBy: REQUIREMENT_ORDER });
@@ -134,19 +164,19 @@ async function loadSyncInputs(scope: { userIds: readonly string[] } | "everyone"
   const [roles, memberships, open] = await Promise.all([
     db.roleAssignment.findMany({
       where: { endedAt: null, role: { in: REQUIREMENT_ROLES }, club: { status: "APPROVED" }, user: { status: "ACTIVE" }, ...only },
-      select: { userId: true, role: true, startedAt: true, clubId: true, club: { select: { approvedAt: true } } },
+      select: { userId: true, role: true, permissions: true, startedAt: true, clubId: true, club: { select: { approvedAt: true, officeId: true } } },
       orderBy: [{ startedAt: "asc" }, { id: "asc" }],
     }),
     // Memberships only matter while a requirement applies to members; students only.
     forMembers
       ? db.membership.findMany({
           where: { status: "ACTIVE", club: { status: "APPROVED" }, user: { status: "ACTIVE", kind: "STUDENT" }, ...only },
-          select: { userId: true, clubId: true, joinedAt: true, requestedAt: true, club: { select: { approvedAt: true } } },
+          select: { userId: true, clubId: true, joinedAt: true, requestedAt: true, club: { select: { approvedAt: true, officeId: true } } },
         })
       : [],
     db.task.findMany({
       where: { sourceType: "requirement", status: "OPEN", assigneeId: scope === "everyone" ? { not: null } : { in: [...scope.userIds] } },
-      select: { id: true, assigneeId: true, sourceId: true, dueAt: true, title: true, href: true, clubId: true, required: true },
+      select: { id: true, assigneeId: true, sourceId: true, dueAt: true, title: true, href: true, clubId: true, required: true, officeId: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
   ]);
@@ -160,9 +190,15 @@ async function loadSyncInputs(scope: { userIds: readonly string[] } | "everyone"
     return list;
   };
   if (scope !== "everyone") for (const id of scope.userIds) seatsOf(id);
-  for (const a of roles) seatsOf(a.userId).push({ role: a.role, startedAt: a.startedAt, clubId: a.clubId, clubApprovedAt: a.club.approvedAt });
+  // What each person's roles give them in each club, for single-permission requirements.
+  const rolesIn = new Map<string, { role: ClubRole; permissions: string[] }[]>();
+  for (const a of roles) rolesIn.set(`${a.userId}:${a.clubId}`, [...(rolesIn.get(`${a.userId}:${a.clubId}`) ?? []), a]);
+  const holdings = new Map([...rolesIn].map(([key, list]) => [key, heldCapabilities(list)]));
+  for (const a of roles) {
+    seatsOf(a.userId).push({ role: a.role, startedAt: a.startedAt, clubId: a.clubId, clubApprovedAt: a.club.approvedAt, clubOfficeId: a.club.officeId ?? null, holds: holdings.get(`${a.userId}:${a.clubId}`) ?? null });
+  }
   const memberSeats = memberships
-    .map((m) => ({ userId: m.userId, seat: { role: "MEMBER" as const, startedAt: m.joinedAt ?? m.requestedAt, clubId: m.clubId, clubApprovedAt: m.club.approvedAt } }))
+    .map((m) => ({ userId: m.userId, seat: { role: "MEMBER" as const, startedAt: m.joinedAt ?? m.requestedAt, clubId: m.clubId, clubApprovedAt: m.club.approvedAt, clubOfficeId: m.club.officeId ?? null, holds: null } }))
     .sort((a, b) => a.seat.startedAt.getTime() - b.seat.startedAt.getTime() || a.seat.clubId.localeCompare(b.seat.clubId));
   for (const m of memberSeats) seatsOf(m.userId).push(m.seat);
   const openTasks = new Map<string, OpenTask[]>();
@@ -174,10 +210,11 @@ async function loadSyncInputs(scope: { userIds: readonly string[] } | "everyone"
   const active = new Map(requirements.map((r) => [r.id, r]));
   const elsewhere = [...new Set(open.map((t) => t.sourceId?.split(":")[0] ?? ""))].filter((id) => id && !active.has(id));
   const testIds = [...new Set(requirements.flatMap((r) => (r.kind === "TEST" && r.testId ? [r.testId] : [])))];
-  const [batch, inactive, forms] = await Promise.all([
+  const [batch, inactive, forms, officeNames] = await Promise.all([
     loadRequirementBatch([...people.keys()], { at: now, requirements }),
     elsewhere.length ? db.roleRequirement.findMany({ where: { id: { in: elsewhere } }, select: { id: true, kind: true, testId: true } }) : [],
     testIds.length ? db.test.findMany({ where: { id: { in: testIds }, isForm: true }, select: { id: true } }) : [],
+    loadOfficeNames(requirements),
   ]);
   // Requirement tests and forms also get an assignment per renewal cycle (below); this cycle's rows.
   const cycles = requirements.flatMap((r) => (r.kind === "TEST" && r.testId ? [{ testId: r.testId, cycleKey: renewalCycle(r.renewal, now, batch.terms).key }] : []));
@@ -197,6 +234,7 @@ async function loadSyncInputs(scope: { userIds: readonly string[] } | "everyone"
     requirementOf: new Map([...requirements, ...inactive].map((r) => [r.id, { kind: r.kind, testId: r.testId }])),
     forms: new Set(forms.map((t) => t.id)),
     assignments,
+    officeNames,
   };
 }
 
@@ -206,7 +244,7 @@ type SyncPlan = {
   cancelled: string[];
   /** testId → people whose open assignment is excused. */
   excuse: Map<string, string[]>;
-  updates: { id: string; data: { dueAt: Date; title: string; href: string; clubId: string | null; required: true } }[];
+  updates: { id: string; data: { dueAt: Date; title: string; href: string; clubId: string | null; required: true; officeId?: string | null } }[];
   creates: Prisma.TaskCreateManyInput[];
   assignmentCreates: Prisma.TestAssignmentCreateManyInput[];
   assignmentUpdates: { id: string; data: Prisma.TestAssignmentUpdateManyMutationInput }[];
@@ -261,10 +299,13 @@ function planPerson(inputs: SyncInputs, userId: string, seats: Seat[], plan: Syn
     const title = requirementTitle(w.requirement, Boolean(w.requirement.testId && inputs.forms.has(w.requirement.testId)), detailsMissing);
     // A leader's task names the club whose permissions it gates; a member-wide one is WSUSA's, not any club's.
     const clubId = w.gates ? w.clubId : null;
+    // Who requires it, for the task's badge ("Required by Campus Rec"); null is WSUSA.
+    const officeId = w.requirement.officeId ?? null;
     const t = existing.get(reqId);
     if (t) {
-      if (t.dueAt?.getTime() !== w.dueAt.getTime() || t.title !== title || t.href !== href || t.clubId !== clubId || !t.required) {
-        plan.updates.push({ id: t.id, data: { dueAt: w.dueAt, title, href, clubId, required: true } });
+      const officeChanged = (t.officeId ?? null) !== officeId;
+      if (t.dueAt?.getTime() !== w.dueAt.getTime() || t.title !== title || t.href !== href || t.clubId !== clubId || !t.required || officeChanged) {
+        plan.updates.push({ id: t.id, data: { dueAt: w.dueAt, title, href, clubId, required: true, ...(officeChanged ? { officeId } : {}) } });
       }
     } else {
       plan.creates.push({
@@ -279,6 +320,7 @@ function planPerson(inputs: SyncInputs, userId: string, seats: Seat[], plan: Syn
         sourceType: "requirement",
         sourceId: requirementSourceId(reqId, userId),
         required: true,
+        officeId,
       });
       opened.push(w);
     }
@@ -308,15 +350,29 @@ function planPerson(inputs: SyncInputs, userId: string, seats: Seat[], plan: Syn
     const names = opened.map((w) => w.requirement.name).join(", ");
     const soonest = opened.reduce((d, w) => (w.dueAt < d ? w.dueAt : d), opened[0].dueAt);
     const gates = opened.some((w) => w.gates);
+    // WSUSA's, or the office's that owns them all ("Campus Recreation"); requirements from different owners just say requirements.
+    const who = ownerName(opened.map((w) => w.requirement), inputs.officeNames);
+    const kept = opened.filter((w) => w.gates);
+    // Single-permission requirements keep that permission on, not every one.
+    const what = kept.every((w) => w.requirement.gatesCapability) ? `your ${capabilityNames(kept.map((w) => w.requirement.gatesCapability!))} permission${new Set(kept.map((w) => w.requirement.gatesCapability)).size === 1 ? "" : "s"}` : "your permissions";
+    const owned = who ? `${who} requirement` : "requirement";
     plan.notices.push({
       userIds: [userId],
       kind: "requirement.assigned",
-      title: !gates ? "Required by WSUSA" : notifyMode === "new-role" ? "Your new role has WSUSA requirements" : opened.length === 1 ? "A WSUSA requirement to finish" : "WSUSA requirements to finish",
+      title: !gates
+        ? who
+          ? `Required by ${who}`
+          : "Required for your clubs"
+        : notifyMode === "new-role"
+          ? `Your new role has ${owned}s`
+          : opened.length === 1
+            ? `${/^[AEIOU]/.test(owned) ? "An" : "A"} ${owned} to finish`
+            : `${owned.charAt(0).toUpperCase()}${owned.slice(1)}s to finish`,
       body: !gates
-        ? `WSUSA asks every club member to finish ${names}${soonest > now ? ` by ${fmtDate(soonest, "MMM d")}` : ""}.`
+        ? `${who === "WSUSA" ? "WSUSA asks every club member" : who ? `${who} asks every member of its clubs` : "Your clubs' offices ask every member"} to finish ${names}${soonest > now ? ` by ${fmtDate(soonest, "MMM d")}` : ""}.`
         : soonest <= now
-          ? `Finish ${names} to turn your permissions back on.`
-          : `Finish ${names} by ${fmtDate(soonest, "MMM d")} to keep your permissions on.`,
+          ? `Finish ${names} to turn ${what} back on.`
+          : `Finish ${names} by ${fmtDate(soonest, "MMM d")} to keep ${what} on.`,
       href: "/tasks",
     });
   }
@@ -424,23 +480,41 @@ export function syncAllRequirementHolders(opts: { notify?: NotifyMode; now?: Dat
   return run;
 }
 
+type GatingRequirement = { id: string; appliesTo: ClubRole[]; officeId: string | null; gatesCapability: string | null };
+
 /**
  * Which (requirement, person) pairs reach the person through a current leader
- * role in an approved club, so being overdue pauses their permissions. Keys
- * are `${requirementId}:${userId}`.
+ * role in an approved club (requirementReaches: its office's clubs, its one
+ * permission's holders), so being overdue pauses their permissions. Keys
+ * are `${requirementId}:${userId}`; `requirements` says what each one gates.
  */
-async function gatingPairs(pairs: readonly { requirementId: string; userId: string }[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  if (!pairs.length) return out;
+async function gatingPairs(pairs: readonly { requirementId: string; userId: string }[]): Promise<{ keys: Set<string>; requirements: Map<string, GatingRequirement> }> {
+  const keys = new Set<string>();
+  if (!pairs.length) return { keys, requirements: new Map() };
   const [reqs, roles] = await Promise.all([
-    db.roleRequirement.findMany({ where: { id: { in: [...new Set(pairs.map((p) => p.requirementId))] } }, select: { id: true, appliesTo: true } }),
-    db.roleAssignment.findMany({ where: { userId: { in: [...new Set(pairs.map((p) => p.userId))] }, endedAt: null, club: { status: "APPROVED" } }, select: { userId: true, role: true } }),
+    db.roleRequirement.findMany({ where: { id: { in: [...new Set(pairs.map((p) => p.requirementId))] } }, select: { id: true, appliesTo: true, officeId: true, gatesCapability: true } }),
+    db.roleAssignment.findMany({
+      where: { userId: { in: [...new Set(pairs.map((p) => p.userId))] }, endedAt: null, club: { status: "APPROVED" } },
+      select: { userId: true, role: true, permissions: true, clubId: true, club: { select: { officeId: true } } },
+    }),
   ]);
-  const leaderRoles = new Map(reqs.map((r) => [r.id, r.appliesTo.filter((role) => role !== "MEMBER")]));
-  const held = new Map<string, Set<ClubRole>>();
-  for (const a of roles) held.set(a.userId, (held.get(a.userId) ?? new Set()).add(a.role));
-  for (const p of pairs) if ((leaderRoles.get(p.requirementId) ?? []).some((role) => held.get(p.userId)?.has(role))) out.add(`${p.requirementId}:${p.userId}`);
-  return out;
+  const byId = new Map(reqs.map((r) => [r.id, r]));
+  // Every leader seat per person, with what they hold in its club.
+  const inClub = new Map<string, typeof roles>();
+  for (const a of roles) inClub.set(`${a.userId}:${a.clubId}`, [...(inClub.get(`${a.userId}:${a.clubId}`) ?? []), a]);
+  const seats = new Map<string, { role: ClubRole; clubOfficeId: string | null; holds: Holdings }[]>();
+  for (const [key, list] of inClub) {
+    const holds = heldCapabilities(list);
+    const userId = key.split(":")[0];
+    for (const a of list) if (a.role !== "MEMBER") seats.set(userId, [...(seats.get(userId) ?? []), { role: a.role, clubOfficeId: a.club.officeId ?? null, holds }]);
+  }
+  for (const p of pairs) {
+    const r = byId.get(p.requirementId);
+    if (!r) continue;
+    const leaderOnly = { ...r, appliesTo: r.appliesTo.filter((role) => role !== "MEMBER") };
+    if ((seats.get(p.userId) ?? []).some((s) => requirementReaches(leaderOnly, s))) keys.add(`${p.requirementId}:${p.userId}`);
+  }
+  return { keys, requirements: new Map(reqs.map((r) => [r.id, { ...r, officeId: r.officeId ?? null, gatesCapability: r.gatesCapability ?? null }])) };
 }
 
 /**
@@ -464,6 +538,7 @@ export async function notifyOverdueRequirements(now: Date = new Date()): Promise
     db.notification.findMany({ where: { kind: "requirement.overdue", userId: { in: [...new Set(late.map((t) => t.assigneeId!))] }, createdAt: { gte: since } }, select: { userId: true, href: true, createdAt: true } }),
     gatingPairs(late.map((t) => ({ requirementId: t.sourceId?.split(":")[0] ?? "", userId: t.assigneeId! }))),
   ]);
+  const officeNames = await loadOfficeNames([...gating.requirements.values()]);
   const toldBy = new Map<string, { href: string | null; createdAt: Date }[]>();
   for (const n of told) toldBy.set(n.userId, [...(toldBy.get(n.userId) ?? []), n]);
   const notices: Omit<NotifyInput, "kind">[] = [];
@@ -472,11 +547,20 @@ export async function notifyOverdueRequirements(now: Date = new Date()): Promise
     const mine = toldBy.get(t.assigneeId!) ?? [];
     if (mine.some((n) => n.href === t.href && n.createdAt >= from)) continue;
     const name = t.title.replace(ACTION_PREFIX, "");
-    const gates = gating.has(`${t.sourceId?.split(":")[0] ?? ""}:${t.assigneeId}`);
+    const reqId = t.sourceId?.split(":")[0] ?? "";
+    const gates = gating.keys.has(`${reqId}:${t.assigneeId}`);
+    const r = gating.requirements.get(reqId);
+    const who = r ? ownerName([r], officeNames) : "WSUSA";
+    // A single-permission requirement pauses just that permission; the rest of the role keeps working.
+    const cap = r?.gatesCapability ? capabilityNames([r.gatesCapability]) : null;
     notices.push({
       userIds: [t.assigneeId!],
-      title: gates ? `Permissions paused${t.club ? ` in ${t.club.name}` : ""}` : "A WSUSA requirement is overdue",
-      body: gates ? `${name} is overdue. Your title stays, and your permissions come back as soon as it's done.` : `${name} was due ${fmtDate(t.dueAt ?? now, "MMM d")}. WSUSA requires it, so please finish it as soon as you can.`,
+      title: gates ? `${cap ?? "Permissions"} paused${t.club ? ` in ${t.club.name}` : ""}` : `A${who && /^[AEIOU]/.test(who) ? "n" : ""} ${who ?? "club"} requirement is overdue`,
+      body: gates
+        ? cap
+          ? `${name} is overdue, so ${cap} is paused. Your title and your other permissions stay, and ${cap} comes back as soon as it's done.`
+          : `${name} is overdue. Your title stays, and your permissions come back as soon as it's done.`
+        : `${name} was due ${fmtDate(t.dueAt ?? now, "MMM d")}. ${who ?? "Your club's office"} requires it, so please finish it as soon as you can.`,
       href: t.href ?? "/tasks",
     });
     // Later tasks in this run see it, as they would have in the database.
@@ -495,6 +579,40 @@ function assertRequirementAdmin(actor: Actor | null): asserts actor is Actor {
   if (!can(actor, "admin.tests") && !can(actor, "admin.trainings")) throw forbidden();
 }
 
+/**
+ * Whose requirements someone manages: WSUSA's admins manage every office's
+ * (and WSUSA's own, officeId null); an office's staff only their office's.
+ * The same rule as administering that office's clubs (canAdminClub).
+ */
+function managesRequirementsOf(actor: Actor, officeId: string | null): boolean {
+  return canAdminClub(actor, { officeId });
+}
+
+/** Requirements this person may see and manage (Admin → Requirements). */
+function requirementScopeWhere(actor: Actor): Prisma.RoleRequirementWhereInput {
+  const s = adminScope(actor);
+  return s.all ? {} : { officeId: { in: s.officeIds } };
+}
+
+/**
+ * Which office a saved requirement belongs to. WSUSA's admins choose (an
+ * office's id, or empty for WSUSA's own); an office's staff always save their
+ * own office's (the one they chose when they staff several).
+ */
+async function requirementOffice(actor: Actor, chosen: string | null | undefined): Promise<string | null> {
+  const s = adminScope(actor);
+  const id = chosen || null;
+  if (!s.all) {
+    if (id && s.officeIds.includes(id)) return id;
+    if (!id && s.officeIds.length === 1) return s.officeIds[0];
+    throw forbidden("You can add requirements for your own office's clubs only.");
+  }
+  if (!id) return null;
+  const office = await db.office.findUnique({ where: { id }, select: { id: true, umbrella: true } });
+  if (!office) throw invalid("That office doesn't exist anymore. Choose another.");
+  return office.umbrella ? null : office.id;
+}
+
 const RequirementInput = z
   .object({
     name: z.string().trim().min(3, "Give the requirement a name (at least 3 characters).").max(120, "Names can be up to 120 characters."),
@@ -511,23 +629,45 @@ const RequirementInput = z
     renewal: z.enum(["NONE", "SEMESTER", "ACADEMIC_YEAR", "ANNUAL"]),
     graceDays: z.coerce.number({ error: "Enter the number of days." }).int("Use whole days.").min(0, "Grace days can't be negative.").max(365, "Grace periods can be up to 365 days."),
     active: z.boolean(),
+    /** "Only people with the ___ permission": reaches only leaders who hold it, and overdue pauses only it. Empty = every leader permission. */
+    gatesCapability: z
+      .enum(ALL_CAPABILITIES as [Capability, ...Capability[]], { error: "Choose one of the club permissions." })
+      .nullish()
+      .or(z.literal("").transform(() => null)),
+    /** Whose requirement it is (an office's id); empty = WSUSA's, for every club. */
+    officeId: z.string().nullish(),
   })
   .superRefine((v, ctx) => {
     if (v.kind === "TEST" && !v.testId) ctx.addIssue({ code: "custom", path: ["testId"], message: "Choose the test or form people must complete." });
     if (v.kind === "TRAINING" && !v.trainingEventId) ctx.addIssue({ code: "custom", path: ["trainingEventId"], message: "Choose the training people must attend." });
+    if (v.gatesCapability && v.appliesTo.includes("MEMBER")) {
+      ctx.addIssue({ code: "custom", path: ["appliesTo"], message: "Members don't hold club permissions, so choose leader roles for a requirement about one permission." });
+    }
   });
 
 export type RequirementInput = z.input<typeof RequirementInput>;
 
-/** Create (id null) or edit a requirement. Holders' tasks catch up via syncAllRequirementHolders (the action runs it after responding). */
+/**
+ * Create (id null) or edit a requirement. Holders' tasks catch up via
+ * syncAllRequirementHolders (the action runs it after responding). An
+ * office's requirement reaches only its clubs and uses the office's own tests
+ * and forms (Test.officeId); WSUSA's uses WSUSA's. Member details and
+ * trainings (university events) are WSUSA's.
+ */
 export async function saveRequirement(actor: Actor | null, id: string | null, input: unknown): Promise<{ id: string }> {
   assertRequirementAdmin(actor);
   const v = parse(RequirementInput, input);
+  const prev = id ? await db.roleRequirement.findUnique({ where: { id } }) : null;
+  if (id && !prev) throw notFound("Requirement");
+  if (prev && !managesRequirementsOf(actor, prev.officeId)) throw forbidden("This requirement belongs to another office.");
+  const officeId = await requirementOffice(actor, v.officeId === undefined && prev ? prev.officeId : v.officeId);
+  if (officeId && v.kind !== "TEST") throw invalid("An office's requirement is a test or form the office owns. Trainings and member details are WSUSA's.");
   if (v.kind === "PROFILE") {
     // Met from Settings → Member details; nothing to point at.
   } else if (v.kind === "TEST") {
-    const test = await db.test.findUnique({ where: { id: v.testId! }, select: { clubId: true, status: true, audience: true } });
+    const test = await db.test.findUnique({ where: { id: v.testId! }, select: { clubId: true, status: true, audience: true, officeId: true } });
     if (!test || test.clubId !== null) throw invalid("Choose a university test or form (club tests and forms can't be WSUSA requirements).");
+    if ((test.officeId ?? null) !== officeId) throw invalid(officeId ? "Choose one of your office's own tests or forms." : "Choose one of WSUSA's tests or forms. Another office's tests stay with its own requirements.");
     if (test.status !== "PUBLISHED") throw invalid("That test or form isn't published yet. Publish it in Admin → Tests first.");
     if (test.audience !== "ROLE_REQUIREMENT") throw invalid("Set its audience to “WSUSA requirement (set in Admin → Requirements)” first, so it isn't also assigned to everyone else.");
   } else {
@@ -545,19 +685,19 @@ export async function saveRequirement(actor: Actor | null, id: string | null, in
     renewal: v.renewal,
     graceDays: v.graceDays,
     active: v.active,
+    gatesCapability: v.gatesCapability ?? null,
+    officeId,
   };
   const dupe = await db.roleRequirement.findFirst({ where: { name: { equals: v.name, mode: "insensitive" }, ...(id ? { id: { not: id } } : {}) }, select: { id: true } });
   if (dupe) throw invalid("Another requirement already has that name.");
 
   let row: RoleRequirement;
   if (id) {
-    const prev = await db.roleRequirement.findUnique({ where: { id } });
-    if (!prev) throw notFound("Requirement");
     row = await db.roleRequirement.update({ where: { id }, data });
-    await logActivity({ actorId: actor.id, action: "requirement.updated", entityType: "roleRequirement", entityId: id, data: { name: row.name, active: row.active, graceDays: row.graceDays, renewal: row.renewal } });
+    await logActivity({ actorId: actor.id, action: "requirement.updated", entityType: "roleRequirement", entityId: id, data: { name: row.name, active: row.active, graceDays: row.graceDays, renewal: row.renewal, gatesCapability: row.gatesCapability, officeId: row.officeId } });
   } else {
     row = await db.roleRequirement.create({ data });
-    await logActivity({ actorId: actor.id, action: "requirement.created", entityType: "roleRequirement", entityId: row.id, data: { name: row.name, kind: row.kind } });
+    await logActivity({ actorId: actor.id, action: "requirement.created", entityType: "roleRequirement", entityId: row.id, data: { name: row.name, kind: row.kind, gatesCapability: row.gatesCapability, officeId: row.officeId } });
   }
   return { id: row.id };
 }
@@ -571,6 +711,7 @@ export async function setRequirementActive(actor: Actor | null, id: string, acti
   assertRequirementAdmin(actor);
   const prev = await db.roleRequirement.findUnique({ where: { id } });
   if (!prev) throw notFound("Requirement");
+  if (!managesRequirementsOf(actor, prev.officeId)) throw forbidden("This requirement belongs to another office.");
   if (active && prev.kind === "TEST") {
     const t = prev.testId ? await db.test.findUnique({ where: { id: prev.testId }, select: { status: true, audience: true } }) : null;
     if (!t) throw invalid("Its test or form was deleted, so it can't be turned on. Edit it to choose one first.");
@@ -591,15 +732,25 @@ export async function setRequirementActive(actor: Actor | null, id: string, acti
 
 // ─── Admin reads: requirements and compliance ────────────────────────────────
 
-/** Every requirement with what it points at, for the admin list. */
-export async function listRequirementsForAdmin() {
+/** The requirements this person manages (every one for WSUSA's admins, their office's for office staff), with what they point at and whose they are. */
+export async function listRequirementsForAdmin(actor: Actor | null) {
+  assertRequirementAdmin(actor);
   return db.roleRequirement.findMany({
+    where: requirementScopeWhere(actor),
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
     include: {
       test: { select: { id: true, title: true, status: true, audience: true, isForm: true } },
       trainingEvent: { select: { id: true, title: true, status: true, _count: { select: { occurrences: true } } } },
+      office: { select: { id: true, name: true, shortName: true } },
     },
   });
+}
+
+/** Whether this person may open (and edit) one requirement. */
+export async function requirementForAdmin(actor: Actor | null, id: string) {
+  assertRequirementAdmin(actor);
+  const r = await db.roleRequirement.findUnique({ where: { id } });
+  return r && managesRequirementsOf(actor, r.officeId) ? r : null;
 }
 
 /**
@@ -623,13 +774,25 @@ export async function openRequirementCounts(now: Date = new Date()): Promise<Map
   return out;
 }
 
-/** What a requirement can point at: published university tests and forms, and scheduled university events (trainings first). */
-export async function requirementTargets() {
-  const [tests, events] = await Promise.all([
-    db.test.findMany({ where: { clubId: null, status: { not: "ARCHIVED" } }, orderBy: { title: "asc" }, select: { id: true, title: true, status: true, audience: true, isForm: true } }),
-    db.event.findMany({ where: { clubId: null, status: "SCHEDULED" }, orderBy: { title: "asc" }, select: { id: true, title: true, kind: true } }),
+/**
+ * What a requirement can point at, for this person: university tests and
+ * forms (their office's, for office staff; each says whose), and scheduled
+ * university events, trainings first (WSUSA's admins only). Also the offices
+ * they can file a requirement under.
+ */
+export async function requirementTargets(actor: Actor | null) {
+  assertRequirementAdmin(actor);
+  const s = adminScope(actor);
+  const [tests, events, offices] = await Promise.all([
+    db.test.findMany({
+      where: { clubId: null, status: { not: "ARCHIVED" }, ...(s.all ? {} : { officeId: { in: s.officeIds } }) },
+      orderBy: { title: "asc" },
+      select: { id: true, title: true, status: true, audience: true, isForm: true, officeId: true },
+    }),
+    s.all ? db.event.findMany({ where: { clubId: null, status: "SCHEDULED" }, orderBy: { title: "asc" }, select: { id: true, title: true, kind: true } }) : Promise.resolve([]),
+    db.office.findMany({ where: { umbrella: false, ...(s.all ? {} : { id: { in: s.officeIds } }) }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
-  return { tests, events: [...events.filter((e) => e.kind === "TRAINING"), ...events.filter((e) => e.kind !== "TRAINING")] };
+  return { tests, events: [...events.filter((e) => e.kind === "TRAINING"), ...events.filter((e) => e.kind !== "TRAINING")], offices, umbrella: s.all };
 }
 
 /** "review": handed in on time and waiting for grading (not met yet, not overdue). */
@@ -642,48 +805,55 @@ export type ComplianceRow = {
   role: ClubRole;
   seat: string | null;
   startedAt: Date;
-  /** By requirement id; requirements that don't apply to the role are absent. */
+  /** By requirement id; requirements that don't reach the seat are absent. */
   cells: Record<string, ComplianceCell>;
   /** Overdue → this person's capabilities in this club are paused (same rule as getClubAccess). */
   paused: boolean;
+  /** Only these permissions are paused (overdue single-permission requirements); absent otherwise. */
+  pausedCapabilities?: string[];
 };
 
 const ROLE_ORDER: Record<ClubRole, number> = { MEMBER: 0, AMBASSADOR: 1, OFFICER: 1, VP: 2, PRESIDENT: 3, ADVISOR: 4 };
 
 /**
- * Every current student leader of an approved club (or of `opts.clubIds`),
- * one row per person per club (their highest role there — exactly what
- * getClubAccess checks), with each requirement's status. The batch evaluator
- * answers for all of them at once: requirementStatus's rule, one load.
- * Read-only.
+ * Every current student leader of an approved club (or of `opts.clubIds`, or
+ * the clubs `opts.clubWhere` picks: an office's), one row per person per club
+ * (their highest role there — exactly what getClubAccess checks), with each
+ * requirement's status. The batch evaluator answers for all of them at once:
+ * requirementStatus's rule, one load. Read-only.
  */
-export async function requirementCompliance(now: Date = new Date(), opts: { clubIds?: string[] } = {}): Promise<ComplianceRow[]> {
+export async function requirementCompliance(now: Date = new Date(), opts: { clubIds?: string[]; clubWhere?: Prisma.ClubWhereInput } = {}): Promise<ComplianceRow[]> {
   const assignments = await db.roleAssignment.findMany({
-    where: { endedAt: null, role: { in: REQUIREMENT_ROLES }, club: { status: "APPROVED" }, user: { status: "ACTIVE" }, ...(opts.clubIds ? { clubId: { in: opts.clubIds } } : {}) },
+    where: { endedAt: null, role: { in: REQUIREMENT_ROLES }, club: { ...opts.clubWhere, status: "APPROVED" }, user: { status: "ACTIVE" }, ...(opts.clubIds ? { clubId: { in: opts.clubIds } } : {}) },
     orderBy: { startedAt: "asc" },
     select: {
       id: true,
       role: true,
+      permissions: true,
       startedAt: true,
       position: { select: { name: true } },
-      club: { select: { id: true, name: true, slug: true, approvedAt: true } },
+      club: { select: { id: true, name: true, slug: true, approvedAt: true, officeId: true } },
       user: { select: { id: true, name: true, email: true, handle: true, avatarUrl: true, avatarColor: true } },
     },
   });
-  // Highest role per person per club, like getClubAccess.
+  // Highest role per person per club, like getClubAccess; what all their seats there give them.
   const top = new Map<string, (typeof assignments)[number]>();
+  const seatsIn = new Map<string, (typeof assignments)[number][]>();
   for (const a of assignments) {
     const k = `${a.user.id}:${a.club.id}`;
     const prev = top.get(k);
     if (!prev || ROLE_ORDER[a.role] > ROLE_ORDER[prev.role]) top.set(k, a);
+    seatsIn.set(k, [...(seatsIn.get(k) ?? []), a]);
   }
   const list = [...top.entries()];
   const batch = await loadRequirementBatch([...new Set(list.map(([, a]) => a.user.id))], { at: now });
   const rows = list.map(([key, a]): ComplianceRow => {
-    const status = batch.status(a.user.id, a.role, { startedAt: a.startedAt, clubApprovedAt: a.club.approvedAt });
+    const status = batch.status(a.user.id, a.role, { startedAt: a.startedAt, clubApprovedAt: a.club.approvedAt, clubOfficeId: a.club.officeId ?? null, holds: heldCapabilities(seatsIn.get(key)!) });
     const cells: Record<string, ComplianceCell> = {};
     for (const it of status.items) cells[it.requirement.id] = { state: it.state, dueAt: it.dueAt };
-    return { key, person: a.user, club: { id: a.club.id, name: a.club.name, slug: a.club.slug }, role: a.role, seat: a.position?.name ?? null, startedAt: a.startedAt, cells, paused: status.overdue };
+    const row: ComplianceRow = { key, person: a.user, club: { id: a.club.id, name: a.club.name, slug: a.club.slug }, role: a.role, seat: a.position?.name ?? null, startedAt: a.startedAt, cells, paused: status.pause.all };
+    if (status.pause.capabilities.length) row.pausedCapabilities = status.pause.capabilities;
+    return row;
   });
   return rows.sort((a, b) => Number(b.paused) - Number(a.paused) || a.person.name.localeCompare(b.person.name) || a.club.name.localeCompare(b.club.name));
 }
@@ -700,21 +870,23 @@ export type PauseReason = {
   dueAt: Date;
   /** Handed in after the deadline and still waiting for a grader. */
   gradingPending: boolean;
+  /** The one permission it pauses (a single-permission requirement); null = every leader permission. */
+  capability: Capability | null;
 };
 
 /**
  * What's overdue for the actor in one club, through their highest role there
- * (the role getClubAccess checks): why their permissions are paused. Empty
- * when they aren't. Read-only.
+ * (the role getClubAccess checks): why their permissions are paused, all of
+ * them or one. Empty when nothing is. Read-only.
  */
 export async function pauseReasons(actor: Actor | null, clubId: string, now: Date = new Date()): Promise<PauseReason[]> {
   assertSignedIn(actor);
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { status: true, approvedAt: true } });
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { status: true, approvedAt: true, officeId: true } });
   if (club?.status !== "APPROVED") return [];
   const roles = await db.roleAssignment.findMany({ where: { clubId, userId: actor.id, endedAt: null } });
   const top = [...roles].sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role])[0];
   if (!top || ROLE_RANK[top.role] < 1 || top.role === "ADVISOR") return [];
-  const status = await requirementStatus(actor.id, top.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: club.approvedAt, at: now });
+  const status = await requirementStatus(actor.id, top.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: club.approvedAt, at: now, clubOfficeId: club.officeId, holds: heldCapabilities(roles) });
   const late = status.items.filter((i) => i.overdue);
   if (!late.length) return [];
   const testIds = late.map((i) => i.requirement.testId).filter((id): id is string => Boolean(id));
@@ -733,6 +905,7 @@ export async function pauseReasons(actor: Actor | null, clubId: string, now: Dat
       kind: r.kind === "TRAINING" ? "TRAINING" : r.kind === "PROFILE" ? "PROFILE" : isForm ? "FORM" : "TEST",
       dueAt: i.dueAt,
       gradingPending: i.gradingPending,
+      capability: r.gatesCapability && r.gatesCapability in CAPABILITIES ? (r.gatesCapability as Capability) : null,
     } satisfies PauseReason;
   });
 }
@@ -762,7 +935,7 @@ export type RequirementOverviewRow = {
  */
 export async function requirementsOverview(actor: Actor | null, now: Date = new Date()): Promise<{ rows: RequirementOverviewRow[]; pausedLeaders: number }> {
   assertRequirementAdmin(actor);
-  const reqs = await db.roleRequirement.findMany({ where: { active: true }, orderBy: { createdAt: "asc" }, include: { test: { select: { isForm: true } } } });
+  const reqs = await db.roleRequirement.findMany({ where: { active: true, ...requirementScopeWhere(actor) }, orderBy: { createdAt: "asc" }, include: { test: { select: { isForm: true } } } });
   if (!reqs.length) return { rows: [], pausedLeaders: 0 };
   const starts = new Map<string, Date>();
   for (const r of reqs) starts.set(r.id, await periodStartFor(r.renewal, now));
@@ -799,9 +972,9 @@ export async function requirementsOverview(actor: Actor | null, now: Date = new 
     });
     if (r.appliesTo.some((role) => role !== "MEMBER")) for (const t of late) if (t.assigneeId) overdueLeaderTasks.push({ reqId: r.id, userId: t.assigneeId });
   }
-  // Paused = overdue on a requirement that reaches them through a leader role (getClubAccess's rule).
+  // Paused = overdue on a requirement that reaches them through a leader role (getClubAccess's rule): every permission, or its one.
   const gating = await gatingPairs(overdueLeaderTasks.map((t) => ({ requirementId: t.reqId, userId: t.userId })));
-  const paused = new Set(overdueLeaderTasks.filter((t) => gating.has(`${t.reqId}:${t.userId}`)).map((t) => t.userId));
+  const paused = new Set(overdueLeaderTasks.filter((t) => gating.keys.has(`${t.reqId}:${t.userId}`)).map((t) => t.userId));
   return { rows, pausedLeaders: paused.size };
 }
 

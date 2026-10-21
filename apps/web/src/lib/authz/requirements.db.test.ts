@@ -6,7 +6,7 @@
  *
  *   REQUIREMENTS_DB=1 npx vitest run src/lib/authz/requirements.db.test.ts
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import * as legacy from "@/test/requirements/legacy";
 import { loadRequirementBatch, requirementStatus } from "@/lib/authz/requirements";
@@ -15,18 +15,29 @@ import { requirementCompliance } from "@/lib/domain/requirements";
 const on = process.env.REQUIREMENTS_DB === "1";
 const ROLES = ["MEMBER", "AMBASSADOR", "OFFICER", "VP", "PRESIDENT"] as const;
 
-/** Items keyed for comparison (the old order came from the database, the new one is oldest first). */
-const view = (s: { items: legacy.RequirementItem[]; overdue: boolean; allMet: boolean }) => ({
-  overdue: s.overdue,
-  allMet: s.allMet,
-  items: Object.fromEntries(
-    s.items.map((i) => [i.requirement.id, { met: i.met, awaitingGrade: i.awaitingGrade, gradingPending: i.gradingPending, periodStart: i.periodStart.getTime(), dueAt: i.dueAt.getTime(), overdue: i.overdue, state: i.state }]),
-  ),
-});
+/**
+ * Items keyed for comparison (the old order came from the database, the new one is oldest first).
+ * Offices' and single-permission requirements reach only some seats, which the old rule never
+ * knew, so they're left out of the comparison (the equivalence tests cover them).
+ */
+let newerKinds = new Set<string>();
+const view = (s: { items: legacy.RequirementItem[] }) => {
+  const items = s.items.filter((i) => !newerKinds.has(i.requirement.id));
+  return {
+    overdue: items.some((i) => i.overdue),
+    allMet: items.every((i) => i.met),
+    items: Object.fromEntries(
+      items.map((i) => [i.requirement.id, { met: i.met, awaitingGrade: i.awaitingGrade, gradingPending: i.gradingPending, periodStart: i.periodStart.getTime(), dueAt: i.dueAt.getTime(), overdue: i.overdue, state: i.state }]),
+    ),
+  };
+};
 
 describe.skipIf(!on)("requirements on the real database", () => {
   afterAll(() => db.$disconnect());
   const now = new Date();
+  beforeAll(async () => {
+    newerKinds = new Set((await db.roleRequirement.findMany({ where: { OR: [{ officeId: { not: null } }, { gatesCapability: { not: null } }] }, select: { id: true } })).map((r) => r.id));
+  });
 
   it("gives every seat the same status as the old per-person rule", async () => {
     const [roles, members] = await Promise.all([
@@ -77,7 +88,9 @@ describe.skipIf(!on)("requirements on the real database", () => {
 
   it("gives admin compliance the same rows as before", async () => {
     const [old, next] = await Promise.all([legacy.requirementCompliance(now), requirementCompliance(now)]);
-    expect(next).toEqual(old);
+    // The newer kinds' cells (and the single-permission pauses only they cause) aren't the old rule's.
+    const strip = <T extends { cells: Record<string, unknown> }>(rows: T[]) => rows.map(({ pausedCapabilities: _p, ...r }: T & { pausedCapabilities?: unknown }) => ({ ...r, cells: Object.fromEntries(Object.entries(r.cells).filter(([id]) => !newerKinds.has(id))) }));
+    expect(strip(next)).toEqual(strip(old));
     console.log(`compared ${next.length} compliance rows`);
   }, 600_000);
 });

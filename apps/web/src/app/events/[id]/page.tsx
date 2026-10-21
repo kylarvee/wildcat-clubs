@@ -5,7 +5,9 @@ import { notFound } from "next/navigation";
 import { CalendarClock, Cast, FileText, Link2, MapPin, Pencil, QrCode, Repeat, Users, Video, Wallet } from "lucide-react";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
-import { can, getClubAccess } from "@/lib/authz";
+import { can, canAdminClub, getClubAccess } from "@/lib/authz";
+import { officeForClub } from "@/lib/offices";
+import { riskPhrase, underReview, waitingLabel } from "@/lib/events/review";
 import { canManageEvent, canSeeEventCosts, canViewEvent, eventCostSummary } from "@/lib/domain/events";
 import { canViewFile, fileUrl } from "@/lib/domain/files";
 import { richToText } from "@/lib/rich/sanitize";
@@ -36,7 +38,7 @@ const loadEvent = cache((id: string) =>
   db.event.findUnique({
     where: { id },
     include: {
-      club: { select: { id: true, name: true, slug: true, logoColor: true, logoUrl: true, status: true } },
+      club: { select: { id: true, name: true, slug: true, logoColor: true, logoUrl: true, status: true, officeId: true } },
       building: { select: { name: true, code: true, lat: true, lng: true } },
       cohosts: { where: { status: "APPROVED" }, include: { club: { select: { id: true, name: true, slug: true, logoColor: true, logoUrl: true } } } },
       attachments: { include: { file: true } },
@@ -75,7 +77,11 @@ export default async function EventPage({ params, searchParams }: Props) {
   const lastPast = upcoming.length === 0 ? await db.eventOccurrence.findFirst({ where: { eventId: id }, orderBy: { startsAt: "desc" } }) : null;
   const occ = requested ?? upcoming.find((x) => x.status === "SCHEDULED") ?? upcoming[0] ?? lastPast;
   const cost = seeCosts ? await eventCostSummary(id) : null;
-  const canCheckIn = event.clubId ? Boolean(hostAccess?.capabilities.has("attendance")) : can(viewer, "admin.trainings");
+  // Waiting for its office's review: only its leaders and the office get here (lib/authz/events). Not posted, so no check-in or calendar copies.
+  const waiting = underReview(event);
+  const office = waiting && event.club ? await officeForClub(event.club.id) : null;
+  const reviews = Boolean(waiting && event.club && can(viewer, "admin.events") && canAdminClub(viewer, { officeId: event.club.officeId }));
+  const canCheckIn = !waiting && (event.clubId ? Boolean(hostAccess?.capabilities.has("attendance")) : can(viewer, "admin.trainings"));
   // Who may check in without the QR code (rules.decideMethod): the host's and co-hosts' members.
   const codeClubs = codeClubsPhrase(event.club?.name ?? null, event.cohosts.map((c) => c.club.name));
   const howToCheckIn =
@@ -125,6 +131,7 @@ export default async function EventPage({ params, searchParams }: Props) {
             <Badge>{KIND_LABEL[event.kind]}</Badge>
             {event.visibility === "UNIVERSITY" ? <Badge tone="brand">{VISIBILITY_LABEL[event.visibility]}</Badge> : null}
             {event.status === "CANCELLED" ? <Badge tone="danger">Cancelled</Badge> : null}
+            {waiting ? <Badge tone="warning">{event.reviewStatus === "CHANGES_REQUESTED" ? "Changes requested" : "Waiting for review"}</Badge> : null}
             <EventBadges badges={badges} inline />
             <span className="text-sm text-ink-3">
               Hosted by{" "}
@@ -141,6 +148,7 @@ export default async function EventPage({ params, searchParams }: Props) {
         }
         actions={
           <>
+            {reviews ? <ButtonLink href={`/admin/events#${event.id}`}>Review it</ButtonLink> : null}
             {manage ? (
               <ButtonLink variant="outline" href={manageHref}>
                 <Pencil className="h-4 w-4" /> Manage event
@@ -154,6 +162,15 @@ export default async function EventPage({ params, searchParams }: Props) {
           </>
         }
       />
+
+      {waiting && office ? (
+        <Callout tone={event.reviewStatus === "CHANGES_REQUESTED" ? "warning" : "info"} className="mb-6" title={event.reviewStatus === "CHANGES_REQUESTED" ? `${office.name} asked for changes` : waitingLabel(office)}>
+          {event.reviewStatus === "CHANGES_REQUESTED" && event.reviewNote ? <p className="whitespace-pre-line font-medium">“{event.reviewNote}”</p> : null}
+          <p>
+            It involves {riskPhrase(event.riskFlags)}, so {office.name} reviews it before it&apos;s posted. Until then only {event.club?.name ?? "the club"}&apos;s leaders and {office.name} can see this page, and it isn&apos;t on any calendar.
+          </p>
+        </Callout>
+      ) : null}
 
       {event.coverUrl ? (
         <EventCover
@@ -199,7 +216,7 @@ export default async function EventPage({ params, searchParams }: Props) {
               ) : null}
               {(occ && !occCancelled && gcal) || (event.club && viewer) ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  {occ && !occCancelled && gcal ? <AddToCalendarMenu googleUrl={gcal} icsUrl={`/api/ics/occurrence/${occ.id}`} /> : null}
+                  {occ && !occCancelled && gcal && !waiting ? <AddToCalendarMenu googleUrl={gcal} icsUrl={`/api/ics/occurrence/${occ.id}`} /> : null}
                   {event.club && viewer ? <SubscribeToggle clubId={event.club.id} clubName={event.club.name} slug={event.club.slug} subscribed={Boolean(following)} signedIn /> : null}
                 </div>
               ) : null}
@@ -399,7 +416,8 @@ export default async function EventPage({ params, searchParams }: Props) {
             <CardBody className="flex gap-2 text-sm text-ink-2">
               <Users className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
               <p>
-                {howToCheckIn}
+                {/* Not posted yet: check-in stays closed until the office approves it. */}
+                {waiting ? "Check-in opens once the event is approved and posted." : howToCheckIn}
                 {!viewer ? " You'll be asked to sign in with your Weber State account." : ""}
               </p>
             </CardBody>

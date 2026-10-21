@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
-import type { CohostStatus, EventKind, EventPerk, EventStatus, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
-import { AlertTriangle, Ban, CalendarCheck, Gift, Loader2, RotateCcw, Trash2, UtensilsCrossed } from "lucide-react";
+import type { CohostStatus, EventKind, EventPerk, EventReview, EventRisk, EventStatus, FundingSource, LocationType, Recurrence, Visibility } from "@prisma/client";
+import { AlertTriangle, Ban, CalendarCheck, CircleCheck, Gift, Hourglass, Loader2, MessageSquareWarning, RotateCcw, Trash2, UtensilsCrossed } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -20,10 +20,13 @@ import { CostsEditor, costRowsError, newCostKey, type CostRowValue } from "@/com
 import { CohostPicker, type ClubOption } from "@/components/events/CohostPicker";
 import { AttachmentsField } from "@/components/events/AttachmentsField";
 import { CoverField } from "@/components/events/CoverField";
+import { RiskReviewFields, travelDraft, travelOut, type ReviewSettings, type TravelDraft } from "@/components/events/RiskReviewFields";
 import { defaultWhen, previewOccurrences, termsFromJson, toSchedule, whenFrom, whenFromEvent, type WhenValue } from "@/components/events/when";
 import { EVENT_KINDS, EVENT_PERKS, KIND_LABEL, PERK_LABEL, VISIBILITY_HINT, VISIBILITY_LABEL } from "@/lib/events/labels";
 import { isHttpUrl, type EventLink } from "@/lib/events/links";
 import { defaultServiceMinutes, hoursText, QUARTER_HOUR, resolveServiceMinutes } from "@/lib/events/rules";
+import { waitingLabel, type TravelPlan } from "@/lib/events/review";
+import { fmtDate } from "@/lib/time";
 import type { TermJson } from "@/lib/events/types";
 import { cancelEventAction, createEventAction, deleteEventAction, restoreEventAction, updateEventAction } from "@/app/events/actions";
 
@@ -64,6 +67,11 @@ export type EditorEvent = {
   attendanceCount: number;
   /** Set when a WSUSA requirement points at this training. */
   requirementName: string | null;
+  /** "Does this event involve…" (lib/events/review), and the trip when Travel is one. */
+  riskFlags: EventRisk[];
+  travel: TravelPlan | null;
+  /** Where its review stands, and the office's last note. */
+  review: { status: EventReview; note: string | null; reviewedAt: string | null; reviewedBy: string | null };
 };
 
 export type EventEditorProps = {
@@ -81,6 +89,8 @@ export type EventEditorProps = {
   defaultFundingSource: FundingSource;
   /** Where uploaded covers go (the club's Flyers folder), from loadEditorData. */
   coverFolderId?: string | null;
+  /** Club events: the "Does this event involve…" settings (null for university events, which are never reviewed). */
+  review?: ReviewSettings | null;
 };
 
 const SECTIONS = [
@@ -88,6 +98,7 @@ const SECTIONS = [
   { id: "cover", label: "Cover image" },
   { id: "when", label: "When" },
   { id: "where", label: "Where" },
+  { id: "involves", label: "Safety review", club: true },
   { id: "service", label: "Service hours" },
   { id: "details", label: "Details" },
   { id: "attachments", label: "Attachments" },
@@ -121,7 +132,7 @@ const toHoursInput = (minutes: number) => String(Math.round((minutes / 60) * 100
  * through the events domain functions.
  */
 export function EventEditor(props: EventEditorProps) {
-  const { mode, club, basePath, event, buildings, clubs, terms, googleLive, defaultFundingSource, coverFolderId = null } = props;
+  const { mode, club, basePath, event, buildings, clubs, terms, googleLive, defaultFundingSource, coverFolderId = null, review = null } = props;
   const router = useRouter();
   const id = useId();
   const isClub = mode === "club" && club !== null;
@@ -165,6 +176,8 @@ export function EventEditor(props: EventEditorProps) {
   const [saving, startSaving] = useTransition();
   const [busy, startBusy] = useTransition();
   const [cancelReason, setCancelReason] = useState("");
+  const [flags, setFlags] = useState<EventRisk[]>(event?.riskFlags ?? []);
+  const [travel, setTravel] = useState<TravelDraft>(() => travelDraft(event?.travel ?? null, event?.startsAt ? new Date(event.startsAt) : null));
 
   const termRows = useMemo(() => termsFromJson(terms), [terms]);
   const meetings = useMemo(() => previewOccurrences(when, termRows).length, [when, termRows]);
@@ -224,6 +237,9 @@ export function EventEditor(props: EventEditorProps) {
     if (location.locationType === "VIRTUAL" && !location.virtualUrl.trim() && !location.createMeetLink) return fail("Add the link people use to join, or ask for a Google Meet link.", "where");
     if (location.locationType !== "TBD" && location.virtualUrl.trim() && !isHttpUrl(location.virtualUrl.trim())) return fail("Enter the full online link, starting with https://", "where");
     if (!service.ok) return fail(service.error, "service");
+    // Travel checked: the trip goes with it (the write path checks it against the dates).
+    const trip = isClub && review && flags.includes("TRAVEL") ? travelOut(travel) : null;
+    if (trip && !trip.ok) return fail(trip.error, "involves");
     if (isClub) {
       const costError = costRowsError(costs);
       if (costError) return fail(costError, "costs");
@@ -242,6 +258,8 @@ export function EventEditor(props: EventEditorProps) {
       attachmentFileIds: files.map((f) => f.id),
       cohostClubIds: isClub ? cohostIds : [],
       cohostAllClubs: isClub ? cohostAll : false,
+      riskFlags: isClub && review ? flags : undefined,
+      travel: trip?.ok ? trip.value : undefined,
       costs: isClub
         ? costs.map((c) => ({
             id: c.id,
@@ -265,7 +283,8 @@ export function EventEditor(props: EventEditorProps) {
       const res = event ? await updateEventAction(event.id, payload) : await createEventAction({ ...payload, clubId: club?.id ?? null });
       if (!res.ok) return fail(res.error);
       setDirty(false);
-      toast.success(event ? "Event saved" : "Event created");
+      const waiting = res.data.review.status === "PENDING";
+      toast.success(waiting ? `Saved and sent to ${res.data.review.waitingFor ?? "your club's office"} for review` : event ? "Event saved" : "Event created");
       if (res.data.google.status === "failed" && res.data.google.message) toast.warning(res.data.google.message);
       router.push(`${basePath}?date=${when.date}`);
       router.refresh();
@@ -321,6 +340,7 @@ export function EventEditor(props: EventEditorProps) {
             It stays on calendars, crossed out. Restore it under “Cancel or delete” to bring it back.
           </Callout>
         ) : null}
+        {isClub && review && event ? <ReviewStatus review={event.review} office={review.office.name} /> : null}
 
         <Card id="basics" className="scroll-mt-20">
           <CardHeader title="Basics" />
@@ -388,6 +408,27 @@ export function EventEditor(props: EventEditorProps) {
             <LocationFields value={location} onChange={touch(setLocation)} buildings={buildings} googleLive={googleLive} />
           </CardBody>
         </Card>
+
+        {isClub && review ? (
+          <Card id="involves" className="scroll-mt-20">
+            <CardHeader title="Does this event involve…" description={`Check anything that applies. ${review.office.name} takes a look at events like these before they're posted.`} />
+            <CardBody>
+              <RiskReviewFields
+                flags={flags}
+                onFlagsChange={touch((next: EventRisk[]) => {
+                  setFlags(next);
+                  // Checking Travel starts the trip on the event's own dates.
+                  if (next.includes("TRAVEL") && !flags.includes("TRAVEL") && !travel.leaveDate && !travel.returnDate) setTravel((t) => ({ ...t, leaveDate: when.date, returnDate: when.endDate || when.date }));
+                })}
+                travel={travel}
+                onTravelChange={touch(setTravel)}
+                settings={review}
+                status={event?.review.status ?? null}
+                savedFlags={event?.riskFlags ?? []}
+              />
+            </CardBody>
+          </Card>
+        ) : null}
 
         <Card id="service" className="scroll-mt-20">
           <CardHeader title="Service hours" description="Each attendee earns these hours for every date they check in." />
@@ -598,4 +639,34 @@ export function EventEditor(props: EventEditorProps) {
       </form>
     </div>
   );
+}
+
+/**
+ * Where the event's review stands, for its leaders: waiting for the office
+ * (hidden until then), sent back with the office's note, or approved (with
+ * any condition the office added).
+ */
+function ReviewStatus({ review, office }: { review: EditorEvent["review"]; office: string }) {
+  const when = review.reviewedAt ? fmtDate(review.reviewedAt, "MMM d") : null;
+  if (review.status === "PENDING")
+    return (
+      <Callout tone="info" icon={<Hourglass />} title={waitingLabel({ name: office })}>
+        Until {office} approves it, only your club&apos;s leaders and {office} can see it. It isn&apos;t on any calendar yet, nobody gets notices or reminders, and check-in stays closed. You can keep editing; your changes go to them as you save.
+      </Callout>
+    );
+  if (review.status === "CHANGES_REQUESTED")
+    return (
+      <Callout tone="warning" icon={<MessageSquareWarning />} title={`${office} asked for changes${when ? ` on ${when}` : ""}`}>
+        {review.note ? <p className="whitespace-pre-line font-medium">“{review.note}”</p> : null}
+        <p>Make the changes and save: that sends it back to {office} for review. It stays hidden until it&apos;s approved.</p>
+      </Callout>
+    );
+  if (review.status === "APPROVED")
+    return (
+      <Callout tone="success" icon={<CircleCheck />} title={`Approved by ${review.reviewedBy ? `${review.reviewedBy} at ` : ""}${office}${when ? ` on ${when}` : ""}`}>
+        {review.note ? <p className="whitespace-pre-line">Their note: “{review.note}”</p> : null}
+        <p>Checking something new under “Does this event involve…” or changing the trip sends it back for review.</p>
+      </Callout>
+    );
+  return null;
 }

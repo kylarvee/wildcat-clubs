@@ -8,6 +8,8 @@ import { normalizeDraftData } from "@/lib/constitution/templates";
 import { rulesFromAnswers } from "@/lib/constitution/rules";
 import { quorumOf, readSelectionRules } from "@/lib/roles/pipeline";
 import { awaitingGrade, requirementState as ruleState } from "@/lib/authz/requirement-rules";
+import { eventVisibilityWhere } from "@/lib/authz/event-visibility";
+import { readTravel, UNDER_REVIEW } from "@/lib/events/review";
 import { evaluateClubActivity } from "@/lib/metrics/pure";
 import { serviceLine, summarizeService } from "@/lib/metrics/service";
 import { unanimousChoice } from "@/lib/roles/pipeline";
@@ -23,6 +25,7 @@ import { holdsLock, lineStanding } from "@/lib/funding/locks";
 import { lineCents } from "@/lib/funding/math";
 import { followUpKeys, INVOICE_DUE_DAYS, pastReviewTime } from "@/lib/funding/review";
 import { ORPHAN_REQUEST_DAYS, ORPHAN_REQUESTS_SOURCE, parseStaffingSourceId, seatApproves, STAFFING_SOURCE } from "@/lib/staffing/rules";
+import { OFFICE_KEYS, officeKeyForClub, routeAdminTask, storedOfficeId } from "@/lib/offices/rules";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
 import { DIGEST_KINDS, digestOn, NOTIFICATION_KINDS, readPrefs, resolveDelivery } from "@/components/notifications/catalog";
 import { fmtDate } from "@/lib/time";
@@ -47,13 +50,20 @@ async function club(key: string) {
   return db.club.findUniqueOrThrow({ where: { slug: clubByKey(key).slug } });
 }
 
-/** Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat, as of `at`. */
+/**
+ * Same rule as lib/authz/requirements (period = academic year containing now), for an officer seat, as of `at`:
+ * WSUSA's officer requirements for every club. An office's requirements and single-permission ones reach only
+ * some officers, so they're checked on their own (requirementChecks).
+ */
 let cached: { periodStart: Date; reqs: Awaited<ReturnType<typeof db.roleRequirement.findMany>> } | null = null;
 async function requirementState(userId: string, assignmentStartedAt: Date, clubApprovedAt: Date | null, at: Date = NOW) {
   if (!cached) {
     const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
     const t = terms.find((x) => x.startsOn <= NOW && NOW <= x.endsOn) ?? [...terms].reverse().find((x) => x.startsOn <= NOW)!;
-    cached = { periodStart: terms.find((x) => x.academicYear === t.academicYear)!.startsOn, reqs: await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" } } }) };
+    cached = {
+      periodStart: terms.find((x) => x.academicYear === t.academicYear)!.startsOn,
+      reqs: await db.roleRequirement.findMany({ where: { active: true, appliesTo: { has: "OFFICER" }, officeId: null, gatesCapability: null } }),
+    };
   }
   const { periodStart, reqs } = cached;
   const out: { name: string; met: boolean; waiting: boolean; dueAt: Date; overdue: boolean }[] = [];
@@ -156,18 +166,21 @@ async function clubChecks() {
   const current = await db.roleAssignment.groupBy({ by: ["clubId", "role"], where: { endedAt: null }, _count: true });
   const held = (clubId: string, role: string) => current.find((x) => x.clubId === clubId && x.role === role)?._count ?? 0;
   const bySlug = new Map(clubs.map((c) => [c.slug, c]));
+  // The staffing stories' clubs (steps/inbox for WSUSA, steps/offices for Campus Recreation) lost their President a few days ago, so each holds one fewer than the list shows.
+  const staffingTasks = await db.task.findMany({ where: { sourceType: STAFFING_SOURCE, status: "OPEN" }, select: { sourceId: true } });
+  const lostPresident = new Set(staffingTasks.map((t) => parseStaffingSourceId(t.sourceId)?.clubId).filter((id): id is string => Boolean(id)));
   const story = CLUBS.filter((d) => d.story && d.status === "APPROVED");
-  const storyMissing = story.filter((d) => !held(bySlug.get(d.slug)!.id, "PRESIDENT") || !held(bySlug.get(d.slug)!.id, "ADVISOR"));
-  check(storyMissing.length === 0, "Every approved story club has a current president and advisor", storyMissing.map((d) => d.name).join(", "));
+  const storyMissing = story.filter((d) => {
+    const id = bySlug.get(d.slug)!.id;
+    return (!held(id, "PRESIDENT") && !lostPresident.has(id)) || !held(id, "ADVISOR");
+  });
+  check(storyMissing.length === 0, "Every approved story club has a current president and advisor (but the staffing story's)", storyMissing.map((d) => d.name).join(", "));
   const listed = CLUBS.filter((d) => !d.story && d.life !== "dormant");
-  // The staffing story's club (steps/inbox) lost its President a few days ago, so it holds one fewer than the list shows.
-  const staffingTask = await db.task.findFirst({ where: { sourceType: STAFFING_SOURCE, status: "OPEN" }, select: { sourceId: true } });
-  const lostPresident = parseStaffingSourceId(staffingTask?.sourceId)?.clubId ?? null;
   const offList = listed.filter((d) => {
     const id = bySlug.get(d.slug)!.id;
     const plan = d.seatPlan ?? {};
     const officers = Object.entries(plan).filter(([k]) => k !== "President" && k !== "Vice President").reduce((n, [, v]) => n + v, 0);
-    const presidents = (plan.President ?? 0) - (id === lostPresident ? 1 : 0);
+    const presidents = (plan.President ?? 0) - (lostPresident.has(id) ? 1 : 0);
     return held(id, "PRESIDENT") !== presidents || held(id, "VP") !== (plan["Vice President"] ?? 0) || held(id, "OFFICER") !== officers || held(id, "ADVISOR") !== (d.advisors ?? 0);
   });
   check(offList.length === 0, `Directory clubs with members have the officers and advisors the list shows (${listed.length} clubs)`, offList.map((d) => d.name).join(", "));
@@ -296,29 +309,33 @@ async function ambassadorChecks() {
 }
 
 /**
- * WSUSA's staffing queue (lib/domain/staffing, steps/inbox staffingStory): one
- * club that just lost its President, one gated club whose join request nobody
- * can approve, nothing backfilled, and the queue's counts matching each admin
- * tool's own list (lib/analytics/admin wsusaQueue counts the open tasks).
+ * The staffing queue (lib/domain/staffing; steps/inbox staffingStory and
+ * steps/offices buildOfficeStories): two clubs that just lost their President,
+ * one WSUSA's and one Campus Recreation's, each task in its own office's
+ * queue; one gated club whose join request nobody can approve; nothing
+ * backfilled; and the queues' counts matching each admin tool's own list
+ * (lib/analytics/admin officeQueue counts the open tasks).
  */
 async function staffingChecks() {
   const open = await db.task.findMany({ where: { sourceType: { in: [STAFFING_SOURCE, ORPHAN_REQUESTS_SOURCE] }, status: "OPEN" }, include: { club: true } });
   const staffing = open.filter((t) => t.sourceType === STAFFING_SOURCE);
-  const gap = parseStaffingSourceId(staffing[0]?.sourceId);
+  const rec = await db.office.findUnique({ where: { key: OFFICE_KEYS.campusRec }, select: { id: true } });
+  const shaped = staffing.filter((t) => parseStaffingSourceId(t.sourceId)?.gap === "president" && t.assigneeType === "ADMINS" && t.kind === "APPROVAL");
   check(
-    staffing.length === 1 && gap?.gap === "president" && staffing[0].assigneeType === "ADMINS" && staffing[0].kind === "APPROVAL",
-    "One open WSUSA staffing task, for a club with no President (clubs that were already leaderless get none)",
-    staffing.map((t) => t.title).join(", "),
+    staffing.length === 2 && shaped.length === 2 && staffing.filter((t) => t.officeId === null).length === 1 && staffing.filter((t) => rec && t.officeId === rec.id).length === 1,
+    "Two open staffing tasks, each for a club with no President: one in WSUSA's queue, one in Campus Recreation's (clubs that were already leaderless get none)",
+    staffing.map((t) => `${t.title} (${t.officeId ? "Campus Rec" : "WSUSA"})`).join(", "),
   );
-  const sc = staffing[0]?.club;
-  if (gap && sc) {
+  for (const task of staffing) {
+    const sc = task.club;
+    if (!sc || !parseStaffingSourceId(task.sourceId)) continue;
     const [presidents, advisors, last] = await Promise.all([
       db.roleAssignment.count({ where: { clubId: sc.id, role: "PRESIDENT", endedAt: null } }),
       db.roleAssignment.count({ where: { clubId: sc.id, role: "ADVISOR", endedAt: null } }),
       db.roleAssignment.findFirst({ where: { clubId: sc.id, role: "PRESIDENT", endedAt: { not: null } }, orderBy: { endedAt: "desc" } }),
     ]);
     const ago = last?.endedAt ? (NOW.getTime() - last.endedAt.getTime()) / DAY : null;
-    check(sc.status === "APPROVED" && presidents === 0 && advisors >= 1 && staffing[0].title === `${sc.name} has no President`, `${sc.name} has no President now but still has an advisor, and the task says so`);
+    check(sc.status === "APPROVED" && presidents === 0 && advisors >= 1 && task.title === `${sc.name} has no President`, `${sc.name} has no President now but still has an advisor, and the task says so`);
     check(last?.endReason === "RESIGNED" && ago !== null && ago > 2 && ago < 5, "…its President stepped down a few days ago", ago === null ? "" : `${ago.toFixed(1)} days ago`);
     const told = await db.notification.count({ where: { kind: "staffing.gap", href: `/clubs/${sc.slug}/manage/org-chart` } });
     check(told >= 1, "…and its remaining leaders got the in-app notice", `${told} told`);
@@ -354,6 +371,81 @@ async function staffingChecks() {
   ];
   const off = pairs.filter(([, listedThere, open]) => listedThere !== open);
   check(off.length === 0, "WSUSA's queue matches each admin tool's own list", off.map(([l, a, b]) => `${l}: ${a} listed, ${b} open tasks`).join("; "));
+}
+
+/**
+ * Offices (lib/offices; steps/offices): WSUSA is the one umbrella, and nothing
+ * points at it by id (null means WSUSA); every club's office follows the
+ * founding rule (Sports scope → Campus Recreation, FSL category → Fraternity
+ * & Sorority Life, else WSUSA); every open admin task about a club sits with
+ * the office the routing rule picks; Rowan staffs Campus Recreation, whose
+ * queue holds the sport-club work (a club with no President, the Hiking and
+ * Outdoors Club's funding request) and nothing from another office; and
+ * Alex's default WSUSA queue (WSUSA plus offices nobody staffs) holds none of
+ * it, while "All offices" does.
+ */
+async function officeChecks() {
+  const offices = await db.office.findMany({ include: { members: { include: { user: { select: { email: true, kind: true, platformRole: true, status: true } } } } } });
+  const byKey = new Map(offices.map((o) => [o.key, o]));
+  const umbrella = offices.filter((o) => o.umbrella);
+  const wsusa = byKey.get(OFFICE_KEYS.umbrella);
+  const rec = byKey.get(OFFICE_KEYS.campusRec);
+  const fsl = byKey.get(OFFICE_KEYS.fsl);
+  check(offices.length === 3 && umbrella.length === 1 && umbrella[0].key === OFFICE_KEYS.umbrella, "Three offices, and WSUSA is the one umbrella", offices.map((o) => o.key).join(", "));
+  check(Boolean(wsusa?.decidesFunding && rec?.decidesFunding && fsl && !fsl.decidesFunding), "WSUSA and Campus Recreation decide funding; Fraternity & Sorority Life's clubs' funding goes to WSUSA");
+  check(Boolean(rec?.email === "campusrecreation@weber.edu" && rec.phone && fsl && fsl.email === null && fsl.hours === null), "Office contacts are only what weber.edu publishes (FSL has no office email or hours there)");
+  if (!wsusa || !rec || !fsl) return;
+
+  const [clubsAtUmbrella, tasksAtUmbrella, testsAtUmbrella, reqsAtUmbrella] = await Promise.all([
+    db.club.count({ where: { officeId: wsusa.id } }),
+    db.task.count({ where: { officeId: wsusa.id } }),
+    db.test.count({ where: { officeId: wsusa.id } }),
+    db.roleRequirement.count({ where: { officeId: wsusa.id } }),
+  ]);
+  check(clubsAtUmbrella + tasksAtUmbrella + testsAtUmbrella + reqsAtUmbrella === 0 && wsusa.members.length === 0, "Nothing points at the umbrella by id (WSUSA is null everywhere), and it has no OfficeMember rows", `${clubsAtUmbrella} clubs, ${tasksAtUmbrella} tasks, ${testsAtUmbrella} tests, ${reqsAtUmbrella} requirements, ${wsusa.members.length} staff`);
+
+  const clubs = await db.club.findMany({ select: { id: true, name: true, scope: true, category: true, officeId: true } });
+  const wrongOffice = clubs.filter((c) => c.officeId !== storedOfficeId(byKey.get(officeKeyForClub(c))));
+  check(wrongOffice.length === 0, "Every club's office follows the rule: Sports → Campus Recreation, FSL → Fraternity & Sorority Life, the rest WSUSA", wrongOffice.slice(0, 5).map((c) => c.name).join(", "));
+  const recClubs = clubs.filter((c) => c.officeId === rec.id);
+  const fslClubs = clubs.filter((c) => c.officeId === fsl.id);
+  check(recClubs.length >= 5 && recClubs.every((c) => c.scope === "SPORTS") && fslClubs.length >= 1 && fslClubs.every((c) => c.category === "FSL"), `Campus Recreation oversees the ${recClubs.length} sport clubs and Fraternity & Sorority Life the ${fslClubs.length} chapters`);
+
+  // Routing: every open admin task about a club is with the office lib/offices/rules routeAdminTask picks.
+  const open = await db.task.findMany({ where: { assigneeType: "ADMINS", status: "OPEN" }, select: { id: true, title: true, sourceType: true, sourceId: true, officeId: true, clubId: true } });
+  const officeOfClub = new Map(clubs.map((c) => [c.id, c.officeId]));
+  const funds = new Map(offices.map((o) => [o.id, o.decidesFunding]));
+  const misrouted = open.filter((t) => {
+    if (!t.clubId || t.sourceType === "testAttempt") return false;
+    const officeId = officeOfClub.get(t.clubId) ?? null;
+    return t.officeId !== routeAdminTask(t.sourceType, officeId ? { officeId, decidesFunding: funds.get(officeId) ?? false } : null);
+  });
+  check(misrouted.length === 0, "Every open admin task about a club is in the queue the routing rule picks (platform-wide work stays WSUSA's; funding goes where it's decided)", misrouted.slice(0, 5).map((t) => t.title).join("; "));
+
+  // Office staff: faculty or staff accounts that aren't platform admins. Rowan staffs Campus Recreation alone.
+  const staff = offices.flatMap((o) => o.members);
+  const rowan = await user("rowan");
+  check(staff.every((m) => m.user.kind === "FACULTY_STAFF" && m.user.email.endsWith("@weber.edu") && m.user.platformRole === "USER" && m.user.status === "ACTIVE"), "Office staff are active faculty and staff, not platform admins");
+  check(rec.members.some((m) => m.userId === rowan.id) && staff.filter((m) => m.userId === rowan.id).length === 1 && fsl.members.length === 0, "Rowan Ashby is on Campus Recreation's staff (only); Fraternity & Sorority Life has no staff yet");
+
+  // Rowan's queue: Campus Recreation's tasks, all about its own clubs, with the sport-club stories in it.
+  const recTasks = open.filter((t) => t.officeId === rec.id);
+  const recClubIds = new Set(recClubs.map((c) => c.id));
+  const recGap = recTasks.find((t) => t.sourceType === STAFFING_SOURCE);
+  const avalanche = await db.fundingRequest.findFirst({ where: { title: "Avalanche awareness course" }, select: { id: true } });
+  const recFunding = recTasks.find((t) => t.sourceType === "funding" && t.sourceId === avalanche?.id);
+  check(recTasks.every((t) => t.clubId && recClubIds.has(t.clubId)), "Everything in Campus Recreation's queue is about its own clubs", `${recTasks.length} tasks`);
+  check(Boolean(recGap && recFunding), "Rowan's queue holds a sport club's staffing gap and the Hiking and Outdoors Club's funding request", recTasks.map((t) => t.title).join("; "));
+
+  // Alex's default queue is WSUSA's plus any office nobody staffs (lib/analytics/admin queueScopeFor); "All offices" is every open task.
+  const unstaffed = offices.filter((o) => !o.umbrella && !o.members.some((m) => m.user.status === "ACTIVE")).map((o) => o.id);
+  const alexDefault = open.filter((t) => t.officeId === null || unstaffed.includes(t.officeId));
+  check(Boolean(recGap && recFunding) && !alexDefault.some((t) => t.id === recGap!.id || t.id === recFunding!.id), "Alex's default WSUSA queue holds none of Campus Recreation's work…");
+  check(Boolean(recGap && recFunding) && open.some((t) => t.id === recGap!.id) && open.some((t) => t.id === recFunding!.id), "…and All offices holds it");
+  const fslTasks = open.filter((t) => t.officeId === fsl.id);
+  check(fslTasks.every((t) => alexDefault.some((x) => x.id === t.id)), `Fraternity & Sorority Life has no staff, so its work falls back to Alex's default queue (${fslTasks.length} ${fslTasks.length === 1 ? "task" : "tasks"})`, fslTasks.map((t) => t.title).join("; "));
+  const reviewBombing = open.find((t) => t.sourceType === "reviewBombing");
+  check(Boolean(reviewBombing && reviewBombing.officeId === null), "Review moderation stays WSUSA's, even for a sport club", reviewBombing?.title ?? "none");
 }
 
 /**
@@ -631,15 +723,18 @@ async function fundingChecks() {
   const mcatStanding = mcatLine ? lineStanding(lineCents(mcatLine.quantity, mcatLine.unitCostCents) * mcatLine.occurrences, [{ status: mcat!.status, totalCents: mcatLine.totalCents, approvedCents: mcatLine.approvedCents }]) : null;
   check(Boolean(mcatStanding && !mcatStanding.lockedBy && mcatStanding.fundedCents > 0 && mcatStanding.openCents > 0), "Pre-Med's MCAT books line was funded in part: unlocked, with the rest open to ask another source for", mcatStanding ? `${mcatStanding.fundedCents} funded, ${mcatStanding.openCents} open` : "");
 
-  // Late work: urgent rows in the WSUSA queue, by lib/funding/review's rule (10 business days unless a sysadmin changed it).
-  const office = (await db.systemConfig.findUnique({ where: { key: "wsusa.office" } }))?.value as { reviewDays?: number } | null;
-  const reviewDays = Number(office?.reviewDays) || 10;
-  const late = requests.filter((r) => r.status === "SUBMITTED" && r.submittedAt && pastReviewTime(r.submittedAt, NOW, reviewDays));
-  const lateTasks = await db.task.findMany({ where: { sourceType: "funding", status: "OPEN", assigneeType: "ADMINS" }, select: { sourceId: true, createdAt: true } });
-  const lateByTask = lateTasks.filter((t) => pastReviewTime(t.createdAt, NOW, reviewDays)).map((t) => t.sourceId);
+  // Late work: urgent rows in the deciding office's queue, by lib/funding/review's rule, with each office's own review time (Office.reviewDays).
+  const offices = await db.office.findMany({ select: { id: true, key: true, umbrella: true, reviewDays: true } });
+  const daysFor = (officeId: string | null) => offices.find((o) => (officeId ? o.id === officeId : o.umbrella))?.reviewDays ?? 10;
+  const lateTasks = await db.task.findMany({ where: { sourceType: "funding", status: "OPEN", assigneeType: "ADMINS" }, select: { sourceId: true, createdAt: true, officeId: true } });
+  const deciding = new Map(lateTasks.map((t) => [t.sourceId, t.officeId]));
+  const late = requests.filter((r) => r.status === "SUBMITTED" && r.submittedAt && pastReviewTime(r.submittedAt, NOW, daysFor(deciding.get(r.id) ?? null)));
+  const lateByTask = lateTasks.filter((t) => pastReviewTime(t.createdAt, NOW, daysFor(t.officeId))).map((t) => t.sourceId);
+  const avalanche = late.find((r) => r.title === "Avalanche awareness course");
+  const recOffice = offices.find((o) => o.key === OFFICE_KEYS.campusRec);
   check(
-    late.some((r) => r.title === "Avalanche awareness course") && late.length === lateByTask.length && late.every((r) => lateByTask.includes(r.id)),
-    `The Hiking and Outdoors Club's request is past WSUSA's review time (${reviewDays} business days): an urgent row in the WSUSA queue`,
+    Boolean(avalanche) && Boolean(recOffice) && deciding.get(avalanche!.id) === recOffice!.id && late.length === lateByTask.length && late.every((r) => lateByTask.includes(r.id)),
+    `The Hiking and Outdoors Club's request is past Campus Recreation's review time (${daysFor(recOffice?.id ?? null)} business days): an urgent row in its queue, which decides its clubs' funding`,
     late.map((r) => `${r.club.name}: ${r.title}`).join("; "),
   );
   const lateInvoices = await db.invoice.findMany({ where: { status: "OPEN" }, select: { id: true, number: true, request: { select: { title: true } } } });
@@ -910,6 +1005,9 @@ async function main() {
   console.log("Staffing");
   await staffingChecks();
 
+  console.log("Offices");
+  await officeChecks();
+
   console.log("Renewals");
   await renewalChecks();
 
@@ -928,6 +1026,12 @@ async function main() {
 
   console.log("Service hours");
   await serviceChecks();
+
+  console.log("Office and single-permission requirements");
+  await requirementChecks();
+
+  console.log("Event reviews");
+  await eventReviewChecks();
 
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();
@@ -1115,6 +1219,109 @@ async function eventsPageChecks() {
   });
   const cookout = found.find((o) => o.event.title === "Trailhead Cookout & Easy Hike");
   check(Boolean(cookout), "Maya's Free food · This weekend (Mine) finds the Trailhead Cookout & Easy Hike, Hiking and Outdoors Club", found.map((o) => `${o.event.title} (${o.event.club?.name ?? "Weber State"}, ${fmtDate(o.startsAt, "EEE h:mm a")})`).join("; ") || "nothing");
+}
+
+/**
+ * Office and single-permission requirements (lib/authz/requirement-rules
+ * requirementReaches): WSUSA's Event Safety Training is about the Events
+ * permission only and is off until WSUSA turns it on (Priya already passed
+ * it). Campus Recreation's sport club safety forms are on, use its own form,
+ * and reach exactly the current officers of its clubs: one task each, in one
+ * of its clubs, and nobody past the grace period yet.
+ */
+async function requirementChecks() {
+  const safety = await db.roleRequirement.findFirst({ where: { name: "Event Safety Training" }, include: { test: { select: { status: true, audience: true, officeId: true } } } });
+  check(
+    Boolean(safety) && !safety!.active && safety!.gatesCapability === "events" && safety!.officeId === null && !safety!.appliesTo.includes("MEMBER"),
+    "Event Safety Training is WSUSA's, about the Events permission only, for leader roles, and off until WSUSA turns it on",
+    safety ? `${safety.appliesTo.join("/")}, ${safety.graceDays}-day grace` : "missing",
+  );
+  check(safety?.test?.status === "PUBLISHED" && safety.test.audience === "ROLE_REQUIREMENT" && safety.test.officeId === null, "…on a published WSUSA test");
+  const priya = await user("priya");
+  check((await db.testAttempt.count({ where: { testId: safety?.testId ?? "", userId: priya.id, passed: true } })) === 1, "…that Priya already passed this year, so turning it on leaves her Events alone");
+  check((await db.task.count({ where: { sourceType: "requirement", sourceId: { startsWith: `${safety?.id}:` } } })) === 0, "…and nobody has a task for it while it's off");
+
+  const rec = await db.office.findUnique({ where: { key: OFFICE_KEYS.campusRec }, select: { id: true } });
+  const forms = await db.roleRequirement.findFirst({ where: { name: "Sport club safety forms" }, include: { test: { select: { officeId: true, isForm: true, status: true } } } });
+  check(
+    Boolean(rec && forms) && forms!.active && forms!.officeId === rec!.id && forms!.gatesCapability === null && forms!.test?.officeId === rec!.id && forms!.test?.isForm === true,
+    "Campus Recreation's sport club safety forms: its own form, required of its clubs' officers, on",
+  );
+  // Who it reaches, as the sweep reads it: current officer, VP and President seats in Campus Recreation's approved clubs, active people.
+  const seats = await db.roleAssignment.findMany({
+    where: { endedAt: null, role: { in: ["OFFICER", "VP", "PRESIDENT"] }, club: { status: "APPROVED", officeId: rec?.id ?? "none" }, user: { status: "ACTIVE" } },
+    select: { userId: true },
+  });
+  const reached = new Set(seats.map((s) => s.userId));
+  const tasks = await db.task.findMany({
+    where: { sourceType: "requirement", sourceId: { startsWith: `${forms?.id}:` }, status: { in: ["OPEN", "DONE"] } },
+    select: { assigneeId: true, status: true, dueAt: true, required: true, club: { select: { officeId: true } } },
+  });
+  const outside = tasks.filter((t) => (t.status === "OPEN" && !reached.has(t.assigneeId!)) || t.club?.officeId !== rec?.id || !t.required);
+  const missing = [...reached].filter((u) => !tasks.some((t) => t.assigneeId === u));
+  check(
+    reached.size > 0 && outside.length === 0 && missing.length === 0,
+    "…it reaches only sport-club officers: every current one has its required task in a Campus Recreation club, and nobody else has an open one",
+    `${reached.size} officers, ${tasks.length} tasks, ${outside.length} outside, ${missing.length} missing`,
+  );
+  const wsusaOfficers = await db.task.count({ where: { sourceType: "requirement", sourceId: { startsWith: `${forms?.id}:` }, club: { officeId: null } } });
+  check(wsusaOfficers === 0, "…so no WSUSA club's officer owes it");
+  check(tasks.filter((t) => t.status === "OPEN").every((t) => t.dueAt && t.dueAt > NOW), "…and nobody's past its 30-day grace yet", `${tasks.filter((t) => t.status === "OPEN").length} still to sign`);
+}
+
+/**
+ * Risk-based review (lib/events/review): two events wait for their offices
+ * (Priya's school visit for WSUSA, a sport club's overnight trip for Campus
+ * Recreation), each with exactly one open review task in that office's
+ * queue; neither, nor the one sent back, shows in the public feed or to Maya
+ * (a member of the trip's club), by the very filter the feeds use; trips
+ * carry their details; an approved event is posted as usual; and nothing
+ * under review has attendance.
+ */
+async function eventReviewChecks() {
+  const rec = await db.office.findUnique({ where: { key: OFFICE_KEYS.campusRec }, select: { id: true } });
+  const waiting = await db.event.findMany({
+    where: { reviewStatus: { in: [...UNDER_REVIEW] } },
+    select: { id: true, title: true, reviewStatus: true, reviewNote: true, riskFlags: true, club: { select: { name: true, officeId: true } } },
+  });
+  const pending = waiting.filter((e) => e.reviewStatus === "PENDING");
+  check(
+    pending.length === 2 && pending.every((e) => e.riskFlags.length > 0) && pending.some((e) => e.club?.officeId === null) && pending.some((e) => e.club?.officeId === rec?.id),
+    "Two events wait for review, one in WSUSA's queue and one in Campus Recreation's",
+    pending.map((e) => `${e.title} (${e.club?.name}: ${e.riskFlags.join(", ")})`).join("; "),
+  );
+  const ids = waiting.map((e) => e.id);
+  const maya = await user("maya");
+  const [memberships, roles] = await Promise.all([
+    db.membership.findMany({ where: { userId: maya.id, status: "ACTIVE" }, select: { clubId: true } }),
+    db.roleAssignment.findMany({ where: { userId: maya.id, endedAt: null }, select: { clubId: true } }),
+  ]);
+  const mayaClubs = [...new Set([...memberships, ...roles].map((m) => m.clubId))];
+  const trip = await db.event.findFirst({ where: { id: { in: ids }, riskFlags: { has: "TRAVEL" }, club: { officeId: rec?.id ?? "none" } }, select: { clubId: true, visibility: true } });
+  const publicFeed = await db.event.count({ where: { AND: [eventVisibilityWhere({ signedIn: false, admin: false, memberClubIds: [] }), { id: { in: ids } }] } });
+  const mayaFeed = await db.event.count({ where: { AND: [eventVisibilityWhere({ signedIn: true, admin: false, memberClubIds: mayaClubs }), { id: { in: ids } }] } });
+  check(
+    publicFeed === 0 && mayaFeed === 0 && Boolean(trip && mayaClubs.includes(trip.clubId!) && trip.visibility === "MEMBERS"),
+    "Events under review stay off the public feed and Maya's, though the members-only trip is her club's",
+    `${publicFeed} public, ${mayaFeed} for Maya`,
+  );
+  const tasks = await db.task.findMany({ where: { sourceType: "eventReview", status: "OPEN" }, select: { sourceId: true, officeId: true, kind: true, assigneeType: true } });
+  const off = pending.filter((e) => {
+    const mine = tasks.filter((t) => t.sourceId === e.id);
+    return mine.length !== 1 || mine[0].kind !== "APPROVAL" || mine[0].assigneeType !== "ADMINS" || (mine[0].officeId ?? null) !== (e.club?.officeId ?? null);
+  });
+  check(off.length === 0 && tasks.length === pending.length, "…each with exactly one open review task, in its club's office's queue", off.map((e) => e.title).join(", "));
+  const back = waiting.filter((e) => e.reviewStatus === "CHANGES_REQUESTED");
+  check(back.length === 1 && Boolean(back[0].reviewNote) && !tasks.some((t) => t.sourceId === back[0].id), "One event was sent back with a note, waiting on its club", back.map((e) => `${e.title} (${e.club?.name})`).join(", "));
+  const trips = await db.event.findMany({ where: { riskFlags: { has: "TRAVEL" } }, select: { title: true, travel: true } });
+  const noTrip = trips.filter((t) => !readTravel(t.travel));
+  check(trips.length >= 2 && noTrip.length === 0, "Every event with Travel carries its trip (destination, dates, drivers)", noTrip.map((t) => t.title).join(", ") || `${trips.length} trips`);
+  const approved = await db.event.findFirst({ where: { title: "Girls in STEM Robot Day" }, select: { id: true, reviewStatus: true, riskFlags: true, reviewedById: true } });
+  const posted = approved ? await db.event.count({ where: { AND: [eventVisibilityWhere({ signedIn: false, admin: false, memberClubIds: [] }), { id: approved.id }] } }) : 0;
+  check(approved?.reviewStatus === "APPROVED" && approved.riskFlags.includes("MINORS") && Boolean(approved.reviewedById) && posted === 1, "Girls in STEM Robot Day was approved (people under 18) and is posted as usual");
+  const history = await db.event.count({ where: { reviewStatus: "APPROVED", riskFlags: { isEmpty: false }, startsAt: { lt: NOW } } });
+  check(history >= 3, "A few past events carry flags, reviewed before they happened", `${history} events`);
+  check((await db.attendance.count({ where: { occurrence: { event: { reviewStatus: { in: [...UNDER_REVIEW] } } } } })) === 0, "Nothing under review has attendance");
 }
 
 main().catch(async (e) => {

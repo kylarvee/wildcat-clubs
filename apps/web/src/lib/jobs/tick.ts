@@ -103,7 +103,7 @@ async function runSequence(now: Date): Promise<JobReport[]> {
     }),
   );
   reports.push(
-    // Requests in WSUSA review past the office's review time and invoices past due: one in-app reminder to the admins each (lib/jobs/funding).
+    // Requests past the deciding office's review time and invoices past due: one in-app reminder to that office's staff each (lib/jobs/funding).
     await job("Funding follow-ups", () => runFundingFollowUps(now)),
   );
   reports.push(

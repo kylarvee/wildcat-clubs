@@ -43,6 +43,8 @@ async function loadManagedTest(scope: TestScope, testId: string) {
     },
   });
   if (!test || test.clubId !== scope.clubId) notFound();
+  // An office's staff manage only their office's university tests (Test.officeId; null is WSUSA's).
+  if (scope.kind === "university" && scope.officeIds && !(test.officeId && scope.officeIds.includes(test.officeId))) notFound();
   return test;
 }
 

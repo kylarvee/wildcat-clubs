@@ -8,11 +8,13 @@ import { parseEventParams } from "@/lib/events/browse-params";
 
 /**
  * GET /api/calendar?scope=club&clubId=… | scope=me | scope=all | scope=university | scope=trainings
- *   &start=ISO&end=ISO  [&q=&type=&category=&food=1&stuff=1&service=1&online=1&following=1]
+ *   &start=ISO&end=ISO  [&q=&type=&category=&food=1&stuff=1&service=1&online=1&following=1]  [&review=1]
  * FullCalendar events for occurrences in range that the viewer may see, with
  * the Events page's filters when given (its Month view). `start`/`end` in the
  * response are campus wall clock (no offset); the real instants are in
- * extendedProps.startsAt/endsAt. See lib/events/feed.
+ * extendedProps.startsAt/endsAt. `review=1` (the Events Builder, club scope)
+ * also returns the club's events waiting for review, to its leaders and its
+ * office only (lib/authz/events). See lib/events/feed.
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
   const filter = await eventFilter(ctx, parseEventParams(q));
   // A search that matched nothing.
   if (!filter) return Response.json([], { headers: { "cache-control": "private, no-store" } });
-  const rows = await feedOccurrences(ctx, scope, { start, end }, { filter });
+  const rows = await feedOccurrences(ctx, scope, { start, end }, { filter, underReview: scope.scope === "club" && q.get("review") === "1" });
   const events = await toCalendarJson(ctx, scope, rows);
   return Response.json(events, { headers: { "cache-control": "private, no-store" } });
 }

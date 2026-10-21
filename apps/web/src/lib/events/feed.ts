@@ -14,6 +14,7 @@ import { richToText } from "@/lib/rich/sanitize";
 import { INSTITUTION } from "@/lib/institution";
 import { toDateInput, toWallClockIso, addDaysToDateInput } from "@/lib/events/wallclock";
 import type { CalendarEventJson } from "@/lib/events/types";
+import { underReview } from "@/lib/events/review";
 
 /**
  * Which occurrences a viewer sees on a calendar — the one query behind the
@@ -28,6 +29,9 @@ import type { CalendarEventJson } from "@/lib/events/types";
  *   trainings   university (admin) events only
  * Visibility always applies: PUBLIC anyone · UNIVERSITY signed in · MEMBERS
  * members and leaders of the host or an approved co-host (never in "university").
+ * Events waiting for their office's review (lib/events/review) are left out,
+ * unless a caller asks for them with `underReview` (the Events Builder's
+ * calendar): then the host club's leaders and its office see them too, marked.
  * The Events page's filters (lib/events/browse-where) ride along as `filter`.
  */
 
@@ -38,14 +42,16 @@ export type ViewerContext = {
   admin: boolean;
   /** Clubs where the viewer is an active member or holds a role. */
   memberClubIds: string[];
-  /** Clubs where the viewer holds a leadership role (for cost / manage checks). */
+  /** Clubs where the viewer holds a leadership role (for cost / manage checks, and their events under review). */
   leaderClubIds: string[];
+  /** Offices the viewer staffs (lib/offices): their clubs' events, as the visibility rule says. */
+  officeIds: string[];
   subscribedClubIds: string[];
   subscribeUniversity: boolean;
 };
 
 export async function viewerContext(actor: Actor | null): Promise<ViewerContext> {
-  if (!actor) return { actor: null, admin: false, memberClubIds: [], leaderClubIds: [], subscribedClubIds: [], subscribeUniversity: false };
+  if (!actor) return { actor: null, admin: false, memberClubIds: [], leaderClubIds: [], officeIds: [], subscribedClubIds: [], subscribeUniversity: false };
   const [memberships, roles, subs, user] = await Promise.all([
     db.membership.findMany({ where: { userId: actor.id, status: "ACTIVE" }, select: { clubId: true } }),
     db.roleAssignment.findMany({ where: { userId: actor.id, endedAt: null }, select: { clubId: true, role: true } }),
@@ -57,18 +63,25 @@ export async function viewerContext(actor: Actor | null): Promise<ViewerContext>
     admin: isAdmin(actor),
     memberClubIds: [...new Set([...memberships.map((m) => m.clubId), ...roles.map((r) => r.clubId)])],
     leaderClubIds: [...new Set(roles.filter((r) => r.role !== "MEMBER").map((r) => r.clubId))],
+    officeIds: actor.status === "DEACTIVATED" ? [] : [...(actor.officeIds ?? [])],
     subscribedClubIds: subs.map((s) => s.clubId),
     subscribeUniversity: user?.subscribeUniversity ?? true,
   };
 }
 
-/** Visibility comes from lib/authz/events; the university listing leaves members-only events out even for admins. */
-function visibilityWhere(ctx: ViewerContext, opts: { allowMembers: boolean; publicOnly?: boolean }): Prisma.EventWhereInput {
+/**
+ * Visibility comes from lib/authz/events; the university listing leaves members-only events out even for admins.
+ * Events under review only where asked for (the Events Builder), never in public or university listings.
+ */
+function visibilityWhere(ctx: ViewerContext, opts: { allowMembers: boolean; publicOnly?: boolean; underReview?: boolean }): Prisma.EventWhereInput {
   if (opts.publicOnly) return eventVisibilityWhere({ signedIn: false, admin: false, memberClubIds: [] });
   if (!opts.allowMembers) {
     return { AND: [eventVisibilityWhere({ signedIn: Boolean(ctx.actor), admin: false, memberClubIds: [] }, { includeMembersOnly: false })] };
   }
-  return eventVisibilityWhere({ signedIn: Boolean(ctx.actor), admin: ctx.admin, memberClubIds: ctx.memberClubIds });
+  return eventVisibilityWhere(
+    { signedIn: Boolean(ctx.actor), admin: ctx.admin, memberClubIds: ctx.memberClubIds, leaderClubIds: ctx.leaderClubIds, officeIds: ctx.officeIds },
+    { underReview: opts.underReview },
+  );
 }
 
 function scopeWhere(scope: FeedScope, ctx: ViewerContext): Prisma.EventWhereInput {
@@ -111,6 +124,7 @@ export const OCC_INCLUDE = {
       coverUrl: true,
       perks: true,
       serviceMinutes: true,
+      reviewStatus: true,
       updatedAt: true,
       clubId: true,
       club: { select: { id: true, name: true, slug: true, logoColor: true, logoUrl: true, status: true } },
@@ -122,12 +136,15 @@ export const OCC_INCLUDE = {
 
 export type FeedOccurrence = Prisma.EventOccurrenceGetPayload<{ include: typeof OCC_INCLUDE }>;
 
-/** The occurrence filter behind every feed: overlapping [start, end), in the scope, visible to the viewer, plus any extra event filter. */
+/**
+ * The occurrence filter behind every feed: overlapping [start, end), in the scope, visible to the viewer, plus any extra event filter.
+ * `underReview`: also events waiting for review that the viewer may see (the Events Builder's calendar).
+ */
 export function feedWhere(
   ctx: ViewerContext,
   scope: FeedScope,
   range: { start: Date; end: Date },
-  opts: { publicOnly?: boolean; filter?: Prisma.EventWhereInput } = {},
+  opts: { publicOnly?: boolean; filter?: Prisma.EventWhereInput; underReview?: boolean } = {},
 ): Prisma.EventOccurrenceWhereInput {
   return {
     startsAt: { lt: range.end },
@@ -138,7 +155,7 @@ export function feedWhere(
         // Club events show while the club is active (or as history once retired).
         { OR: [{ clubId: null }, { club: { status: { in: ["APPROVED", "RETIRED"] } } }] },
         scopeWhere(scope, ctx),
-        visibilityWhere(ctx, { allowMembers: scope.scope !== "university", publicOnly: opts.publicOnly }),
+        visibilityWhere(ctx, { allowMembers: scope.scope !== "university", publicOnly: opts.publicOnly, underReview: opts.underReview }),
         ...(opts.filter ? [opts.filter] : []),
       ],
     },
@@ -150,7 +167,7 @@ export async function feedOccurrences(
   ctx: ViewerContext,
   scope: FeedScope,
   range: { start: Date; end: Date },
-  opts: { publicOnly?: boolean; take?: number; filter?: Prisma.EventWhereInput } = {},
+  opts: { publicOnly?: boolean; take?: number; filter?: Prisma.EventWhereInput; underReview?: boolean } = {},
 ): Promise<FeedOccurrence[]> {
   if (scope.scope === "me" && !ctx.actor) return [];
   const where = feedWhere(ctx, scope, range, opts);
@@ -190,6 +207,8 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
     const e = o.event;
     const color = e.club?.logoColor ?? UNIVERSITY_COLOR;
     const cancelled = o.status === "CANCELLED" || e.status === "CANCELLED";
+    // Waiting for its office (only its leaders and the office get it here): shown, marked, posted nowhere else.
+    const review = underReview(e) ? (e.reviewStatus as "PENDING" | "CHANGES_REQUESTED") : null;
     const canManage = e.clubId ? powers.manage.has(e.clubId) : powers.university;
     const summary = summaries.get(e.id);
     const hostedHere = scope.scope === "club" ? e.clubId === scope.clubId : true;
@@ -208,7 +227,7 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
       // Only upcoming one-time events of clubs you manage can be dragged; repeating ones open
       // the editor, and past ones are history.
       editable: canManage && hostedHere && e.recurrence === "NONE" && !cancelled && o.endsAt > now,
-      classNames: cancelled ? ["wc-cancelled"] : [],
+      classNames: [...(cancelled ? ["wc-cancelled"] : []), ...(review ? ["wc-review"] : [])],
       extendedProps: {
         eventId: e.id,
         occurrenceId: o.id,
@@ -228,6 +247,7 @@ export async function toCalendarJson(ctx: ViewerContext, scope: FeedScope, rows:
         kind: e.kind,
         visibility: e.visibility,
         cancelled,
+        review,
         note: o.note,
         startsAt: o.startsAt.toISOString(),
         endsAt: o.endsAt.toISOString(),

@@ -24,11 +24,11 @@ export async function OrgChart({ clubId, className, showAdvisors = true }: { clu
   const [data, viewer, club] = await Promise.all([
     orgChartData(clubId),
     getCurrentUser(),
-    db.club.findUnique({ where: { id: clubId }, select: { approvedAt: true, status: true } }),
+    db.club.findUnique({ where: { id: clubId }, select: { approvedAt: true, status: true, officeId: true } }),
   ]);
   if (!club) return null;
   const access = viewer ? await getClubAccess(viewer, clubId) : null;
-  const training = access?.isLeader && club.status === "APPROVED" ? await trainingStatusFor(data.seats.flatMap((s) => s.holders), club.approvedAt) : new Map();
+  const training = access?.isLeader && club.status === "APPROVED" ? await trainingStatusFor(data.seats.flatMap((s) => s.holders), club.approvedAt, club.officeId) : new Map();
 
   const tiers = TIERS.map((t) => ({ ...t, seats: data.seats.filter((s) => t.roles.includes(s.role)) })).filter((t) => t.seats.length > 0);
 

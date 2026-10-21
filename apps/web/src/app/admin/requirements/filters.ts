@@ -38,7 +38,7 @@ export function applyFilter(rows: ComplianceRow[], f: ComplianceFilter): Complia
     if (q && !r.person.name.toLowerCase().includes(q) && !r.person.email.toLowerCase().includes(q)) return false;
     const cells = f.req ? (r.cells[f.req] ? [r.cells[f.req]] : []) : Object.values(r.cells);
     if (f.req && cells.length === 0) return false;
-    if (f.state === "paused") return r.paused;
+    if (f.state === "paused") return r.paused || Boolean(r.pausedCapabilities?.length);
     if (f.state === "met") return cells.length > 0 && cells.every((c) => c.state === "met");
     if (f.state) return cells.some((c) => c.state === f.state);
     return true;

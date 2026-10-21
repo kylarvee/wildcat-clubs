@@ -11,6 +11,7 @@ import { getConfig, type Config } from "@/lib/config";
 import { logActivity } from "@/lib/lake/activity";
 import { DomainError, assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { joinClub } from "@/lib/domain/memberships";
+import { underReview, UNDER_REVIEW } from "@/lib/events/review";
 import { notify } from "@/lib/domain/notify";
 import { reopenRequirementTasks, requirementSourceId } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
@@ -74,6 +75,9 @@ const CheckInInput = z.object({
 });
 
 const codeNotFound = (code: string) => new DomainError("NOT_FOUND", codeNotFoundMessage(code));
+
+/** An event waiting for its club's office to review it isn't posted, so nobody checks in yet (lib/events/review). */
+const NOT_POSTED = "This event isn't posted yet: its club's office is still reviewing it. Check-in opens once it's approved.";
 
 function hostClubId(o: OccurrenceRow) {
   return o.event.clubId;
@@ -207,6 +211,7 @@ export async function checkinPreview(actor: Actor | null, rawCode: string, token
   if (!norm.ok) return { found: false, message: norm.error };
   const occ = await occurrenceByCode(norm.code);
   if (!occ) return { found: false, message: codeNotFoundMessage(norm.code) };
+  if (underReview(occ.event)) return { found: false, message: NOT_POSTED };
 
   const cfg = await getConfig();
   const now = new Date();
@@ -301,6 +306,8 @@ export async function checkIn(actor: Actor | null, input: unknown): Promise<Chec
   const existing = await db.attendance.findUnique({ where: { occurrenceId_userId: { occurrenceId: occ.id, userId: actor.id } } });
   if (existing) return already(existing);
 
+  // No check-in (or the membership a check-in files) while the event waits for review.
+  if (underReview(occ.event)) throw invalid(NOT_POSTED);
   if (occurrence.cancelled) throw invalid("This event was cancelled, so check-in is closed.");
   if (occ.event.club && occ.event.club.status !== "APPROVED") throw invalid("This club isn't running events right now.");
   if (actor.status !== "ACTIVE") throw forbidden("Alumni accounts can't check themselves in. Ask a club leader to add you.");
@@ -383,6 +390,7 @@ export async function addManual(actor: Actor | null, occurrenceId: string, userI
   const now = new Date();
   const occurrence = toOccurrenceSummary(occ, cfg, now);
   if (occurrence.cancelled) throw invalid("This event was cancelled.");
+  if (underReview(occ.event)) throw invalid("This event is waiting for its office's review, so nobody can be checked in yet.");
   if (occurrence.windowState === "NOT_OPEN") throw invalid(`You can add people once check-in opens — ${whenLabel(occurrence.opensAt, now)}.`);
 
   const person = await db.user.findUnique({ where: { id: input.userId }, select: { id: true, name: true, status: true } });
@@ -495,6 +503,7 @@ export async function liveOccurrencesForUserId(userId: string, opts: { clubId?: 
       attendances: { none: { userId } },
       event: {
         status: "SCHEDULED",
+        reviewStatus: { notIn: [...UNDER_REVIEW] },
         // The one-tap prompt hands over the code, so it's only for online events (rules.allowsTapCheckIn).
         locationType: "VIRTUAL",
         OR: [{ clubId: { in: scope }, club: { status: "APPROVED" } }, { cohosts: { some: { clubId: { in: scope }, status: "APPROVED" } } }],
@@ -525,7 +534,7 @@ export async function liveOccurrencesForClub(clubId: string): Promise<(LiveOccur
   const cfg = await getConfig();
   const now = new Date();
   const rows = await db.eventOccurrence.findMany({
-    where: { ...liveWindowWhere(cfg, now), event: { status: "SCHEDULED", OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }] } },
+    where: { ...liveWindowWhere(cfg, now), event: { status: "SCHEDULED", reviewStatus: { notIn: [...UNDER_REVIEW] }, OR: [{ clubId }, { cohosts: { some: { clubId, status: "APPROVED" } } }] } },
     include: { ...occurrenceInclude, _count: { select: { attendances: true } } },
     orderBy: { startsAt: "asc" },
     take: 10,
@@ -559,6 +568,7 @@ export async function currentQrToken(actor: Actor | null, occurrenceId: string):
   const now = Date.now();
   const occurrence = toOccurrenceSummary(occ, cfg, new Date(now));
   if (occurrence.cancelled) throw invalid("This event was cancelled.");
+  if (underReview(occ.event)) throw invalid(NOT_POSTED);
   const rotateSeconds = cfg["checkin.qrRotateSeconds"];
   const w = tokenWindow(now, rotateSeconds);
   const token = checkinToken(occ.checkinSecret, w);

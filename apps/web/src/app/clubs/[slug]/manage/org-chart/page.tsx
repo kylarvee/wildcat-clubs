@@ -49,7 +49,7 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
     selectionSetup(club.id),
   ]);
   const holders = data.seats.flatMap((s) => s.holders);
-  const training = club.status === "APPROVED" ? await trainingStatusFor(holders, club.approvedAt) : new Map<string, "pending" | "overdue">();
+  const training = club.status === "APPROVED" ? await trainingStatusFor(holders, club.approvedAt, club.officeId) : new Map<string, "pending" | "overdue">();
   // A requirement that's a form reads "Fill out", not "Pass".
   const formIds = new Set(
     requirements.length ? (await db.roleRequirement.findMany({ where: { id: { in: requirements.map((r) => r.id) }, test: { isForm: true } }, select: { id: true } })).map((r) => r.id) : [],

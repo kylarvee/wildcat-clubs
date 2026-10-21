@@ -5,6 +5,7 @@ import { can } from "@/lib/authz";
 import { featuredClubs, upcomingPublicEvents } from "@/lib/clubs/queries";
 import { getConfig } from "@/lib/config";
 import { announcementFeed } from "@/lib/domain/announcements";
+import { umbrellaOffice } from "@/lib/offices";
 import { AnnouncementsFeed } from "@/components/announcements/AnnouncementsFeed";
 import { platformSummary } from "@/lib/metrics";
 import { ClubCard } from "@/components/clubs/ClubCard";
@@ -13,13 +14,15 @@ import { Audiences, hasNumbers, LandingHero, LandingSection, Lifecycle, LiveNumb
 
 /** The public front door: what Wildcat Clubs is, live numbers, clubs and events worth a look. */
 export default async function Home() {
-  const [user, summary, clubs, events, cfg, news] = await Promise.all([
+  const [user, summary, clubs, events, cfg, news, wsusa] = await Promise.all([
     getCurrentUser(),
     platformSummary(),
     featuredClubs(6),
     upcomingPublicEvents({ days: 14, limit: 6 }),
     getConfig(),
     announcementFeed(null, 1),
+    // Most new clubs go to WSUSA, the umbrella office (club sports and Greek chapters go to their own offices).
+    umbrellaOffice(),
   ]);
   const hasNews = news.length > 0;
   const startHref = user ? "/clubs/new" : `/login?next=${encodeURIComponent("/clubs/new")}`;
@@ -87,7 +90,7 @@ export default async function Home() {
 
       <NetworkPreview />
 
-      {canStart ? <StartClubCta href={startHref} reviewDays={cfg["wsusa.office"].reviewDays} office={cfg["wsusa.office"].name} /> : null}
+      {canStart ? <StartClubCta href={startHref} reviewDays={wsusa.reviewDays} office={wsusa.name} /> : null}
     </>
   );
 }

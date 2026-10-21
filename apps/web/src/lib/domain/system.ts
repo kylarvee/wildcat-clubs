@@ -55,6 +55,8 @@ export const CONFIG_SCHEMAS: { [K in ConfigKey]: z.ZodType<Config[K]> } = {
   "checkin.closesMinutesAfter": int(0, 240, "minutes"),
   "checkin.qrRotateSeconds": int(10, 300, "seconds"),
   "renewal.dueDays": int(1, 180, "days"),
+  "events.riskReview": z.boolean(),
+  "events.largeCrowd": int(10, 10_000, "people"),
   "ai.assistantEnabled": z.boolean(),
   "ai.gradingEnabled": z.boolean(),
   "integrations.googleCalendar": z.boolean(),
@@ -62,18 +64,6 @@ export const CONFIG_SCHEMAS: { [K in ConfigKey]: z.ZodType<Config[K]> } = {
   "integrations.googleChat": z.boolean(),
   "integrations.email": z.boolean(),
   "integrations.push": z.boolean(),
-  "wsusa.office": z.object({
-    name: z.string().trim().min(2, "Enter the office name.").max(120, "Keep the office name under 120 characters."),
-    location: z.string().trim().max(200, "Keep the location under 200 characters."),
-    hours: z.string().trim().max(120, "Keep the hours under 120 characters."),
-    email: z.union([z.literal(""), email]),
-    phone: z
-      .string()
-      .trim()
-      .max(40, "Keep the phone number under 40 characters.")
-      .refine((v) => v === "" || /^[+\d][\d\s().\-x]{6,}$/i.test(v), "Enter a phone number like 801-626-0000, or leave it blank."),
-    reviewDays: int(1, 90, "days"),
-  }) as unknown as z.ZodType<Config["wsusa.office"]>,
   "wsusa.reviewers": z
     .array(
       z.object({
@@ -144,7 +134,7 @@ export async function setConfigs(actor: Actor | null, values: Partial<Record<Con
 
 /**
  * Records that a sysadmin checked settings that still hold their shipped
- * values (the WSUSA contacts ship as placeholders). Saving the current value
+ * values (WSUSA's reviewers ship as placeholders). Saving the current value
  * marks them as confirmed, so the placeholder warning goes away.
  */
 export async function confirmConfig(actor: Actor | null, keys: unknown) {

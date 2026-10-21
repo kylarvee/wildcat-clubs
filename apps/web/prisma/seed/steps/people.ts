@@ -76,7 +76,12 @@ const PERSONA_SPECS: Record<string, PersonaSpec> = {
   nathan: { gender: "MALE", dept: "Botany", jobTitle: "Professor of Botany", pronouns: "he/him", createdDaysAgo: 1400 },
   alex: { gender: "NON_BINARY", jobTitle: "Clubs & Organizations Coordinator, WSUSA", role: "ADMIN", pronouns: "they/them", createdDaysAgo: 900 },
   sydney: { gender: "FEMALE", jobTitle: "Platform Administrator, Information Technology Division", role: "SYSADMIN", pronouns: "she/her", createdDaysAgo: 950 },
+  // Office staff (lib/offices): built after everyone else (officePersonas), so they draw nothing from the shared RNG.
+  rowan: { gender: "NON_BINARY", jobTitle: "Sport Clubs Coordinator, Campus Recreation", pronouns: "they/them", createdDaysAgo: 700 },
 };
+
+/** Personas who staff an office (steps/offices), by office key. Built last; see officePersonas. */
+const OFFICE_PERSONAS: Record<string, string> = { rowan: "campus-rec" };
 
 const EXTRA_ADMINS: { name: string; gender: Gender; jobTitle: string; createdAt: Date }[] = [
   { name: "Jordan Whitaker", gender: "MALE", jobTitle: "Assistant Director, Student Involvement & Leadership (WSUSA)", createdAt: new Date("2022-08-01T16:00:00Z") },
@@ -182,6 +187,7 @@ export function buildPeople(ctx: Ctx): UserRows {
 
   // ─── Personas ──────────────────────────────────────────────────────────────
   for (const persona of PERSONAS) {
+    if (OFFICE_PERSONAS[persona.key]) continue;
     const spec = PERSONA_SPECS[persona.key] ?? {};
     const kind = emailKind(persona.email);
     if (!kind) throw new Error(`Persona ${persona.key} has a non-university email`);
@@ -377,8 +383,40 @@ export function buildPeople(ctx: Ctx): UserRows {
       }
     }
   }
+  officePersonas(ctx, add, handleFor);
   buildMemberDetails(ctx);
   return rows;
+}
+
+/**
+ * Office staff personas (Rowan, Campus Recreation): faculty/staff accounts
+ * on their office's staff (an OfficeMember row, added by Alex). They're built
+ * after every generated person, with fixed values instead of RNG draws, so
+ * adding them leaves the rest of the seed exactly as it was.
+ */
+function officePersonas(ctx: Ctx, add: (p: Person, extra: Partial<Prisma.UserCreateManyInput>) => void, handleFor: (email: string) => string) {
+  const { NOW } = ctx;
+  for (const persona of PERSONAS) {
+    const officeKey = OFFICE_PERSONAS[persona.key];
+    if (!officeKey) continue;
+    const spec = PERSONA_SPECS[persona.key] ?? {};
+    const kind = emailKind(persona.email);
+    if (kind !== "FACULTY_STAFF") throw new Error(`Office persona ${persona.key} needs a faculty/staff (@weber.edu) email`);
+    const office = ctx.offices.get(officeKey);
+    if (!office || office.umbrella) throw new Error(`Office persona ${persona.key}: no office ${officeKey}`);
+    const [first, ...rest] = persona.name.split(" ");
+    const createdAt = addDays(NOW, -(spec.createdDaysAgo ?? 365));
+    const p: Person = {
+      id: ctx.id(), name: persona.name, first, last: rest.join(" "), email: persona.email, handle: handleFor(persona.email), kind, status: "ACTIVE",
+      gender: spec.gender ?? null, persona: persona.key, collegeKey: null, majorId: null, majorName: null, departmentId: null, departmentName: null,
+      jobTitle: spec.jobTitle ?? null, enrollStart: createdAt, gradDate: null, propensity: 1, createdAt,
+    };
+    add(p, { platformRole: "USER", pronouns: spec.pronouns ?? null, headline: spec.jobTitle ?? null, lastSeenAt: addDays(NOW, -0.2) });
+    // Not in ctx.staff: nothing should pick them as a club advisor.
+    ctx.persona.set(persona.key, p);
+    // Alex (WSUSA) put them on the office's staff in Admin → Offices.
+    ctx.officeStaff.push({ officeId: office.id, userId: p.id, addedAt: addDays(createdAt, 2), addedById: ctx.persona.get("alex")?.id ?? null });
+  }
 }
 
 // ─── Member details ──────────────────────────────────────────────────────────

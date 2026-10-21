@@ -11,7 +11,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Container, EmptyState, PageHeader, Section } from "@/components/ui/layout";
 import { FormBadge, ResultBadge } from "@/components/tests/badges";
-import { REQUIRED_LABEL } from "@/components/tasks/labels";
+import { requiredLabel } from "@/components/tasks/labels";
 
 export const metadata: Metadata = { title: "Tests & forms" };
 
@@ -93,7 +93,7 @@ function TodoCard({ t, now }: { t: MyTestItem; now: Date }) {
           {t.isForm ? <FormBadge /> : null}
           {t.required ? (
             <Badge tone="danger" className="font-semibold">
-              {REQUIRED_LABEL}
+              {requiredLabel(t.requiredBy)}
             </Badge>
           ) : null}
         </p>

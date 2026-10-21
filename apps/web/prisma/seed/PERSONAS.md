@@ -36,6 +36,7 @@ permissions are paused.
 | Prof. Nathan Reed | nathan.reed@weber.edu | Invited advisor | Accepting an advisor invitation |
 | Alex Morgan | alex.morgan@weber.edu | Administrator (WSUSA) | Every admin queue |
 | Sydney Park | sydney.park@weber.edu | System administrator | System settings, AI and integration switches, outbox |
+| Rowan Ashby | rowan.ashby@weber.edu | Campus Recreation staff | The admin console for one office: sport clubs only |
 
 Check-in codes are fixed: **HERE26** (live now), **LATER7** (later today),
 **BUILD8** (RC Wrecker Bots Club, live now). Type them at `/c/<code>` or in the app.
@@ -256,6 +257,16 @@ hasn't signed the *Club Member Agreements* form.
    waiting to be applied. As VP she can't apply a presidential result; SWE's
    president (graduating in December), its advisor or an admin can.
 4. SWE's *Girls in STEM Robot Day supplies* funding request is submitted.
+   - **Sent back:** WSUSA asked for changes to SWE's *Bake Sale for SWE
+     Scholarships* (it collects money): its editor shows Alex's note (who
+     handles the cash box, and where the money goes). Add both to the
+     description and save: that sends it back to WSUSA. Until it's approved
+     it stays hidden.
+   - **One permission paused:** she hasn't taken *Event Safety Training*. If
+     Alex turns it on, it's already past its 14-day grace for her, so only
+     **Events** pauses in SWE: the Events Builder says *Events is paused until
+     you finish Event Safety Training*, and everything else (Members, Budget,
+     the org chart) keeps working. Passing the test brings Events back.
 5. Messages: a DM thread with Priya about co-hosting.
 6. **Renewal:** SWE re-registered for 2026–27 in mid-September, and Vanessa
    did it (a VP can renew). The Overview reads *Re-registered 2026–27 · by
@@ -297,7 +308,21 @@ The club runs its own *Event Safety Quiz*.
    days ago: the card under the chart shows the request as **Requested**, with
    **Withdraw request**.
 5. **Events:** upcoming co-hosted *Wrecker Bots × CSWS: Intro to Embedded
-   Programming* and *Girls in STEM Robot Day*.
+   Programming* and *Girls in STEM Robot Day* (it involves people under 18,
+   so WSUSA reviewed and approved it before it was posted).
+   - **Waiting for review:** *Robot Demo Day at Roy Junior High* (about ten
+     days out) involves people under 18 and travel, so it waits for WSUSA (in
+     Alex's **Event reviews**). In the Events Builder it's dashed and its
+     editor says *Waiting for WSUSA's review*; its page says the same, with no
+     **Add to calendar** or check-in. Nobody else sees it: Maya won't find it
+     on the Events page, and no notices or reminders go out.
+   - **Try it:** **New event** → under **Does this event involve…** check
+     **Travel or an overnight stay**: the trip's fields open right there
+     (where to, leaving and coming back, overnight, drivers picked from the
+     club or typed, notes). Save and the toast says it went to WSUSA for
+     review. With nothing checked, it posts at once, as before.
+   - **Event Safety Training** (Admin → Requirements, off): she passed it
+     already, so turning it on leaves her Events alone.
    - **Try it:** open a *Build Night* in the Events Builder. Under **Basics**,
      pick **Free food** or **Free stuff**. Under **Cover image**, **Choose from
      club files** (Flyers & Photos has public flyers) or **Upload an image**;
@@ -440,14 +465,16 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
   (*Member vote*, a change); bylaws don't decide who can join, so approving
   them leaves joining as it is. Approving tells AAT's members and WSUSA that
   it now uses Member vote to fill seats.
-- **Funding:** five requests in WSUSA review (Wildcat Investors' *Fall speaker
-  series* and *Club banner*, SWE, NSNA, and the Hiking and Outdoors Club's
-  *Avalanche awareness course*, past WSUSA's review time of 10 business days)
-  and three open invoices (RC Wrecker Bots Club, Wildcat Investors, and Black
-  Student Union (BSU)'s, which is past due). The late request and the late
-  invoice are their own urgent rows in the WSUSA queue. Run the scheduled jobs
-  (System → Scheduled jobs → Run now, as Sydney) and each admin's bell gets
-  one reminder about each; running them again sends nothing new.
+- **Funding:** four requests in WSUSA's review (Wildcat Investors' *Fall
+  speaker series* and *Club banner*, SWE and NSNA) and three open invoices (RC
+  Wrecker Bots Club, Wildcat Investors, and Black Student Union (BSU)'s, which
+  is past due and its own urgent row in the WSUSA queue). The Hiking and
+  Outdoors Club's *Avalanche awareness course* is a sport club's, so Campus
+  Recreation decides it (see Rowan): it's past review time, and Alex sees it
+  under **All offices** or **Campus Rec**, not in WSUSA's default queue. Run
+  the scheduled jobs (System → Scheduled jobs → Run now, as Sydney) and the
+  deciding office's staff get one reminder about each late one; running them
+  again sends nothing new.
   - **Try it:** open *Fall speaker series* → **Approve part**. Every line
     starts at its full amount; untick one (it reads *Not funded · unlocks for
     another source*), keep or change **Funded by** (it starts at the club's
@@ -471,6 +498,24 @@ about a real club.
 - **WSUSA requirements:** one officer is past the grace period, so their
   permissions are paused (the seed prints who). Their club workspace banner,
   *Permissions paused*, names what's overdue and links to it.
+- **Event reviews** (`/admin/events`): Priya's *Robot Demo Day at Roy Junior
+  High* waits here, with what it involves, the trip (where, when, drivers,
+  notes), the date and place, and who to contact. **Approve and post** and it
+  shows up for everyone at once (Events page, calendars, Google once that's
+  on), and Priya and the club's event planners hear. Or write a note and
+  **Ask for changes**. SWE's bake sale is under **Sent back**. Campus
+  Recreation's Moab trip isn't in WSUSA's queue (it's Rowan's), though Alex
+  can open it from the Overview's **Campus Rec** filter.
+- **Requirements, by office:** each card says whose it is. *Event Safety
+  Training* is WSUSA's, **Only people with Events**, and off: turn it on and
+  every leader holding Events who hasn't passed it gets a task, already past
+  its grace (try Vanessa: only her Events pauses). Oscar, a Treasurer without
+  Events, isn't asked. Campus Recreation's *Sport club safety forms* reaches
+  only its sport clubs' officers. **New requirement** has **Whose
+  requirement** and **Only people with one permission**.
+- **Event review settings** (System settings → Event review, as Sydney):
+  turn review off and new events post right away (their answers are still
+  saved); *Large crowd* sets the "More than 100 people" threshold.
 - **Ambassador programs** (Club approvals → Ambassador programs): only admins
   start a program and choose its advisor ("Change" appoints someone else and
   ends the previous advisor's role). In **EAST Ambassadors → Ambassador
@@ -492,10 +537,23 @@ about a real club.
   waited nine days: *Join requests waiting at Kappa Omega Eta*, opened by the
   "Club staffing" scheduled job. Deciding the request on the club's Members
   page, or giving someone there the Members permission, closes it on the
-  job's next run.
-- **One queue:** the dashboard's WSUSA queue, the Overview's *Waiting on
-  WSUSA* and the counts in the admin side nav (Club approvals, Funding, Tests,
-  Reports, Review moderation) all count the same open tasks, so they agree.
+  job's next run. Kappa Omega Eta is a Fraternity & Sorority Life chapter, and
+  FSL has no staff yet, so its work falls back to WSUSA's queue: nothing waits
+  unseen.
+- **One queue, by office:** the dashboard's WSUSA queue, the Overview's
+  *Waiting on WSUSA* and the counts in the admin side nav (Club approvals,
+  Event reviews, Funding, Tests, Reports, Review moderation) all count the
+  same open tasks, so they agree. WSUSA's queue is the default; the
+  Overview's filter switches it to **Campus Rec**, **FSL** or **All offices**
+  (Campus Rec's sport-club staffing gap and funding request show only there).
+- **Offices** (Admin → Offices): WSUSA, Campus Recreation (club sports, decides
+  their funding) and Fraternity & Sorority Life (Greek chapters, funding goes
+  to WSUSA), each with its contacts, review time, staff and club count. Their
+  details start from weber.edu's public pages, so the page asks to confirm
+  them (save each office once). Add or remove staff by @weber.edu email.
+  **Move a club:** open any club in Club approvals → *Overseen by* → **Move
+  club**; its open admin tasks move with it (reports and review moderation
+  stay WSUSA's) and its leaders are told.
 - **Daily digest:** instead of an email for each club submission, funding
   request, custom document or flagged review, admins get one email each
   morning (the first *Send queued messages* run after 7 AM): what's waiting on
@@ -552,6 +610,39 @@ sends requirement reminders a week and a day before they're due. Running it
 again sends nothing new. To see one, have a leader create or move an event to
 start in about an hour first; the outbox shows the emails (requirements only)
 and pushes (none until a phone registers).
+
+## Rowan Ashby — Campus Recreation staff
+
+Rowan is on Campus Recreation's staff (Admin → Offices, added by Alex), not a
+platform admin, so **Admin** is the same console scoped to the sport clubs
+Campus Rec oversees: their queue (dashboard and Overview), Club approvals,
+Club analytics, Event reviews, Funding (Campus Rec decides its clubs'
+funding), Tests (its own tests and forms) and Requirements. Nothing from
+WSUSA's or FSL's clubs shows anywhere, and People, Policies, Directory,
+Reports, Review moderation, Announcements, Trainings, Offices and System are
+404.
+
+**Waiting for Rowan:**
+- **A club missing a leader:** Cornhole Club's only President stepped down two
+  days ago, so Campus Rec has *Cornhole Club has no President*, and Rowan got
+  the notice in-app and by email. Assign a President in its org chart and the
+  task closes.
+- **Funding:** the Hiking and Outdoors Club's *Avalanche awareness course*,
+  past Campus Rec's review time: an urgent row. Decide it like any request.
+- **Renewals** (Club approvals → Renewals): the sport clubs that haven't
+  re-registered for 2026–27.
+- **Event reviews:** the Hiking and Outdoors Club's *Moab Canyoneering
+  Weekend* (travel, overnight, two Campus Rec vans) waits for Campus Rec,
+  members only and still hidden from its members. Approve it, or ask for
+  changes with a note. Priya's school visit is WSUSA's, so it isn't here.
+- **Requirements:** Campus Rec's own *Sport club safety forms* (a Test Tool
+  form Campus Rec owns), required of its sport clubs' officers only: about a
+  third haven't signed, all still inside the 30-day grace. New requirements
+  here are always Campus Rec's and use its own tests and forms.
+
+Sport clubs' pages say **Overseen by Campus Recreation** with its email and
+phone; Rowan's club workspace header reads *Viewing as Campus Recreation
+staff*. The daily digest covers Campus Rec's queue only.
 
 ---
 

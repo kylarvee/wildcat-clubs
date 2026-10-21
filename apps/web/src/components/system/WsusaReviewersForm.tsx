@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { ArrowDown, ArrowUp, BadgeCheck, Loader2, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,31 +12,27 @@ import { toast } from "@/components/ui/misc";
 import { SectionFooter } from "@/components/system/RulesSection";
 import { confirmConfigAction, saveConfigAction } from "@/app/system/actions";
 
-export type Office = { name: string; location: string; hours: string; email: string; phone: string; reviewDays: number };
 export type Reviewer = { name: string; title: string; email: string };
 
-type OfficeDraft = Omit<Office, "reviewDays"> & { reviewDays: string };
 type ReviewerDraft = Reviewer & { rid: number };
 
 const MAX_REVIEWERS = 12;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE = /^[+\d][\d\s().\-x]{6,}$/i;
 
-const toDraft = (o: Office): OfficeDraft => ({ ...o, reviewDays: String(o.reviewDays) });
 let nextRid = 1;
 const withIds = (list: Reviewer[]): ReviewerDraft[] => list.map((r) => ({ ...r, rid: nextRid++ }));
 const strip = (list: ReviewerDraft[]) => list.map(({ name, title, email }) => ({ name: name.trim(), title: title.trim(), email: email.trim() }));
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * The WSUSA office and reviewers founders and funding requesters see. They
- * ship with what weber.edu publishes (lib/config), which WSUSA hasn't
- * confirmed, so the section stays flagged until a sysadmin saves or confirms them.
+ * The reviewers founders of WSUSA's clubs see after they submit
+ * (wsusa.reviewers). Every office's own contacts and review time, WSUSA's
+ * included, live on the office (Admin → Offices). The list ships with what
+ * weber.edu publishes (lib/config), which WSUSA hasn't confirmed, so the
+ * section stays flagged until a sysadmin saves or confirms it.
  */
-export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged }: { office: Office; reviewers: Reviewer[]; placeholder: boolean; lastChanged: string | null }) {
-  const [savedOffice, setSavedOffice] = useState(() => toDraft(office));
+export function WsusaReviewersForm({ reviewers, placeholder, lastChanged }: { reviewers: Reviewer[]; placeholder: boolean; lastChanged: string | null }) {
   const [savedReviewers, setSavedReviewers] = useState(() => strip(withIds(reviewers)));
-  const [draft, setDraft] = useState(() => toDraft(office));
   const [list, setList] = useState<ReviewerDraft[]>(() => withIds(reviewers));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -44,15 +41,9 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
   const [flagged, setFlagged] = useState(placeholder);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const officeTrimmed = { ...draft, name: draft.name.trim(), location: draft.location.trim(), hours: draft.hours.trim(), email: draft.email.trim(), phone: draft.phone.trim(), reviewDays: draft.reviewDays.trim() };
-  const officeDirty = !same(officeTrimmed, savedOffice);
   const reviewersDirty = !same(strip(list), savedReviewers);
-  const dirty = Object.keys(draft).filter((k) => officeTrimmed[k as keyof OfficeDraft] !== savedOffice[k as keyof OfficeDraft]).length + (reviewersDirty ? 1 : 0);
+  const dirty = reviewersDirty ? 1 : 0;
 
-  function setOffice<K extends keyof OfficeDraft>(k: K, v: string) {
-    setDraft((d) => ({ ...d, [k]: v }));
-    if (errors[k]) setErrors(({ [k]: _drop, ...rest }) => rest);
-  }
   function setReviewer(rid: number, k: keyof Reviewer, v: string) {
     setList((l) => l.map((r) => (r.rid === rid ? { ...r, [k]: v } : r)));
     const ek = `r${rid}.${k}`;
@@ -70,11 +61,6 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
 
   function validate() {
     const e: Record<string, string> = {};
-    if (officeTrimmed.name.length < 2) e.name = "Enter the office name.";
-    if (officeTrimmed.email && !EMAIL.test(officeTrimmed.email)) e.email = "Enter a valid email address, or leave it blank.";
-    if (officeTrimmed.phone && !PHONE.test(officeTrimmed.phone)) e.phone = "Enter a phone number like 801-626-0000, or leave it blank.";
-    const days = officeTrimmed.reviewDays;
-    if (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > 90) e.reviewDays = "Enter a whole number of days from 1 to 90.";
     for (const r of list) {
       if (r.name.trim().length < 2) e[`r${r.rid}.name`] = "Enter their name.";
       if (!EMAIL.test(r.email.trim())) e[`r${r.rid}.email`] = "Enter a valid email address.";
@@ -94,22 +80,14 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
     setFormError(null);
     setPending(true);
     try {
-      const payload: Record<string, unknown> = {};
-      if (officeDirty) payload["wsusa.office"] = { ...officeTrimmed, reviewDays: Number(officeTrimmed.reviewDays) };
-      if (reviewersDirty) payload["wsusa.reviewers"] = strip(list);
-      const r = await saveConfigAction(payload);
+      const r = await saveConfigAction({ "wsusa.reviewers": strip(list) });
       if (!r.ok) {
         setFormError(r.error);
         return;
       }
-      setSavedOffice(officeTrimmed);
       setSavedReviewers(strip(list));
-      // Saving the section means someone checked all of it, including the part they didn't edit.
-      if (flagged) {
-        const c = await confirmConfigAction(["wsusa.office", "wsusa.reviewers"]);
-        if (c.ok) setFlagged(false);
-      }
-      toast.success(r.data.changed.length ? "WSUSA contacts saved" : "Nothing changed");
+      setFlagged(false);
+      toast.success(r.data.changed.length ? "WSUSA reviewers saved" : "Nothing changed");
     } catch {
       setFormError("We couldn't reach the server, so nothing was saved. Check your connection and try again.");
     } finally {
@@ -120,7 +98,7 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
   async function confirm() {
     setConfirming(true);
     try {
-      const r = await confirmConfigAction(["wsusa.office", "wsusa.reviewers"]);
+      const r = await confirmConfigAction(["wsusa.reviewers"]);
       if (!r.ok) return void toast.error(r.error);
       setFlagged(false);
       toast.success("Marked as confirmed");
@@ -138,7 +116,7 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
       <CardHeader
         title={
           <span className="flex flex-wrap items-center gap-2">
-            WSUSA contacts
+            WSUSA reviewers
             {flagged ? (
               <Badge tone="warning">
                 <TriangleAlert className="h-3 w-3" aria-hidden /> Not confirmed
@@ -150,15 +128,21 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
             )}
           </span>
         }
-        description="Shown to founders after they submit a club for review, and to leaders requesting funding: the office, where to find it, how long a review usually takes, and who to contact."
+        description={
+          <>
+            The people founders of WSUSA&apos;s clubs can contact after they submit. Every office&apos;s location, hours, email, phone and review time, WSUSA&apos;s included, are in{" "}
+            <Link href="/admin/offices" className="font-medium text-brand-600 underline-offset-2 hover:underline">
+              Admin → Offices
+            </Link>
+            .
+          </>
+        }
       />
       <form ref={formRef} onSubmit={submit} noValidate aria-busy={pending}>
         <div className="space-y-6 px-5 py-4">
           {flagged ? (
             <Callout tone="warning" title="Not confirmed with WSUSA yet">
-              <p>
-                These came from Student Involvement &amp; Leadership&apos;s pages on weber.edu. Check the office, hours, email, phone number, reviewers and review time with WSUSA, then save your corrections, or confirm them as they are.
-              </p>
+              <p>These came from Student Involvement &amp; Leadership&apos;s pages on weber.edu. Check the reviewers with WSUSA, then save your corrections, or confirm them as they are.</p>
               {!dirty ? (
                 <Button size="sm" variant="outline" className="mt-2 bg-surface" onClick={confirm} disabled={confirming}>
                   {confirming ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <BadgeCheck className="h-4 w-4" aria-hidden />}
@@ -168,35 +152,8 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
             </Callout>
           ) : null}
 
-          <fieldset className="space-y-4">
-            <legend className="text-sm font-semibold text-ink">Review office</legend>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Office name" required error={err("name")}>
-                {(id) => <Input id={id} value={draft.name} onChange={(e) => setOffice("name", e.target.value)} maxLength={120} aria-invalid={err("name") ? true : undefined} />}
-              </Field>
-              <Field label="Where to find it" hint="Building and room, as students would say it.">
-                {(id) => <Input id={id} value={draft.location} onChange={(e) => setOffice("location", e.target.value)} maxLength={200} />}
-              </Field>
-              <Field label="Office hours">{(id) => <Input id={id} value={draft.hours} onChange={(e) => setOffice("hours", e.target.value)} maxLength={120} />}</Field>
-              <Field label="Typical review time" required error={err("reviewDays")} hint="Business days founders should expect to wait.">
-                {(id) => (
-                  <div className="relative">
-                    <Input id={id} value={draft.reviewDays} inputMode="numeric" onChange={(e) => setOffice("reviewDays", e.target.value)} className="pr-14 tabular-nums" aria-invalid={err("reviewDays") ? true : undefined} />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-3">days</span>
-                  </div>
-                )}
-              </Field>
-              <Field label="Email" error={err("email")}>
-                {(id) => <Input id={id} type="email" value={draft.email} onChange={(e) => setOffice("email", e.target.value)} maxLength={200} autoComplete="off" aria-invalid={err("email") ? true : undefined} />}
-              </Field>
-              <Field label="Phone" error={err("phone")} hint="Optional.">
-                {(id) => <Input id={id} type="tel" value={draft.phone} onChange={(e) => setOffice("phone", e.target.value)} maxLength={40} placeholder="801-626-0000" aria-invalid={err("phone") ? true : undefined} />}
-              </Field>
-            </div>
-          </fieldset>
-
           <fieldset>
-            <legend className="text-sm font-semibold text-ink">Reviewers</legend>
+            <legend className="sr-only">Reviewers</legend>
             <p className="text-sm text-ink-3">The people founders can contact about a submission, in the order shown.</p>
             {list.length === 0 ? (
               <p className="mt-3 rounded-lg border border-dashed border-line-2 px-4 py-5 text-center text-sm text-ink-3">No reviewers listed. Founders will see the office contact only.</p>
@@ -265,7 +222,6 @@ export function WsusaContactsForm({ office, reviewers, placeholder, lastChanged 
           pending={pending}
           lastChanged={lastChanged}
           onDiscard={() => {
-            setDraft(savedOffice);
             setList(withIds(savedReviewers));
             setErrors({});
             setFormError(null);

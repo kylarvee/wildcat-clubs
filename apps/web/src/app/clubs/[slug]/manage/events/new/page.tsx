@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { loadClubWorkspace } from "@/lib/clubs/context";
+import { pausedNote } from "@/lib/authz";
 import { loadEditorData } from "@/lib/events/queries";
 import { defaultFundingSource } from "@/lib/funding/defaults";
 import { PageHeader } from "@/components/ui/layout";
@@ -21,7 +22,7 @@ export default async function NewClubEventPage({
   const sp = await searchParams;
   const { club, access, allowed } = await loadClubWorkspace(slug, "events");
   if (club.status !== "APPROVED") notFound();
-  if (!allowed) return <NoPermission what="the Events Builder" suspended={access.suspended} />;
+  if (!allowed) return <NoPermission what="the Events Builder" suspended={access.suspended} note={pausedNote(access, "events")} />;
   const data = await loadEditorData(club.id, null);
   if (!data) notFound();
   const base = `/clubs/${club.slug}/manage/events`;
@@ -42,6 +43,7 @@ export default async function NewClubEventPage({
         googleLive={data.googleLive}
         defaultFundingSource={defaultFundingSource(club)}
         coverFolderId={data.coverFolderId}
+        review={data.review}
       />
     </div>
   );

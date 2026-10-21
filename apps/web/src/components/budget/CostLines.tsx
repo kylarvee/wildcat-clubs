@@ -33,7 +33,7 @@ function FundingNote({ line }: { line: Pick<BudgetLine, "lockedBy" | "decisions"
     return (
       <span className="mt-1 inline-flex items-center gap-1 text-xs text-ink-2">
         <Lock className="h-3 w-3" aria-hidden />
-        {lock.status === "SUBMITTED" ? `In “${lock.title}” · in WSUSA review` : `Funded in full by “${lock.title}”`}
+        {lock.status === "SUBMITTED" ? `In “${lock.title}” · in review` : `Funded in full by “${lock.title}”`}
       </span>
     );
   const last = line.decisions.at(-1);

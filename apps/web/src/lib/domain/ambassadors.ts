@@ -5,7 +5,7 @@ import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, hasCap } from "@/lib/authz";
 import { clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
-import { assertCan, assertClubCap, conflict, invalid, notFound, parse } from "@/lib/domain/kit";
+import { assertClubCap, assertUmbrellaAdmin, conflict, invalid, notFound, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
 import { grantRole } from "@/lib/domain/roles";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
@@ -177,7 +177,8 @@ const AdvisorInput = z.object({
  * step (reason SUCCEEDED), and any old advisor invitations are cancelled.
  */
 export async function setAmbassadorAdvisor(actor: Actor | null, input: unknown) {
-  assertCan(actor, "admin.clubs");
+  // College ambassador programs are WSUSA's, whatever office a club belongs to.
+  assertUmbrellaAdmin(actor, "admin.clubs", "Naming an ambassador program's advisor");
   const v = parse(AdvisorInput, input);
   const org = await db.club.findUnique({ where: { id: v.orgId }, select: { id: true, name: true, slug: true, type: true, status: true } });
   if (!org || org.type !== "COLLEGE_AMBASSADORS") throw notFound("Ambassador program");

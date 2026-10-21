@@ -3,10 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowUpRight, Mail } from "lucide-react";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
-import { can } from "@/lib/authz";
-
+import { can, canAdminFunding } from "@/lib/authz";
 import { fmtLongDate, fmtMoney } from "@/lib/time";
 import { invoiceDueDates, loadClubTermBudget, loadFundingRequest, priorRequests } from "@/lib/domain/funding";
+import { fundingOfficeForClub } from "@/lib/offices";
 import { plural, sourceName, sourceNames } from "@/lib/funding/labels";
 import { requestTimeline } from "@/lib/funding/timeline";
 import { TYPE_LABEL } from "@/components/founding/copy";
@@ -25,14 +25,15 @@ import { MarkProcessedButton } from "@/components/budget/admin/InvoiceActions";
 type Params = Promise<{ id: string }>;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
-  // Metadata resolves before the admin layout's check, so only admins get the request's title.
-  if (!can(await getCurrentUser(), "admin.funding")) return { title: "Funding request" };
+  // Metadata resolves before the admin layout's check, so only the admins who decide the club's funding get the request's title.
+  const viewer = await getCurrentUser();
+  if (!can(viewer, "admin.funding")) return { title: "Funding request" };
   const request = await loadFundingRequest((await params).id);
-  return { title: request && request.status !== "DRAFT" ? `Funding · ${request.title}` : "Funding request" };
+  return { title: request && request.status !== "DRAFT" && canAdminFunding(viewer, request.club) ? `Funding · ${request.title}` : "Funding request" };
 }
 
 /**
- * One funding request for WSUSA: the club, the lines it asked for (as
+ * One funding request for the office that decides it (WSUSA, or the club's own office when it decides funding): the club, the lines it asked for (as
  * submitted), the club's budget for that semester, its earlier requests, the
  * decision (line by line, with the source that funds it), and the invoice the
  * approval created.
@@ -42,17 +43,24 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
   if (!can(user, "admin.funding")) notFound();
   const { id } = await params;
   const request = await loadFundingRequest(id);
-  // Drafts are the club's own work until they submit.
-  if (!request || request.status === "DRAFT") notFound();
+  // Drafts are the club's own work until they submit; office staff see only their own clubs' requests.
+  if (!request || request.status === "DRAFT" || !canAdminFunding(user, request.club)) notFound();
 
   const invoice = request.invoices[0] ?? null;
-  const [budget, prior, due] = await Promise.all([loadClubTermBudget(request.clubId, request.termId), priorRequests(request.clubId, request.id), invoiceDueDates(invoice ? [invoice.id] : [])]);
+  const [budget, prior, due, office] = await Promise.all([
+    loadClubTermBudget(request.clubId, request.termId),
+    priorRequests(request.clubId, request.id),
+    invoiceDueDates(invoice ? [invoice.id] : []),
+    // Who decides it: the club's office when it decides funding, else WSUSA (lib/offices).
+    fundingOfficeForClub(request.clubId),
+  ]);
   const club = request.club;
   const source = sourceName(request.fundingSource, club);
   const approved = request.status === "APPROVED" || request.status === "PARTIALLY_APPROVED";
   const fundedBy = approved ? sourceName(request.fundedSource ?? request.fundingSource, club) : null;
   const reducedLines = approved ? request.items.filter((i) => i.approvedCents != null && i.approvedCents < i.totalCents).length : 0;
   const steps = requestTimeline({
+    office: office.name,
     status: request.status,
     createdAt: request.createdAt,
     submittedAt: request.submittedAt,
@@ -86,7 +94,7 @@ export default async function AdminFundingRequestPage({ params }: { params: Para
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-6">
-          <DecisionCallout request={request} audience="admin" fundedLabel={fundedBy} reducedLines={reducedLines} />
+          <DecisionCallout request={request} audience="admin" office={office.name} fundedLabel={fundedBy} reducedLines={reducedLines} />
 
           {request.status === "SUBMITTED" ? (
             <Card>

@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import type { Actor } from "@/lib/auth/session";
 import { isAdmin, ROLE_RANK, type ClubAccess } from "@/lib/authz";
-import { visibleEventsWhere } from "@/lib/authz/events";
+import { PUBLISHED_EVENT, visibleEventsWhere } from "@/lib/authz/events";
 import { canViewFile } from "@/lib/domain/files";
 import { clubListMetrics, type ClubListMetrics } from "@/lib/metrics";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_LABEL } from "@/components/clubs/labels";
@@ -497,7 +497,8 @@ export async function upcomingPublicEvents({ days = 14, limit = 6 }: { days?: nu
       status: "SCHEDULED",
       endsAt: { gte: now },
       startsAt: { lte: until },
-      event: { status: "SCHEDULED", visibility: "PUBLIC", OR: [{ clubId: null }, { club: { status: "APPROVED" } }] },
+      // Published only: an event waiting for its office's review isn't posted (lib/authz/events).
+      event: { status: "SCHEDULED", visibility: "PUBLIC", ...PUBLISHED_EVENT, OR: [{ clubId: null }, { club: { status: "APPROVED" } }] },
     },
     orderBy: { startsAt: "asc" },
     take: limit,

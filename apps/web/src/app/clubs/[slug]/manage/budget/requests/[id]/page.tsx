@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Mail } from "lucide-react";
-import { getConfig } from "@/lib/config";
+import { fundingOfficeForClub } from "@/lib/offices";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getClubAccess } from "@/lib/authz";
 import { loadClubWorkspace } from "@/lib/clubs/context";
@@ -46,7 +46,8 @@ export default async function FundingRequestPage({ params }: { params: Params })
   const request = await loadFundingRequest(id);
   if (!request || request.clubId !== club.id) notFound();
 
-  const cfg = await getConfig();
+  // The office that decides this club's funding (lib/offices): its own when that office decides funding, else WSUSA.
+  const office = await fundingOfficeForClub(club.id);
   const base = `/clubs/${club.slug}/manage/budget`;
   const names = sourceNames(club);
   const crumbs = [
@@ -87,7 +88,8 @@ export default async function FundingRequestPage({ params }: { params: Params })
             fundingSource: request.fundingSource,
             itemIds: request.items.map((i) => i.budgetItemId).filter((x): x is string => Boolean(x)),
           }}
-          reviewDays={cfg["wsusa.office"].reviewDays}
+          reviewDays={office.reviewDays}
+          office={office.name}
           minJustification={MIN_JUSTIFICATION}
         />
         <PolicyNotices placement="FUNDING" />
@@ -100,6 +102,7 @@ export default async function FundingRequestPage({ params }: { params: Params })
   const expected = sourceName(request.fundingSource, club);
   const fundedBy = approved ? sourceName(request.fundedSource ?? request.fundingSource, club) : null;
   const steps = requestTimeline({
+    office: office.name,
     status: request.status,
     createdAt: request.createdAt,
     submittedAt: request.submittedAt,
@@ -129,7 +132,7 @@ export default async function FundingRequestPage({ params }: { params: Params })
       />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
-          <DecisionCallout request={request} audience="club" reviewDays={cfg["wsusa.office"].reviewDays} fundedLabel={fundedBy} reducedLines={reduced.length} askAgainHref={askAgainHref} />
+          <DecisionCallout request={request} audience="club" reviewDays={office.reviewDays} office={office.name} fundedLabel={fundedBy} reducedLines={reduced.length} askAgainHref={askAgainHref} />
           <RequestFactsCard request={request} sourceLabel={expected} fundedLabel={fundedBy} />
           <section className="space-y-2" aria-labelledby="items-heading">
             <h2 id="items-heading" className="text-base font-semibold text-ink">
@@ -137,18 +140,18 @@ export default async function FundingRequestPage({ params }: { params: Params })
             </h2>
             <p className="text-sm text-ink-3">
               The lines as they were when the request was submitted. Later budget changes don&apos;t alter them.
-              {approved ? " WSUSA decides line by line; a line that got less than it asked is free to put in a request to another source." : ""}
+              {approved ? ` ${office.name} decides line by line; a line that got less than it asked is free to put in a request to another source.` : ""}
             </p>
             <RequestItemsTable items={request.items} requestedCents={request.amountRequestedCents} approvedCents={request.amountApprovedCents} showApproved={approved} caption={`Lines in ${request.title}`} />
           </section>
           {approved ? (
             <Card>
-              <CardHeader title="Invoice" description="WSUSA uses the invoice to move the approved money through the university finance system." />
+              <CardHeader title="Invoice" description={`${office.name} uses the invoice to move the approved money through the university finance system.`} />
               <CardBody>
                 {invoice ? (
                   <InvoicePanel invoice={invoice} />
                 ) : (
-                  <p className="text-sm text-ink-2">This request was approved before approvals came with an invoice. Ask WSUSA if you need one.</p>
+                  <p className="text-sm text-ink-2">This request was approved before approvals came with an invoice. Ask {office.name} if you need one.</p>
                 )}
               </CardBody>
             </Card>
@@ -165,16 +168,16 @@ export default async function FundingRequestPage({ params }: { params: Params })
             <CardBody className="flex gap-3 text-sm text-ink-2">
               <Mail className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden />
               <p>
-                {cfg["wsusa.office"].email ? (
+                {office.email ? (
                   <>
                     Questions about this request? Email{" "}
-                    <a href={`mailto:${cfg["wsusa.office"].email}`} className="font-medium text-brand-600 hover:underline">
-                      {cfg["wsusa.office"].name}
+                    <a href={`mailto:${office.email}`} className="font-medium text-brand-600 hover:underline">
+                      {office.name}
                     </a>
-                    {cfg["wsusa.office"].location ? ` or stop by the ${cfg["wsusa.office"].location}` : ""}.
+                    {office.location ? ` or stop by ${office.location}` : ""}.
                   </>
                 ) : (
-                  `Questions about this request? Ask ${cfg["wsusa.office"].name}${cfg["wsusa.office"].location ? ` at the ${cfg["wsusa.office"].location}` : ""}.`
+                  `Questions about this request? Ask ${office.name}${office.location ? ` at ${office.location}` : ""}.`
                 )}
               </p>
             </CardBody>

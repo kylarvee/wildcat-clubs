@@ -7,6 +7,12 @@
  * attempts (on time and late), training check-ins, member details, and an
  * inbox that's out of step on purpose: stale due dates, titles, hrefs and
  * clubs, tasks nobody owes, excused and missing assignments, earlier notices.
+ *
+ * `{ offices: true }` adds what the old code never knew about, from its own
+ * generator so the plain worlds stay exactly as they were: an office that
+ * oversees some clubs, requirements it owns (for leaders and for members),
+ * and single-permission requirements (Events, Budget) with attempts on
+ * their tests. Only the new code runs those worlds.
  */
 import type { Tables } from "./fake-db";
 import { renewalCycle } from "@/lib/tests/cycles";
@@ -48,7 +54,7 @@ const LEADER = ["OFFICER", "VP", "PRESIDENT"];
 
 export type World = { seed: number; now: Date; tables: Tables; userIds: string[]; clubIds: string[] };
 
-export function buildWorld(seed: number): World {
+export function buildWorld(seed: number, opts: { offices?: boolean } = {}): World {
   const r = rng(seed);
   const now = d(r.pick(NOWS));
   const ago = (days: number) => new Date(now.getTime() - days * DAY);
@@ -238,5 +244,55 @@ export function buildWorld(seed: number): World {
     if (r.chance(0.2)) t.notification.push({ id: `n${t.notification.length + 1}`, userId: k.assigneeId, kind: "requirement.overdue", title: "Earlier", body: null, href: r.chance(0.8) ? k.href : "/other", createdAt: ago(r.int(-1, 70)), readAt: null });
 
   t.reminderLog = [];
+  if (opts.offices) addOffices(t, seed, now);
   return { seed, now, tables: t, userIds, clubIds };
+}
+
+/** Offices and single-permission requirements on top of a world (see the module comment). */
+function addOffices(t: Tables, seed: number, now: Date) {
+  const r = rng(seed * 7919 + 17);
+  const ago = (days: number) => new Date(now.getTime() - days * DAY);
+  t.office = [
+    { id: "o-rec", key: "campus-rec", name: "Campus Recreation", shortName: "Campus Rec", umbrella: false },
+    { id: "o-fsl", key: "fsl", name: "Fraternity & Sorority Life", shortName: "FSL", umbrella: false },
+  ];
+  // Two clubs belong to Campus Recreation (one approved long ago, one never approved), one to FSL.
+  for (const c of t.club) c.officeId = c.id === "c1" || c.id === "c3" ? "o-rec" : c.id === "c2" && r.chance(0.5) ? "o-fsl" : null;
+  t.test.push(
+    { id: "tSafety", title: "Event Safety Training", isForm: false, audience: "ROLE_REQUIREMENT", clubId: null, status: "PUBLISHED", officeId: null },
+    { id: "tRec", title: "Sport club safety forms", isForm: true, audience: "ROLE_REQUIREMENT", clubId: null, status: "PUBLISHED", officeId: "o-rec" },
+    { id: "tMoney", title: "Treasurer Basics", isForm: false, audience: "ROLE_REQUIREMENT", clubId: null, status: "PUBLISHED", officeId: null },
+  );
+  const LEADERS = ["AMBASSADOR", "OFFICER", "VP", "PRESIDENT"];
+  const extra = [
+    { name: "Event Safety Training", kind: "TEST", testId: "tSafety", appliesTo: LEADERS, gatesCapability: "events", officeId: null, graceDays: r.pick([0, 10, 30]), createdAt: ago(r.int(20, 400)) },
+    { name: "Treasurer Basics", kind: "TEST", testId: "tMoney", appliesTo: ["OFFICER", "VP"], gatesCapability: "budget", officeId: null, graceDays: 14, createdAt: ago(r.int(5, 300)) },
+    { name: "Sport club safety forms", kind: "TEST", testId: "tRec", appliesTo: LEADERS, gatesCapability: null, officeId: "o-rec", graceDays: r.pick([7, 30]), createdAt: ago(r.int(5, 300)) },
+    { name: "Campus Rec waiver", kind: "TEST", testId: "tRec", appliesTo: ["MEMBER"], gatesCapability: null, officeId: "o-rec", graceDays: 20, createdAt: ago(r.int(5, 120)) },
+    { name: "Recreation event permit", kind: "TEST", testId: "tSafety", appliesTo: ["OFFICER", "PRESIDENT"], gatesCapability: "events", officeId: "o-rec", graceDays: 5, createdAt: ago(r.int(5, 200)) },
+  ].filter((_, i) => i === 0 || r.chance(0.75));
+  const base = t.roleRequirement.length;
+  const rows: Record<string, unknown>[] = [
+    ...t.roleRequirement.map((q) => ({ officeId: null, gatesCapability: null, ...q })),
+    ...extra.map((p, i) => ({ id: `rx${String(base + i + 1).padStart(2, "0")}`, description: null, renewal: "ACADEMIC_YEAR", trainingEventId: null, active: true, ...p })),
+  ];
+  t.roleRequirement = rows.sort((a, b) => (a.createdAt as Date).getTime() - (b.createdAt as Date).getTime() || String(a.name).localeCompare(String(b.name)));
+  // Attempts on the new tests: passes, fails and waits, some long ago.
+  for (const userId of t.user.map((u) => u.id as string))
+    for (const testId of ["tSafety", "tRec", "tMoney"])
+      if (r.chance(0.35)) {
+        const kind = r.pick(["pass", "pass", "fail", "review"]);
+        t.testAttempt.push({
+          id: `ax${t.testAttempt.length + 1}`,
+          testId,
+          userId,
+          cycleKey: "x",
+          startedAt: ago(600),
+          submittedAt: ago(r.int(0, 300) + r.next()),
+          status: kind === "review" ? "NEEDS_REVIEW" : "GRADED",
+          passed: kind === "pass" ? true : kind === "fail" ? false : null,
+        });
+      }
+  // Give more seats Events (and Budget), so single-permission requirements reach plenty of people.
+  for (const a of t.roleAssignment) if (r.chance(0.4)) a.permissions = [...new Set([...(a.permissions as string[]), r.pick(["events", "budget"])])];
 }

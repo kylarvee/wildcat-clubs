@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, Download, GraduationCap, Hourglass, Plus, ShieldCheck } from "lucide-react";
 import { listRequirementsForAdmin, openRequirementCounts, requirementCompliance, type ComplianceCell, type ComplianceRow } from "@/lib/domain/requirements";
 import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
-import { ROLE_LABEL } from "@/lib/authz";
+import { adminClubWhere, adminScope, CAPABILITIES, ROLE_LABEL, type Capability } from "@/lib/authz";
 import { RENEWAL_LABEL } from "@/lib/tests/types";
 import { fmtDate } from "@/lib/time";
 import { Avatar } from "@/components/ui/avatar";
@@ -24,21 +24,29 @@ const SOON_DAYS = 14;
 /** Leader rows per page; the stats, filters and CSV always cover everyone. */
 const PAGE_SIZE = 50;
 
+/** "Events" for a capability key; the key itself for anything unknown. */
+const permissionLabel = (c: string) => (c in CAPABILITIES ? CAPABILITIES[c as Capability].label : c);
+
 /**
- * Requirements: the tests, forms and trainings WSUSA requires of club
- * members and student leaders, and where every current student leader stands.
- * Leader status comes from the requirement rule (passed attempts, submitted
- * forms and training check-ins), never stored, evaluated for every leader in
- * one batch (requirementCompliance); member-wide requirements show how many
- * people still owe them (their open required tasks). The table shows
- * PAGE_SIZE rows at a time.
+ * Requirements: the tests, forms and trainings WSUSA (and each office, for
+ * its own clubs) requires of club members and student leaders, and where
+ * every current student leader stands. Leader status comes from the
+ * requirement rule (passed attempts, submitted forms and training check-ins),
+ * never stored, evaluated for every leader in one batch
+ * (requirementCompliance); member-wide requirements show how many people
+ * still owe them (their open required tasks). An office's staff see and
+ * manage only their office's requirements and the leaders of its clubs;
+ * WSUSA's admins see everything, each requirement labelled by its office.
+ * The table shows PAGE_SIZE rows at a time.
  */
 export default async function RequirementsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireRequirementAdmin("/admin/requirements");
+  const user = await requireRequirementAdmin("/admin/requirements");
   const sp = await searchParams;
   const f = parseFilter(sp);
   const now = new Date();
-  const [reqs, rows, open] = await Promise.all([listRequirementsForAdmin(), requirementCompliance(now), openRequirementCounts(now)]);
+  const umbrella = adminScope(user).all;
+  const [reqs, rows, open] = await Promise.all([listRequirementsForAdmin(user), requirementCompliance(now, { clubWhere: adminClubWhere(user) }), openRequirementCounts(now)]);
+  const ownerOf = (r: (typeof reqs)[number]) => r.office?.name ?? "WSUSA";
   // The leader table covers requirements that reach a leader role; member-wide ones are counted on their cards.
   const active = reqs.filter((r) => r.active && r.appliesTo.some((role) => role !== "MEMBER"));
   const shown = applyFilter(rows, f);
@@ -49,7 +57,8 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
   const pageRows = shown.slice(from, from + PAGE_SIZE);
 
   const people = new Set(rows.map((r) => r.person.id)).size;
-  const pausedPeople = new Set(rows.filter((r) => r.paused).map((r) => r.person.id)).size;
+  // Paused all the way, or just a permission or two.
+  const pausedPeople = new Set(rows.filter((r) => r.paused || r.pausedCapabilities?.length).map((r) => r.person.id)).size;
   const soon = now.getTime() + SOON_DAYS * 86_400_000;
   const dueSoon = new Set(rows.filter((r) => !r.paused && Object.values(r.cells).some((c) => c.state === "due" && c.dueAt.getTime() <= soon)).map((r) => r.person.id)).size;
   const allMet = new Set(rows.filter((r) => Object.values(r.cells).every((c) => c.state === "met")).map((r) => r.person.id)).size;
@@ -67,7 +76,11 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
     <div className="space-y-8">
       <PageHeader
         title="Requirements"
-        description="Tests, forms and trainings WSUSA requires of club members and student leaders. They show as Required by WSUSA in everyone's tasks. Each has a grace period; past it, a leader keeps their title but their permissions pause until it's done."
+        description={
+          umbrella
+            ? "Tests, forms and trainings WSUSA (or an office, for its own clubs) requires of club members and student leaders. They show as required in everyone's tasks. Each has a grace period; past it, a leader keeps their title but their permissions pause until it's done, or just the one permission it's about."
+            : "Tests and forms your office requires of its clubs' members and student leaders. They show as required in everyone's tasks. Each has a grace period; past it, a leader keeps their title but their permissions pause until it's done, or just the one permission it's about."
+        }
         actions={
           <ButtonLink href="/admin/requirements/new">
             <Plus className="h-4 w-4" aria-hidden /> New requirement
@@ -118,11 +131,13 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
                       <ActiveToggle id={r.id} name={r.name} active={r.active} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-1.5">
+                      {umbrella ? <Badge tone={r.office ? "info" : "brand"}>{ownerOf(r)}</Badge> : null}
                       {r.appliesTo.map((role) => (
                         <Badge key={role} tone={role === "MEMBER" ? "brand" : "neutral"}>
-                          {role === "MEMBER" ? "Every club member" : ROLE_LABEL[role]}
+                          {role === "MEMBER" ? (r.office ? `Every ${r.office.name} club member` : "Every club member") : ROLE_LABEL[role]}
                         </Badge>
                       ))}
+                      {r.gatesCapability ? <Badge tone="warning">Only people with {permissionLabel(r.gatesCapability)}</Badge> : null}
                       <Badge tone="info">{RENEWAL_LABEL[r.renewal]}</Badge>
                       <Badge tone={r.graceDays === 0 ? "warning" : "neutral"}>{r.graceDays === 0 ? "Must be done first" : `${r.graceDays}-day grace period`}</Badge>
                     </div>
@@ -148,7 +163,10 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
         )}
       </Section>
 
-      <Section title="Where student leaders stand" description="Every current officer, VP, president and ambassador of an approved club, per club.">
+      <Section
+        title="Where student leaders stand"
+        description={umbrella ? "Every current officer, VP, president and ambassador of an approved club, per club." : "Every current officer, VP, president and ambassador of your office's approved clubs. Permissions count every requirement, WSUSA's included."}
+      >
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Student leaders" value={people} hint={`${rows.length} club roles`} />
           <Stat label="All done" value={allMet} hint="every requirement met" />
@@ -198,6 +216,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
               {active.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
+                  {umbrella && r.office ? ` (${r.office.name})` : ""}
                 </option>
               ))}
             </Select>
@@ -245,7 +264,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
           <EmptyState icon={<CheckCircle2 />} title="Nobody matches" description={rows.length ? "Try a different filter." : "There are no current student leaders in approved clubs yet."} />
         ) : (
           <>
-            <ComplianceTable rows={pageRows} columns={columns} now={now} />
+            <ComplianceTable rows={pageRows} columns={columns.map((c) => ({ id: c.id, name: c.name, owner: umbrella && c.office ? c.office.name : null }))} now={now} />
             {pages > 1 ? <Pager page={page} pages={pages} total={shown.length} noun="club role" /> : null}
           </>
         )}
@@ -254,7 +273,7 @@ export default async function RequirementsPage({ searchParams }: { searchParams:
   );
 }
 
-function ComplianceTable({ rows, columns, now }: { rows: ComplianceRow[]; columns: { id: string; name: string }[]; now: Date }) {
+function ComplianceTable({ rows, columns, now }: { rows: ComplianceRow[]; columns: { id: string; name: string; owner: string | null }[]; now: Date }) {
   return (
     <Table>
       <THead>
@@ -264,6 +283,7 @@ function ComplianceTable({ rows, columns, now }: { rows: ComplianceRow[]; column
           {columns.map((c) => (
             <TH key={c.id} className="normal-case tracking-normal">
               {c.name}
+              {c.owner ? <span className="block text-xs font-normal text-ink-3">{c.owner}</span> : null}
             </TH>
           ))}
           <TH>Permissions</TH>
@@ -300,6 +320,10 @@ function ComplianceTable({ rows, columns, now }: { rows: ComplianceRow[]; column
               {r.paused ? (
                 <Badge tone="danger">
                   <AlertTriangle className="h-3 w-3" aria-hidden /> Paused
+                </Badge>
+              ) : r.pausedCapabilities?.length ? (
+                <Badge tone="warning">
+                  <AlertTriangle className="h-3 w-3" aria-hidden /> {r.pausedCapabilities.map(permissionLabel).join(", ")} paused
                 </Badge>
               ) : (
                 <Badge tone="success">On</Badge>

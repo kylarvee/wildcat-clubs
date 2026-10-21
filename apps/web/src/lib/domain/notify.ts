@@ -16,8 +16,8 @@ import { readPrefs, resolveDelivery, type Recipient } from "@/components/notific
  * pushes as QUEUED in the outbox instead of sending them, and the "Send
  * queued messages" job (lib/jobs/notifications) delivers them in batches, so
  * a big audience never makes a request wait on hundreds of emails. WSUSA's
- * digest kinds aren't emailed to admins one by one: the daily digest covers
- * them (same job).
+ * digest kinds aren't emailed to admins or office staff one by one: the
+ * daily digest covers them (same job).
  *
  * Never pass anonymous-complaint content through here.
  */
@@ -110,9 +110,14 @@ async function writeBells(sends: Send[]) {
   for (const part of chunks(rows)) await db.notification.createMany({ data: part });
 }
 
-type Person = { id: string; email: string; emailNotifications: boolean; notificationPrefs: unknown; platformRole: string };
+type Person = { id: string; email: string; emailNotifications: boolean; notificationPrefs: unknown; platformRole: string; officeMemberships?: { officeId: string }[] };
 
-const recipientOf = (u: Person): Recipient => ({ emailOn: u.emailNotifications, admin: u.platformRole === "ADMIN" || u.platformRole === "SYSADMIN", prefs: readPrefs(u.notificationPrefs) });
+/** Admins and office staff (lib/offices) both read the daily digest, so digest kinds wait for it. */
+const recipientOf = (u: Person): Recipient => ({
+  emailOn: u.emailNotifications,
+  admin: u.platformRole === "ADMIN" || u.platformRole === "SYSADMIN" || Boolean(u.officeMemberships?.length),
+  prefs: readPrefs(u.notificationPrefs),
+});
 
 /** Email and push per the registry; queued for the scheduled job when `queue`. Deactivated accounts get neither. */
 async function deliver(sends: Send[], queue: boolean) {
@@ -120,7 +125,7 @@ async function deliver(sends: Send[], queue: boolean) {
   for (const ids of chunks([...new Set(sends.flatMap((s) => s.ids))])) {
     const rows = await db.user.findMany({
       where: { id: { in: ids }, status: { not: "DEACTIVATED" } },
-      select: { id: true, email: true, emailNotifications: true, notificationPrefs: true, platformRole: true },
+      select: { id: true, email: true, emailNotifications: true, notificationPrefs: true, platformRole: true, officeMemberships: { where: { office: { umbrella: false } }, select: { officeId: true }, take: 1 } },
     });
     for (const u of rows) people.set(u.id, u);
   }

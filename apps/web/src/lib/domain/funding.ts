@@ -3,13 +3,14 @@ import { Prisma, type ClubType, type FundingSource, type FundingStatus, type Ter
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { can, getClubAccess } from "@/lib/authz";
+import { adminFundingClubWhere, adminScope, canAdminFunding, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, invalid, notFound, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
-import { notifyAdmins, notifyClubCapability } from "@/lib/domain/notify";
+import { notifyClubCapability } from "@/lib/domain/notify";
 import { costLineLocks, eventCostSummaries } from "@/lib/domain/events";
-import { getConfig } from "@/lib/config";
+import { fundingOfficeForClub, listOffices, notifyOffice } from "@/lib/offices";
+import { storedOfficeId } from "@/lib/offices/rules";
 import { budgetTermFor, getTerms } from "@/lib/terms";
 import { DAY_MS, fmtDate, fmtMoney } from "@/lib/time";
 import { defaultFundingSource } from "@/lib/funding/defaults";
@@ -334,6 +335,7 @@ export async function loadFundingRequest(requestId: string) {
           logoColor: true,
           contactEmail: true,
           departmentId: true,
+          officeId: true,
           department: { select: { name: true } },
           college: { select: { name: true } },
         },
@@ -342,7 +344,7 @@ export async function loadFundingRequest(requestId: string) {
   });
 }
 
-/** An invoice with everything its PDF shows, if the viewer may see it (admins, or the club's budget holders). */
+/** An invoice with everything its PDF shows, if the viewer may see it (the admins who decide the club's funding, or its budget holders). */
 export async function loadInvoiceForViewer(actor: Actor | null, invoiceId: string) {
   assertSignedIn(actor);
   const invoice = await db.invoice.findUnique({
@@ -352,13 +354,13 @@ export async function loadInvoiceForViewer(actor: Actor | null, invoiceId: strin
       request: {
         include: {
           ...REQUEST_INCLUDE,
-          club: { select: { id: true, name: true, slug: true, type: true, contactEmail: true, department: { select: { name: true } }, college: { select: { name: true } } } },
+          club: { select: { id: true, name: true, slug: true, type: true, contactEmail: true, officeId: true, department: { select: { name: true } }, college: { select: { name: true } } } },
         },
       },
     },
   });
   if (!invoice) throw notFound("Invoice");
-  if (!can(actor, "admin.funding")) {
+  if (!canAdminFunding(actor, invoice.request.club)) {
     const access = await getClubAccess(actor, invoice.request.clubId);
     // Not found rather than forbidden, so invoice ids don't reveal anything.
     if (!access?.capabilities.has("budget")) throw notFound("Invoice");
@@ -583,7 +585,9 @@ export async function discardFundingDraft(actor: Actor | null, requestId: string
 
 /**
  * Sends a draft for review: re-reads its lines from the live budget, snapshots
- * them (meetings in the term × one set), and opens the admins' approval task.
+ * them (meetings in the term × one set), and opens the approval task for the
+ * office that decides the club's funding (its own office when that office
+ * decides funding, else WSUSA: lib/offices/rules routeAdminTask).
  */
 export async function submitFundingRequest(actor: Actor | null, requestId: string) {
   const request = await loadClubRequest(actor, requestId);
@@ -602,6 +606,7 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
   const now = new Date();
   const club = request.club;
   const source = sourceName(request.fundingSource, club);
+  const office = await fundingOfficeForClub(club.id);
   await db.$transaction(async (tx) => {
     const claimed = await tx.fundingRequest.updateMany({
       where: { id: request.id, status: "DRAFT" },
@@ -615,6 +620,7 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
         kind: "APPROVAL",
         title: `Funding request from ${club.name}: ${request.title}`,
         description: `${fmtMoney(total)} for ${request.term.name}. The club expects it from ${source}; record the source that funds it when you approve.`,
+        // Routed to the office that decides the club's funding.
         assignee: { type: "ADMINS" },
         clubId: club.id,
         href: `/admin/funding/${request.id}`,
@@ -626,17 +632,19 @@ export async function submitFundingRequest(actor: Actor | null, requestId: strin
     await logActivity({ actorId: actor!.id, action: "funding.submitted", entityType: "fundingRequest", entityId: request.id, clubId: club.id, data: { title: request.title, cents: total, source: request.fundingSource } }, tx);
   });
 
-  const cfg = await getConfig();
-  await notifyAdmins({
-    kind: "funding.submitted",
-    title: `Funding request: ${club.name} — ${request.title}`,
-    body: `${fmtMoney(total)} for ${request.term.name}, expected from ${source}.`,
-    href: `/admin/funding/${request.id}`,
-  });
+  await notifyOffice(
+    { officeId: storedOfficeId(office) },
+    {
+      kind: "funding.submitted",
+      title: `Funding request: ${club.name} — ${request.title}`,
+      body: `${fmtMoney(total)} for ${request.term.name}, expected from ${source}.`,
+      href: `/admin/funding/${request.id}`,
+    },
+  );
   await notifyClubCapability(club.id, "budget", {
     kind: "funding.submitted",
     title: `Funding request submitted: ${request.title}`,
-    body: `${actor!.name} sent it to WSUSA for ${fmtMoney(total)}, expected from ${source}. WSUSA reviews every request, usually within about ${cfg["wsusa.office"].reviewDays} business days, and may fund it from another source.`,
+    body: `${actor!.name} sent it to ${office.name} for ${fmtMoney(total)}, expected from ${source}. ${office.name} reviews every request, usually within about ${office.reviewDays} business days, and may fund it from another source.`,
     href: `/clubs/${club.slug}/manage/budget/requests/${request.id}`,
     exceptUserId: actor!.id,
   });
@@ -648,15 +656,18 @@ const Withdraw = z.object({ reason: z.string().trim().max(1000, "Keep the reason
 /** Pulls a submitted request back before WSUSA decides. Its lines can be requested again. */
 export async function withdrawFundingRequest(actor: Actor | null, requestId: string, input: unknown = {}) {
   const request = await loadClubRequest(actor, requestId);
-  if (request.status !== "SUBMITTED") throw conflict(request.status === "DRAFT" ? "This request hasn't been submitted yet — discard the draft instead." : "WSUSA already decided this request, so it can't be withdrawn.");
+  const office = await fundingOfficeForClub(request.clubId);
+  if (request.status !== "SUBMITTED") throw conflict(request.status === "DRAFT" ? "This request hasn't been submitted yet — discard the draft instead." : `${office.name} already decided this request, so it can't be withdrawn.`);
   const v = parse(Withdraw, input ?? {});
+  // Whoever has the task (its office may have changed since it was submitted).
+  const task = await db.task.findFirst({ where: { sourceType: "funding", sourceId: request.id, status: "OPEN", assigneeType: "ADMINS" }, select: { officeId: true } });
   await db.$transaction(async (tx) => {
     const claimed = await tx.fundingRequest.updateMany({ where: { id: request.id, status: "SUBMITTED" }, data: { status: "WITHDRAWN", decidedAt: new Date(), decidedById: null, decisionNote: v.reason || null } });
-    if (!claimed.count) throw conflict("WSUSA just decided this request, so it can't be withdrawn.");
+    if (!claimed.count) throw conflict(`${office.name} just decided this request, so it can't be withdrawn.`);
     await resolveTasks("funding", request.id, actor!.id, tx, "CANCELLED");
     await logActivity({ actorId: actor!.id, action: "funding.withdrawn", entityType: "fundingRequest", entityId: request.id, clubId: request.clubId, data: { title: request.title, reason: v.reason ?? null } }, tx);
   });
-  await notifyAdmins({ kind: "funding.withdrawn", title: `${request.club.name} withdrew “${request.title}”`, body: v.reason || undefined, href: `/admin/funding/${request.id}` });
+  await notifyOffice({ officeId: task ? task.officeId : storedOfficeId(office) }, { kind: "funding.withdrawn", title: `${request.club.name} withdrew “${request.title}”`, body: v.reason || undefined, href: `/admin/funding/${request.id}` });
   return { id: request.id };
 }
 
@@ -742,7 +753,9 @@ export async function decideFundingRequest(actor: Actor | null, input: unknown) 
   assertCan(actor, "admin.funding");
   const v = parse(Decision, input);
   const request = await loadFundingRequest(v.requestId);
-  if (!request) throw notFound("Funding request");
+  // Office staff decide only their own office's clubs' requests (lib/authz canAdminFunding).
+  if (!request || !canAdminFunding(actor, request.club)) throw notFound("Funding request");
+  const office = await fundingOfficeForClub(request.clubId);
   if (request.status !== "SUBMITTED") throw conflict("This request isn't waiting for a decision — someone may have decided it already, or the club withdrew it.");
 
   let status: FundingStatus = "DENIED";
@@ -799,10 +812,10 @@ export async function decideFundingRequest(actor: Actor | null, input: unknown) 
     status === "APPROVED" ? `Funding approved: ${request.title}` : status === "PARTIALLY_APPROVED" ? `Funding partly approved: ${request.title}` : `Funding not approved: ${request.title}`;
   const lead =
     status === "APPROVED"
-      ? `WSUSA approved the full ${fmtMoney(approved!)}, funded by ${fundedBy}.`
+      ? `${office.name} approved the full ${fmtMoney(approved!)}, funded by ${fundedBy}.`
       : status === "PARTIALLY_APPROVED"
-        ? `WSUSA approved ${fmtMoney(approved!)} of the ${fmtMoney(request.amountRequestedCents)} requested, funded by ${fundedBy}. ${plural(reduced, "line")} got less than asked; ${reduced === 1 ? "it's" : "they're"} free again, so you can ask another source for the rest.`
-        : `WSUSA didn't approve the ${fmtMoney(request.amountRequestedCents)} requested.`;
+        ? `${office.name} approved ${fmtMoney(approved!)} of the ${fmtMoney(request.amountRequestedCents)} requested, funded by ${fundedBy}. ${plural(reduced, "line")} got less than asked; ${reduced === 1 ? "it's" : "they're"} free again, so you can ask another source for the rest.`
+        : `${office.name} didn't approve the ${fmtMoney(request.amountRequestedCents)} requested.`;
   await notifyClubCapability(request.clubId, "budget", {
     kind: `funding.${status.toLowerCase()}`,
     title,
@@ -814,7 +827,7 @@ export async function decideFundingRequest(actor: Actor | null, input: unknown) 
     await notifyClubCapability(request.clubId, "budget", {
       kind: "invoice.created",
       title: `Invoice ${invoice.number} is ready`,
-      body: `It covers the ${fmtMoney(approved!)} approved for “${request.title}”. WSUSA is sending it through the university finance system.`,
+      body: `It covers the ${fmtMoney(approved!)} approved for “${request.title}”. ${office.name} is sending it through the university finance system.`,
       href,
     });
   }
@@ -824,8 +837,9 @@ export async function decideFundingRequest(actor: Actor | null, input: unknown) 
 /** The money went through in the university finance system: close the invoice and its task, tell the club. */
 export async function markInvoiceProcessed(actor: Actor | null, invoiceId: string) {
   assertCan(actor, "admin.funding");
-  const invoice = await db.invoice.findUnique({ where: { id: invoiceId }, include: { request: { select: { id: true, title: true, clubId: true, club: { select: { slug: true } } } } } });
-  if (!invoice) throw notFound("Invoice");
+  const invoice = await db.invoice.findUnique({ where: { id: invoiceId }, include: { request: { select: { id: true, title: true, clubId: true, club: { select: { slug: true, officeId: true } } } } } });
+  if (!invoice || !canAdminFunding(actor, invoice.request.club)) throw notFound("Invoice");
+  const office = await fundingOfficeForClub(invoice.request.clubId);
   await db.$transaction(async (tx) => {
     const claimed = await tx.invoice.updateMany({ where: { id: invoice.id, status: "OPEN" }, data: { status: "PROCESSED", processedAt: new Date() } });
     if (!claimed.count) throw conflict(`Invoice ${invoice.number} is already marked processed.`);
@@ -835,7 +849,7 @@ export async function markInvoiceProcessed(actor: Actor | null, invoiceId: strin
   await notifyClubCapability(invoice.request.clubId, "budget", {
     kind: "invoice.processed",
     title: `Funding for ${invoice.request.title} went through`,
-    body: `${fmtMoney(invoice.amountCents)} was processed in the university finance system (invoice ${invoice.number}). Keep your receipts for WSUSA.`,
+    body: `${fmtMoney(invoice.amountCents)} was processed in the university finance system (invoice ${invoice.number}). Keep your receipts for ${office.name}.`,
     href: `/clubs/${invoice.request.club.slug}/manage/budget/requests/${invoice.request.id}`,
   });
   return { id: invoice.id };
@@ -861,11 +875,12 @@ export async function invoiceDueDates(invoiceIds: string[]): Promise<Map<string,
   return new Map(tasks.map((t) => [t.sourceId!, t.dueAt!]));
 }
 
-/** The admin funding queue. Drafts are the club's own work and never show here. */
+/** The admin funding queue: the clubs whose funding this person decides (lib/authz adminFundingClubWhere). Drafts are the club's own work and never show here. */
 export async function adminFundingQueue(actor: Actor | null, opts: { queue: AdminQueue; source?: FundingSource | null; clubId?: string | null; take?: number }) {
   assertCan(actor, "admin.funding");
   const where: Prisma.FundingRequestWhereInput = {
     AND: [
+      { club: adminFundingClubWhere(actor) },
       { status: opts.queue === "submitted" ? "SUBMITTED" : opts.queue === "approved" ? { in: ["APPROVED", "PARTIALLY_APPROVED"] } : { not: "DRAFT" } },
       ...(opts.queue === "approved" ? [{ OR: INVOICE_PENDING.OR }] : []),
       ...(opts.source ? [bySource(opts.source)] : []),
@@ -880,7 +895,18 @@ export async function adminFundingQueue(actor: Actor | null, opts: { queue: Admi
       orderBy,
       take: opts.take ?? 100,
       include: {
-        club: { select: { id: true, name: true, slug: true, logoUrl: true, logoColor: true, department: { select: { name: true } }, college: { select: { name: true } } } },
+        club: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logoUrl: true,
+            logoColor: true,
+            department: { select: { name: true } },
+            college: { select: { name: true } },
+            office: { select: { decidesFunding: true, reviewDays: true } },
+          },
+        },
         term: { select: { name: true } },
         invoices: { select: { id: true, number: true, status: true, createdAt: true } },
         _count: { select: { items: true } },
@@ -889,37 +915,61 @@ export async function adminFundingQueue(actor: Actor | null, opts: { queue: Admi
     db.fundingRequest.count({ where }),
   ]);
   const due = await invoiceDueDates(found.flatMap((r) => r.invoices.filter((i) => i.status === "OPEN").map((i) => i.id)));
-  const rows = found.map((r) => ({ ...r, invoices: r.invoices.map((i) => ({ ...i, dueAt: due.get(i.id) ?? null })) }));
+  // Each request is late by the review time of the office deciding it (lib/offices/rules fundingOfficeId).
+  const umbrellaDays = (await listOffices())[0].reviewDays;
+  const rows = found.map((r) => ({
+    ...r,
+    reviewDays: r.club.office?.decidesFunding ? r.club.office.reviewDays : umbrellaDays,
+    invoices: r.invoices.map((i) => ({ ...i, dueAt: due.get(i.id) ?? null })),
+  }));
   return { rows, total };
 }
 
-/** Counts for the queue tabs. */
-export async function adminFundingCounts() {
-  const [submitted, approved] = await Promise.all([db.fundingRequest.count({ where: { status: "SUBMITTED" } }), db.fundingRequest.count({ where: INVOICE_PENDING })]);
+/** Counts for the queue tabs, for the clubs whose funding this person decides. */
+export async function adminFundingCounts(actor: Actor | null) {
+  assertCan(actor, "admin.funding");
+  const club = adminFundingClubWhere(actor);
+  const [submitted, approved] = await Promise.all([db.fundingRequest.count({ where: { status: "SUBMITTED", club } }), db.fundingRequest.count({ where: { AND: [INVOICE_PENDING, { club }] } })]);
   return { submitted, approved };
 }
 
 /**
- * The admin funding page's headline numbers: what's waiting on a decision
- * (and how much of it is past WSUSA's review time), what's approved but not
- * yet through the finance system (and past due), and what was approved for
- * the current budget semester. "Late" is lib/funding/review's rule, the same
- * one the WSUSA queue and the follow-up job use.
+ * The offices whose funding work this person sees, with each one's review
+ * time: every office for WSUSA's admins, else the staffed offices that decide
+ * funding. (officeId null = the umbrella.)
+ */
+async function fundingOffices(actor: Actor) {
+  const offices = await listOffices();
+  const all = adminScope(actor).all;
+  return offices.filter((o) => all || (!o.umbrella && (actor.fundingOfficeIds ?? []).includes(o.id))).map((o) => ({ officeId: storedOfficeId(o), reviewDays: o.reviewDays, umbrella: o.umbrella }));
+}
+
+/**
+ * The admin funding page's headline numbers, for the clubs whose funding this
+ * person decides: what's waiting on a decision (and how much of it is past
+ * the office's review time, each office's own), what's approved but not yet
+ * through the finance system (and past due), and what was approved for the
+ * current budget semester. "Late" is lib/funding/review's rule, the same one
+ * the office queue and the follow-up job use.
  */
 export async function adminFundingOverview(actor: Actor | null, now = new Date()) {
   assertCan(actor, "admin.funding");
-  const [terms, cfg] = await Promise.all([getTerms(), getConfig()]);
+  const terms = await getTerms();
   const term = budgetTermFor(terms, now);
-  const reviewDays = cfg["wsusa.office"].reviewDays;
-  const openTasks = (late: Prisma.TaskWhereInput) => db.task.count({ where: { status: "OPEN", assigneeType: "ADMINS", ...late } });
+  const club = adminFundingClubWhere(actor);
+  const offices = await fundingOffices(actor);
+  // The review time the page quotes: WSUSA's for its admins, else the staffer's office's.
+  const reviewDays = (offices.find((o) => o.umbrella) ?? offices[0])?.reviewDays ?? 10;
+  const openTasks = (kind: "review" | "invoice") =>
+    offices.length ? db.task.count({ where: { status: "OPEN", assigneeType: "ADMINS", OR: offices.map((o) => ({ officeId: o.officeId, ...fundingTasks(kind, true, now, o.reviewDays) })) } }) : Promise.resolve(0);
   const [waiting, oldest, pastReview, openInvoices, invoicesPastDue, approvedThisTerm] = await Promise.all([
-    db.fundingRequest.aggregate({ where: { status: "SUBMITTED" }, _count: { _all: true }, _sum: { amountRequestedCents: true } }),
-    db.fundingRequest.findFirst({ where: { status: "SUBMITTED" }, orderBy: { submittedAt: "asc" }, select: { submittedAt: true } }),
-    openTasks(fundingTasks("review", true, now, reviewDays)),
-    db.invoice.aggregate({ where: { status: "OPEN" }, _count: { _all: true }, _sum: { amountCents: true } }),
-    openTasks(fundingTasks("invoice", true, now, reviewDays)),
+    db.fundingRequest.aggregate({ where: { status: "SUBMITTED", club }, _count: { _all: true }, _sum: { amountRequestedCents: true } }),
+    db.fundingRequest.findFirst({ where: { status: "SUBMITTED", club }, orderBy: { submittedAt: "asc" }, select: { submittedAt: true } }),
+    openTasks("review"),
+    db.invoice.aggregate({ where: { status: "OPEN", request: { club } }, _count: { _all: true }, _sum: { amountCents: true } }),
+    openTasks("invoice"),
     term
-      ? db.fundingRequest.aggregate({ where: { termId: term.id, status: { in: ["APPROVED", "PARTIALLY_APPROVED"] } }, _count: { _all: true }, _sum: { amountApprovedCents: true } })
+      ? db.fundingRequest.aggregate({ where: { termId: term.id, status: { in: ["APPROVED", "PARTIALLY_APPROVED"] }, club }, _count: { _all: true }, _sum: { amountApprovedCents: true } })
       : null,
   ]);
   return {
@@ -930,9 +980,10 @@ export async function adminFundingOverview(actor: Actor | null, now = new Date()
   };
 }
 
-/** Clubs that have ever sent a request (for the admin club filter). */
-export async function clubsWithRequests() {
-  return db.club.findMany({ where: { fundingRequests: { some: { status: { not: "DRAFT" } } } }, orderBy: { name: "asc" }, select: { id: true, name: true } });
+/** Clubs that have ever sent a request (for the admin club filter), among those whose funding this person decides. */
+export async function clubsWithRequests(actor: Actor | null) {
+  assertCan(actor, "admin.funding");
+  return db.club.findMany({ where: { AND: [adminFundingClubWhere(actor), { fundingRequests: { some: { status: { not: "DRAFT" } } } }] }, orderBy: { name: "asc" }, select: { id: true, name: true } });
 }
 
 /** The club's other requests, newest first (the admin detail page's history). */

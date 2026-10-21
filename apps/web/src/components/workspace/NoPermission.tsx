@@ -1,15 +1,21 @@
 import { Lock } from "lucide-react";
 import { EmptyState } from "@/components/ui/layout";
 
-export function NoPermission({ what = "this tool", suspended }: { what?: string; suspended?: boolean }) {
+/**
+ * A tool the person can't use here. `note` (lib/authz pausedNote) says when
+ * an overdue single-permission requirement paused just this permission.
+ */
+export function NoPermission({ what = "this tool", suspended, note }: { what?: string; suspended?: boolean; note?: string | null }) {
   return (
     <EmptyState
       icon={<Lock />}
-      title={`You don't have access to ${what}`}
+      title={note ? `${what.charAt(0).toUpperCase()}${what.slice(1)} is paused for you` : `You don't have access to ${what}`}
       description={
-        suspended
-          ? "Your leadership permissions are paused until you finish your overdue WSUSA requirement. Check your tasks."
-          : "Ask your club's president or advisor to add this permission to your role."
+        note
+          ? `${note} Check your tasks.`
+          : suspended
+            ? "Your leadership permissions are paused until you finish your overdue requirement. Check your tasks."
+            : "Ask your club's president or advisor to add this permission to your role."
       }
     />
   );

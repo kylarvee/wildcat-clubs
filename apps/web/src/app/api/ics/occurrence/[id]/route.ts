@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { canViewEvent } from "@/lib/domain/events";
 import { buildCalendar, icsResponse } from "@/lib/events/ics";
 import { OCC_INCLUDE, toIcsEvents } from "@/lib/events/feed";
+import { underReview } from "@/lib/events/review";
 
 /** GET /api/ics/occurrence/<occurrenceId> — one meeting as an .ics download ("Add to calendar"). */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const actor = await getCurrentUser();
   // The feed include selects only APPROVED co-hosts' clubs; the visibility rule needs { clubId, status }.
   const gate = { ...occ.event, cohosts: occ.event.cohosts.map((c) => ({ clubId: c.club.id, status: "APPROVED" })) };
-  if (!(await canViewEvent(actor, gate))) return new Response("Not found", { status: 404 });
+  // Not posted yet (waiting for its office's review): nothing to add to a calendar.
+  if (underReview(occ.event) || !(await canViewEvent(actor, gate))) return new Response("Not found", { status: 404 });
   const body = buildCalendar({ name: occ.event.title, events: toIcsEvents([occ]) });
   const slug = occ.event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "event";
   return icsResponse(body, { filename: `${slug}.ics`, download: true, cacheSeconds: 60 });

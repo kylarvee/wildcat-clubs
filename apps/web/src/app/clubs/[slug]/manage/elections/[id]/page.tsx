@@ -5,6 +5,7 @@ import { CheckCircle2, ExternalLink, Info } from "lucide-react";
 import { db } from "@/lib/db";
 import { ALL_CAPABILITIES, CAPABILITIES, ROLE_LABEL } from "@/lib/authz";
 import { loadClubWorkspace } from "@/lib/clubs/context";
+import { officeForClub } from "@/lib/offices";
 import { electionResults, keyHolders, nextInLineOutcome, runoffFor, syncElection, voteOutcome, voterRoll } from "@/lib/domain/elections";
 import { candidateSource, electionCandidates, resultRows } from "@/lib/roles/election-queries";
 import { activeStudentMembers } from "@/lib/roles/queries";
@@ -90,6 +91,8 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
   const tie = vote?.kind === "tie" ? vote : null;
   const choosers = tie?.resolution.kind === "choose" ? tie.resolution : null;
   const chooserNames = choosers?.userIds.length ? (await db.user.findMany({ where: { id: { in: choosers.userIds } }, select: { name: true } })).map((u) => u.name) : [];
+  // When nobody in the club can settle it, the club's office does (lib/offices).
+  const officeName = choosers?.by === "wsusa" ? (await officeForClub(club.id)).name : "WSUSA";
   const mayChoose = !tie || (choosers ? (choosers.by === "organizer" ? true : access.viaPlatform !== null || choosers.userIds.includes(user.id)) : false);
   const tieNote = !choosers
     ? undefined
@@ -98,7 +101,7 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
       : choosers.by === "president"
         ? "Under your bylaws the President casts the deciding vote: choose who takes the seat"
         : choosers.by === "wsusa"
-          ? "Nobody in the club can settle it under its bylaws, so as a WSUSA administrator, choose who takes the seat"
+          ? `Nobody in the club can settle it under its bylaws, so as ${officeName} staff, choose who takes the seat`
           : undefined;
 
   const canApply = access.assignableRoles.includes(e.position.role);
@@ -411,7 +414,7 @@ export default async function ManageElectionPage({ params }: { params: Promise<{
                 <div className="space-y-3 border-t border-line pt-4">
                   <Callout tone="info" icon={<Info />} title="It's a tie">
                     {choosers?.by === "wsusa"
-                      ? "Nobody in the club can settle it under its bylaws, so a WSUSA administrator chooses who takes the seat."
+                      ? `Nobody in the club can settle it under its bylaws, so ${officeName} chooses who takes the seat.`
                       : `Under your bylaws, ${chooserNames.length ? names(chooserNames) : `the ${choosers?.by === "president" ? "President" : "advisor"}`} ${chooserNames.length === 1 || !chooserNames.length ? "casts" : "cast"} the deciding vote. They choose who takes ${e.position.name} from this page.`}
                   </Callout>
                 </div>

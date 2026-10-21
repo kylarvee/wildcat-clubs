@@ -9,6 +9,7 @@ import { splitEventLinks } from "@/lib/events/links";
 import { isHybrid, roomLabel } from "@/lib/events/labels";
 import { appUrl, campusMapQuery } from "@/lib/events/share";
 import { addDaysToDateInput, campusParts, toDateInput } from "@/lib/events/wallclock";
+import { underReview } from "@/lib/events/review";
 import { TZ } from "@/lib/time";
 
 /**
@@ -136,12 +137,16 @@ async function calendarIdFor(cal: calendar_v3.Calendar, e: Loaded): Promise<stri
 
 /**
  * Creates or updates the Google copy of an event (or cancels it when the event
- * is cancelled or has no scheduled meetings left). Never throws.
+ * is cancelled or has no scheduled meetings left). An event waiting for its
+ * office's review (lib/events/review) gets no copy until it's approved, and a
+ * copy from before it went back for review is cancelled meanwhile. Never throws.
  */
 export async function syncEventToGoogle(eventId: string, opts: { createMeet?: boolean } = {}): Promise<GoogleSyncResult> {
   try {
     const e = await loadEvent(eventId);
     if (!e) return { status: "skipped" };
+    // Never posted yet: nothing to copy until the office approves it.
+    if (underReview(e) && !e.googleEventId) return { status: "skipped" };
     if (!(await integrationLive("googleCalendar"))) return { status: "off", message: "Google Calendar sync is off." };
     const account = e.club ? clubGoogleAccount(e.club) : { email: PLATFORM_SENDER };
     if (!account.email) return { status: "off", message: account.reason };
@@ -149,7 +154,7 @@ export async function syncEventToGoogle(eventId: string, opts: { createMeet?: bo
     const cal = await client(account.email);
     const calendarId = await calendarIdFor(cal, e);
 
-    if (e.status === "CANCELLED" || e.occurrences.length === 0) {
+    if (e.status === "CANCELLED" || underReview(e) || e.occurrences.length === 0) {
       if (e.googleEventId) await cal.events.patch({ calendarId, eventId: e.googleEventId, requestBody: { status: "cancelled" } }).catch(() => undefined);
       return { status: "synced" };
     }

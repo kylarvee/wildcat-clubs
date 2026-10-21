@@ -6,6 +6,7 @@ import type { Club } from "@prisma/client";
 import type { Capability, ClubAccess } from "@/lib/authz";
 import { getConfig } from "@/lib/config";
 import { db } from "@/lib/db";
+import { UNDER_REVIEW } from "@/lib/events/review";
 import { clubActivity } from "@/lib/metrics";
 import { STANDING_HINT, STANDING_LABEL, STANDING_TONE, standingOf } from "@/lib/labels/clubs";
 import { DAY_MS, fmtLongDate, fmtRange } from "@/lib/time";
@@ -42,7 +43,8 @@ export async function ClubDashboard({ club, access }: { club: Club; access: Club
     clubActivity(club.id),
     getConfig(),
     db.membership.count({ where: { clubId: club.id, status: "PENDING" } }),
-    db.eventCohost.count({ where: { clubId: club.id, status: "PENDING" } }),
+    // Invitations to events still waiting for their office's review aren't shown yet (lib/events/review).
+    db.eventCohost.count({ where: { clubId: club.id, status: "PENDING", event: { reviewStatus: { notIn: [...UNDER_REVIEW] } } } }),
     db.eventOccurrence.findMany({
       where: {
         status: "SCHEDULED",

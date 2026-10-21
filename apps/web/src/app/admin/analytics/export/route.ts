@@ -1,4 +1,5 @@
 import { getCurrentUser } from "@/lib/auth/session";
+import { adminClubWhere } from "@/lib/authz";
 import { apiRoute, assertCan } from "@/lib/domain/kit";
 import { toCsv } from "@/lib/attendance/matrix";
 import { fmtDate } from "@/lib/time";
@@ -10,7 +11,8 @@ import { csvRows, filterRows, parseTableFilters, sortRows } from "@/lib/analytic
  * GET /admin/analytics/export?q=&college=&type=&status=&missing=&sort=&dir=
  * The club analytics table as CSV, with the same filters and order as the
  * page (lib/analytics/club-table), so the download matches the screen.
- * Admins only (admin.analytics). Aggregates only — no people.
+ * Admins only (admin.analytics); an office's staff get their office's clubs.
+ * Aggregates only — no people.
  */
 export async function GET(req: Request) {
   try {
@@ -18,7 +20,7 @@ export async function GET(req: Request) {
     assertCan(actor, "admin.analytics");
     const filters = parseTableFilters(new URL(req.url).searchParams);
     const now = new Date();
-    const { rows, termName } = await clubAnalyticsRows(now);
+    const { rows, termName } = await clubAnalyticsRows(now, adminClubWhere(actor));
     const shown = sortRows(filterRows(rows, filters), filters.sort, filters.dir);
     // The BOM makes Excel read names with accents correctly.
     const csv = "﻿" + toCsv(csvRows(shown, termName, appUrl));

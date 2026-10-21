@@ -107,6 +107,17 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
     min: 1,
     max: 180,
   },
+  "events.riskReview": {
+    label: "Review events that need a second look",
+    help: "When the Events Builder's “Does this event involve…” answers include anything (outdoor spaces, people under 18, travel, a large crowd, collecting money, alcohol), the event waits for its club's office to review it before it's posted. Off: the answers are still saved, but events post right away.",
+  },
+  "events.largeCrowd": {
+    label: "Large crowd",
+    help: "The checklist asks whether more than this many people are expected.",
+    unit: "people",
+    min: 10,
+    max: 10000,
+  },
   "ai.assistantEnabled": {
     label: "Ask Claude assistant",
     help: "Ask Wildcat Clubs, the in-app assistant that helps students, leaders and administrators set things up and answers questions about the platform.",
@@ -135,13 +146,9 @@ export const CONFIG_COPY: Record<ConfigKey, ConfigCopy> = {
     label: "Mobile push notifications",
     help: "Sends notifications to the Wildcat Clubs app through Expo's push service. While off, pushes are recorded in the outbox instead.",
   },
-  "wsusa.office": {
-    label: "WSUSA review office",
-    help: "Shown to founders after they submit a club for review, and to leaders requesting funding: the office, where to find it, and how many days a review usually takes.",
-  },
   "wsusa.reviewers": {
     label: "Reviewers",
-    help: "The people founders can contact about a submission.",
+    help: "The people founders of WSUSA's clubs can contact about a submission.",
   },
   "platform.supportEmail": {
     label: "Help email",

@@ -98,7 +98,7 @@ async function checkReviewBombing(club: { id: string; name: string }, actorId: s
     kind: "APPROVAL",
     title: `Possible review bombing: ${club.name}`,
     description,
-    assignee: { type: "ADMINS" },
+    assignee: { type: "ADMINS", umbrella: true }, // review moderation is WSUSA's, whatever office oversees the club
     clubId: club.id,
     href,
     source: { type: "reviewBombing", id: club.id },
@@ -152,7 +152,7 @@ export async function flagReview(actor: Actor | null, reviewId: string, input: u
         kind: "APPROVAL",
         title: `Review flagged on ${review.club.name}`,
         description: `${flags} people flagged this review. Decide whether to keep or hide it.`,
-        assignee: { type: "ADMINS" },
+        assignee: { type: "ADMINS", umbrella: true }, // review moderation is WSUSA's, whatever office oversees the club
         clubId: review.clubId,
         href,
         source: { type: "reviewFlag", id: reviewId },

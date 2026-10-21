@@ -36,8 +36,10 @@ export type TaskItem = {
   personal: boolean;
   /** PERSONAL and CLUB tasks are checked off by hand; the rest close themselves. */
   checkable: boolean;
-  /** WSUSA requires it: listed first and marked "Required by WSUSA". */
+  /** WSUSA (or another office) requires it: listed first and marked "Required by WSUSA". */
   required: boolean;
+  /** On required tasks, who requires it: "WSUSA", or the office's short name ("Campus Rec"). */
+  requiredBy: string | null;
 };
 
 export function dueInfo(dueAt: Date | null, now: Date): TaskItem["due"] {
@@ -77,6 +79,7 @@ export function toTaskItem(t: TaskRow, viewerId: string, now: Date): TaskItem {
     personal: t.kind === "PERSONAL" && t.assigneeId === viewerId,
     checkable: !SELF_CLOSING.includes(t.kind),
     required: t.required,
+    requiredBy: t.required ? (t.office?.shortName ?? "WSUSA") : null,
   };
 }
 

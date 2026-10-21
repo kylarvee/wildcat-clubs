@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { RefreshCw } from "lucide-react";
 import { loadClubWorkspace } from "@/lib/clubs/context";
+import { pausedNote } from "@/lib/authz";
 import { loadBuilderData } from "@/lib/events/queries";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +28,7 @@ export default async function ClubEventsPage({ params, searchParams }: { params:
       </>
     );
   }
-  if (!allowed) return <NoPermission what="the Events Builder" suspended={access.suspended} />;
+  if (!allowed) return <NoPermission what="the Events Builder" suspended={access.suspended} note={pausedNote(access, "events")} />;
 
   const data = await loadBuilderData(club.id);
   const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : undefined;

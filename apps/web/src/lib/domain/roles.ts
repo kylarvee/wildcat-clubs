@@ -8,7 +8,7 @@ import { clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
 import { notify } from "@/lib/domain/notify";
-import { openRequirementTasks, reopenRequirementTasks } from "@/lib/domain/requirements";
+import { openRequirementTasks, reopenRequirementTasks, syncUserRequirements } from "@/lib/domain/requirements";
 import { resolveTasks } from "@/lib/domain/tasks";
 import { staffingAfterRoleChange } from "@/lib/domain/staffing";
 import { canViewFile } from "@/lib/domain/files";
@@ -270,6 +270,8 @@ export async function setRolePermissions(actor: Actor | null, assignmentId: stri
   // Taking Members off the last seat that had it leaves nobody to approve join requests; granting it can close that task.
   const droppedMembers = a.permissions.includes("roster") && !perms.includes("roster");
   await staffingAfterRoleChange([a.clubId], { actorId: actor.id, dropped: droppedMembers ? [{ role: a.role, permissions: a.permissions }] : [] });
+  // A requirement about one permission (Event Safety Training for Events) follows who holds it: gaining it opens the task, losing it cancels it.
+  await syncUserRequirements(a.userId, { notify: "due" });
 }
 
 // ─── Presidential hand-off ───────────────────────────────────────────────────

@@ -42,9 +42,6 @@ describe("platform rules", () => {
     expect(CONFIG_SCHEMAS["app.iosUrl"].safeParse("http://apps.apple.com/x").success).toBe(false);
     expect(CONFIG_SCHEMAS["app.iosUrl"].safeParse("").success).toBe(true);
     expect(CONFIG_SCHEMAS["ai.assistantEnabled"].safeParse("true").success).toBe(false);
-    const office = { ...CONFIG_DEFAULTS["wsusa.office"] };
-    expect(CONFIG_SCHEMAS["wsusa.office"].safeParse({ ...office, email: "not-an-email" }).success).toBe(false);
-    expect(CONFIG_SCHEMAS["wsusa.office"].safeParse({ ...office, phone: "801-626-6000" }).success).toBe(true);
     expect(CONFIG_SCHEMAS["wsusa.reviewers"].safeParse([{ name: "A", title: "", email: "a@weber.edu" }]).success).toBe(false);
   });
 

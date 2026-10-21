@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { toast } from "@/components/ui/misc";
 import { PersonalTaskDialog } from "@/components/tasks/PersonalTaskDialog";
-import { AWAITING_GRADE_NOTE, KIND_TONE, REQUIRED_LABEL, SELF_CLOSING_NOTE, taskKindLabel } from "@/components/tasks/labels";
+import { AWAITING_GRADE_NOTE, KIND_TONE, requiredLabel, SELF_CLOSING_NOTE, taskKindLabel } from "@/components/tasks/labels";
 import { cancelClubTaskAction, deletePersonalTaskAction, setTaskDoneAction } from "@/app/tasks/actions";
 import type { TaskItem } from "@/components/tasks/items";
 
@@ -188,7 +188,7 @@ function TaskRowView({ task, mode, compact, showClub, onHide }: { task: TaskItem
         <div className={cn("flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-3", compact ? "mt-1" : "mt-2")}>
           {task.required ? (
             <Badge tone="danger" className="font-semibold">
-              {compact ? "Required" : REQUIRED_LABEL}
+              {compact ? "Required" : requiredLabel(task.requiredBy)}
             </Badge>
           ) : (
             <Badge tone={KIND_TONE[task.kind]}>{taskKindLabel(task)}</Badge>

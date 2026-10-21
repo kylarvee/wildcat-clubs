@@ -3,6 +3,7 @@ import type { ClubRole, ClubType, MembershipStatus, RoleEndReason, RoleRequireme
 import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
 import { loadRequirementBatch } from "@/lib/authz/requirements";
+import { heldCapabilities } from "@/lib/authz/requirement-rules";
 import { seatSort } from "@/lib/domain/orgchart";
 import { pipelineOrder, type PipelineSeat } from "@/lib/roles/pipeline";
 
@@ -151,18 +152,21 @@ export async function clubPipeline(clubId: string): Promise<ClubPipeline> {
 
 /**
  * Officer requirements status per holder — "pending" (within grace) or
- * "overdue" (permissions paused). One batch for every holder (the evaluator
- * getClubAccess and the daily sweep use), so a big chart costs the same few
- * queries as a small one.
+ * "overdue" (permissions paused, all of them or one). One batch for every
+ * holder (the evaluator getClubAccess and the daily sweep use), so a big
+ * chart costs the same few queries as a small one. `clubOfficeId` is the
+ * club's office, so an office's requirements count; each holder's seats here
+ * say which permissions they hold, for single-permission requirements.
  */
-export async function trainingStatusFor(holders: ChartHolder[], clubApprovedAt: Date | null): Promise<Map<string, "pending" | "overdue">> {
+export async function trainingStatusFor(holders: ChartHolder[], clubApprovedAt: Date | null, clubOfficeId: string | null = null): Promise<Map<string, "pending" | "overdue">> {
   const out = new Map<string, "pending" | "overdue">();
   if (!clubApprovedAt) return out; // requirements only bind leaders of approved clubs
   const leaders = holders.filter((h) => h.role !== "ADVISOR" && h.role !== "MEMBER");
   if (!leaders.length) return out;
   const batch = await loadRequirementBatch([...new Set(leaders.map((h) => h.person.id))]);
   for (const h of leaders) {
-    const s = batch.status(h.person.id, h.role, { startedAt: h.startedAt, clubApprovedAt });
+    const holds = heldCapabilities(holders.filter((x) => x.person.id === h.person.id));
+    const s = batch.status(h.person.id, h.role, { startedAt: h.startedAt, clubApprovedAt, clubOfficeId, holds });
     if (s.overdue) out.set(h.assignmentId, "overdue");
     else if (!s.allMet) out.set(h.assignmentId, "pending");
   }

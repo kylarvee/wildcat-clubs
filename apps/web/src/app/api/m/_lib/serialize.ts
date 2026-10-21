@@ -25,7 +25,7 @@ import type { MAnnouncement, MAttendanceSummary, MClubMetrics, MClubRef, MEvent,
 
 const iso = (d: Date) => d.toISOString();
 
-export function toMUser(a: Actor): MUser {
+export function toMUser(a: Omit<Actor, "officeIds" | "fundingOfficeIds">): MUser {
   return { id: a.id, name: a.name, email: a.email, handle: a.handle, kind: a.kind, status: a.status, platformRole: a.platformRole, avatarUrl: a.avatarUrl, avatarColor: a.avatarColor };
 }
 

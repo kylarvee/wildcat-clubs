@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import type { Club } from "@prisma/client";
 import type { ClubAccess } from "@/lib/authz";
 import { db } from "@/lib/db";
-import { getConfig } from "@/lib/config";
 import { INSTITUTION } from "@/lib/institution";
+import { officeForClub } from "@/lib/offices";
 import { fmtLongDate } from "@/lib/time";
 import { foundingChecklist, type DocState } from "@/lib/domain/clubs";
 import { Badge } from "@/components/ui/badge";
@@ -45,37 +45,41 @@ function Step({ n, done, waiting, title, icon, summary, children }: { n: number;
   );
 }
 
-function docLine(label: string, d: DocState) {
+function docLine(label: string, d: DocState, office: string) {
   if (!d) return { label, text: "Not adopted yet", tone: "neutral" as const };
   if (d.status === "ACTIVE") return { label, text: d.source === "BUILDER" ? `Adopted with the builder (v${d.version}) on ${fmtLongDate(d.createdAt)}` : `Custom document approved (v${d.version})`, tone: "success" as const };
-  return { label, text: `Custom upload waiting for WSUSA approval — counts toward your checklist`, tone: "info" as const };
+  return { label, text: `Custom upload waiting for ${office}'s approval — counts toward your checklist`, tone: "info" as const };
 }
 
-/** DRAFT and CHANGES_REQUESTED: the founding checklist with live status. */
+/**
+ * DRAFT and CHANGES_REQUESTED: the founding checklist with live status. The
+ * club goes to the office that oversees it (lib/offices: club sports to
+ * Campus Recreation, Greek chapters to Fraternity & Sorority Life, else WSUSA).
+ */
 export async function FoundingOverview({ club, access, justCreated }: { club: Club; access: ClubAccess; justCreated: boolean }) {
-  const [check, invites, lastChanges, cfg] = await Promise.all([
+  const [check, invites, lastChanges, office] = await Promise.all([
     foundingChecklist(club.id),
     db.advisorInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, orderBy: { createdAt: "desc" }, select: { id: true, name: true, email: true, createdAt: true, inviteeId: true } }),
     club.status === "CHANGES_REQUESTED"
       ? db.clubDecision.findFirst({ where: { clubId: club.id, action: "CHANGES_REQUESTED" }, orderBy: { at: "desc" }, include: { by: { select: { name: true } } } })
       : null,
-    getConfig(),
+    officeForClub(club.id),
   ]);
   const doneCount = [check.profile.done, check.advisor.done, check.documents.done].filter(Boolean).length;
   const base = `/clubs/${club.slug}/manage`;
   const has = (c: Parameters<typeof access.capabilities.has>[0]) => access.capabilities.has(c);
-  const docs = [docLine("Constitution", check.documents.constitution), docLine("Bylaws", check.documents.bylaws)];
+  const docs = [docLine("Constitution", check.documents.constitution, office.name), docLine("Bylaws", check.documents.bylaws, office.name)];
 
   return (
     <div className="space-y-5">
       {justCreated ? (
         <Callout tone="success" icon={<Sparkles />} title={`${club.name} is saved as a draft`}>
-          Three things to finish, then you can send it to {INSTITUTION.studentGovernment}. Only your club&apos;s leaders and WSUSA can see it until it&apos;s approved.
+          Three things to finish, then you can send it to {office.name} for review. Only your club&apos;s leaders and {office.name} can see it until it&apos;s approved.
         </Callout>
       ) : null}
 
       {lastChanges ? (
-        <Callout tone="warning" title="WSUSA asked for changes">
+        <Callout tone="warning" title={`${office.name} asked for changes`}>
           <p className="whitespace-pre-line">{lastChanges.note}</p>
           <p className="mt-2 text-xs opacity-80">
             {lastChanges.by.name} · {fmtLongDate(lastChanges.at)}. Make the changes below, then resubmit.
@@ -165,9 +169,11 @@ export async function FoundingOverview({ club, access, justCreated }: { club: Cl
       <Card className={cn(check.ready && "border-brand-200 ring-1 ring-brand-100")}>
         <CardBody className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h3 className="font-semibold text-ink">{club.status === "CHANGES_REQUESTED" ? "Resubmit to WSUSA" : `Submit to ${INSTITUTION.studentGovernment}`}</h3>
+            <h3 className="font-semibold text-ink">{club.status === "CHANGES_REQUESTED" ? `Resubmit to ${office.name}` : `Submit to ${office.name}`}</h3>
             {check.ready ? (
-              <p className="text-sm text-ink-2">Everything&apos;s in place. WSUSA usually decides within {cfg["wsusa.office"].reviewDays} days.</p>
+              <p className="text-sm text-ink-2">
+                Everything&apos;s in place. {office.name} usually decides within {office.reviewDays} days.
+              </p>
             ) : (
               <div id="submit-blocked" className="text-sm text-ink-3">
                 <p>Finish these first:</p>
@@ -180,7 +186,7 @@ export async function FoundingOverview({ club, access, justCreated }: { club: Cl
             )}
           </div>
           {has("profile") ? (
-            <SubmitForReview clubId={club.id} clubName={club.name} ready={check.ready} resubmission={club.status === "CHANGES_REQUESTED"} reviewDays={cfg["wsusa.office"].reviewDays} />
+            <SubmitForReview clubId={club.id} clubName={club.name} ready={check.ready} resubmission={club.status === "CHANGES_REQUESTED"} reviewDays={office.reviewDays} office={office.name} />
           ) : (
             <p className="text-sm text-ink-3">Your President or advisor submits the club.</p>
           )}
@@ -196,7 +202,7 @@ export async function FoundingOverview({ club, access, justCreated }: { club: Cl
         <Link href={`${base}/files`} className="font-medium text-brand-600 hover:underline">
           club files
         </Link>
-        . Events, budgets and attendance unlock once WSUSA approves your club.
+        . Events, budgets and attendance unlock once {office.name} approves your club.
       </p>
 
       <PolicyNotices placement="CLUB_CREATION" title="Policies for new clubs" />

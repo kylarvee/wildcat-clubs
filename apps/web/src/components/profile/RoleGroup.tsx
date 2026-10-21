@@ -6,7 +6,7 @@ import { END_REASON_LABEL } from "@/lib/roles/labels";
 import { fmtDuration, fmtExperienceRange } from "@/lib/profiles/format";
 import type { ProfileRole, ProfileRoleGroup } from "@/lib/profiles/queries";
 
-const STATUS_NOTE: Partial<Record<string, string>> = { RETIRED: "Retired club", DRAFT: "Founding", SUBMITTED: "In WSUSA review", CHANGES_REQUESTED: "Founding", REJECTED: "Not approved" };
+const STATUS_NOTE: Partial<Record<string, string>> = { RETIRED: "Retired club", DRAFT: "Founding", SUBMITTED: "In review", CHANGES_REQUESTED: "Founding", REJECTED: "Not approved" };
 
 function RoleMeta({ role, now }: { role: ProfileRole; now: Date }) {
   return (

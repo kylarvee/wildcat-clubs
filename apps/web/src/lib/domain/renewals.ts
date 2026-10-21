@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { getClubAccess } from "@/lib/authz";
+import { adminClubWhere, getClubAccess } from "@/lib/authz";
+import { umbrellaOffice } from "@/lib/offices";
 import { getConfig } from "@/lib/config";
 import { logActivity } from "@/lib/lake/activity";
 import { getTerms } from "@/lib/terms";
@@ -31,17 +32,18 @@ import {
 } from "@/lib/renewals/rules";
 
 /**
- * Yearly club renewal with WSUSA: the write path for ClubRenewal, and the
- * reads the workspace overview, the club page and Admin → Club approvals →
+ * Yearly club renewal with the club's office (WSUSA, or the office that
+ * oversees it: lib/offices): the write path for ClubRenewal, and the reads
+ * the workspace overview, the club page and Admin → Club approvals →
  * Renewals use. The rules (window, checks, status names, who renews) are pure
  * in lib/renewals/rules; the "Club renewals" scheduled job that opens and
  * closes the tasks is lib/jobs/renewals.
  *
  * Renewing is the club's own act, not a review. It writes the ClubRenewal
  * with the checks as they stood, logs club.renewed (public), closes the
- * club's renewal tasks for everyone and tells WSUSA nothing. A club that
- * doesn't renew loses nothing automatically: WSUSA sees it on the Renewals
- * tab and decides.
+ * club's renewal tasks for everyone and tells the office nothing. A club that
+ * doesn't renew loses nothing automatically: its office sees it on the
+ * Renewals tab (each office its own clubs) and decides.
  */
 
 /** This academic year's window (null without terms), and the term "an event this term" reads. */
@@ -63,6 +65,8 @@ const done = (s: ClubRenewalState): RenewalDone | null => (s.renewal ? { at: s.r
 
 export type RenewalView = {
   club: { id: string; name: string; slug: string };
+  /** Who the club renews with: the office that oversees it (lib/offices). */
+  office: string;
   window: RenewalWindow | null;
   status: RenewalStatus;
   checks: RenewalCheckRow[];
@@ -94,6 +98,7 @@ export async function renewalView(actor: Actor | null, clubId: string, now: Date
           : renewerBlocker(access, state.club.name);
   return {
     club: { id: state.club.id, name: state.club.name, slug: state.club.slug },
+    office: state.club.office?.name ?? (await umbrellaOffice()).name,
     window,
     status,
     checks: checkRows(state.club.slug, state.checks),
@@ -144,6 +149,7 @@ export async function renewClub(actor: Actor | null, input: unknown, now: Date =
   if (!state) throw notFound("Club");
   const name = state.club.name;
 
+  const office = state.club.office?.name ?? (await umbrellaOffice()).name;
   const who = renewerBlocker(access, name);
   if (who) throw forbidden(who);
   if (!window) throw conflict("Renewal isn't open: the academic calendar doesn't have any terms yet.");
@@ -160,7 +166,7 @@ export async function renewClub(actor: Actor | null, input: unknown, now: Date =
         data: { clubId: state.club.id, academicYear: window.year, submittedById: actor.id, submittedAt: now, checks: snapshotChecks(state.checks), note: v.note },
       });
       await resolveTasks(RENEWAL_SOURCE, renewalSourceId(state.club.id, window.year), actor.id, tx);
-      await logActivity({ actorId: actor.id, action: "club.renewed", entityType: "club", entityId: state.club.id, clubId: state.club.id, data: { year: window.year }, isPublic: true }, tx);
+      await logActivity({ actorId: actor.id, action: "club.renewed", entityType: "club", entityId: state.club.id, clubId: state.club.id, data: { year: window.year, office: office }, isPublic: true }, tx);
       return row;
     });
   } catch (e) {
@@ -174,7 +180,7 @@ export async function renewClub(actor: Actor | null, input: unknown, now: Date =
     userIds: [...state.presidents, ...state.advisors].map((p) => p.id),
     exceptUserId: actor.id,
     kind: "club.renewed",
-    ...renewedNotice(name, window.year, actor.name),
+    ...renewedNotice(name, window.year, actor.name, office),
     href: `/clubs/${state.club.slug}/manage`,
   });
   return { year: window.year, at: renewal.submittedAt, slug: state.club.slug };
@@ -214,9 +220,10 @@ export type RenewalCounts = {
   startingNextYear: number;
 };
 
-async function allStates(now: Date) {
+/** Every approved club's renewal state, or just the viewer's office's clubs (lib/authz adminClubWhere). */
+async function allStates(actor: Actor, now: Date) {
   const { window, term } = await currentRenewalWindow(now);
-  const states = await loadRenewalStates(db, { window, term, now });
+  const states = await loadRenewalStates(db, { window, term, now, clubs: adminClubWhere(actor) });
   const renewed = states.filter((s) => s.renewal);
   const notRenewed = states.filter((s) => !s.renewal && !s.exemption);
   const counts: RenewalCounts = {
@@ -238,7 +245,7 @@ async function allStates(now: Date) {
 export async function renewalsForAdmin(actor: Actor | null, opts: { filter?: string | null } = {}, now: Date = new Date()) {
   assertCan(actor, "admin.clubs");
   const filter: RenewalFilter = RENEWAL_FILTERS.some((f) => f.key === opts.filter) ? (opts.filter as RenewalFilter) : "not-renewed";
-  const { window, renewed, notRenewed, counts } = await allStates(now);
+  const { window, renewed, notRenewed, counts } = await allStates(actor, now);
   // A stable sort, so each group stays in name order.
   const nobody = (s: ClubRenewalState) => (s.presidents.length || s.advisors.length ? 0 : 1);
   const staffedFirst = (list: ClubRenewalState[]) => [...list].sort((a, b) => nobody(a) - nobody(b));
@@ -258,6 +265,6 @@ export async function renewalsForAdmin(actor: Actor | null, opts: { filter?: str
 /** The admin Overview's count. */
 export async function renewalCounts(actor: Actor | null, now: Date = new Date()): Promise<{ window: RenewalWindow | null; counts: RenewalCounts }> {
   assertCan(actor, "admin.access");
-  const { window, counts } = await allStates(now);
+  const { window, counts } = await allStates(actor, now);
   return { window, counts };
 }

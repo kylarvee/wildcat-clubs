@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, ExternalLink, Network, Settings2, ShieldCheck, Star, UserX } from "lucide-react";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
-import { can } from "@/lib/authz";
+import { can, canAdminClub, canAdminFunding } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getTerms } from "@/lib/terms";
@@ -36,8 +36,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { clubId } = await params;
   const user = await getCurrentUser();
   if (!can(user, "admin.analytics")) return { title: "Club analytics" };
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { name: true } });
-  return { title: club ? `${club.name} · Club analytics` : "Club analytics" };
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { name: true, officeId: true } });
+  return { title: club && canAdminClub(user, club) ? `${club.name} · Club analytics` : "Club analytics" };
 }
 
 function toSeries(points: RetentionPoint[]): RetentionSeries {
@@ -45,9 +45,11 @@ function toSeries(points: RetentionPoint[]): RetentionSeries {
 }
 
 /**
- * One club's full picture for WSUSA: standing and why, membership over time,
- * attendance by event, retention, seat coverage, this year's funding and the
- * clubs it's most connected with. Every activity number comes from lib/metrics.
+ * One club's full picture for its office (WSUSA, or the office that oversees
+ * it): standing and why, membership over time, attendance by event,
+ * retention, seat coverage, this year's funding and the clubs it's most
+ * connected with. Every activity number comes from lib/metrics. Another
+ * office's club is not found.
  */
 export default async function ClubAnalyticsDetailPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const { clubId } = await params;
@@ -69,9 +71,10 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
       department: { select: { name: true } },
       focusMajor: { select: { name: true } },
       focusOther: true,
+      officeId: true,
     },
   });
-  if (!club) notFound();
+  if (!club || !canAdminClub(user, club)) notFound();
 
   const sp = await searchParams;
   const str = (k: string) => {
@@ -152,7 +155,7 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
               <Settings2 className="h-4 w-4" aria-hidden="true" /> Workspace
             </ButtonLink>
             <ButtonLink href={`/admin/clubs/${club.id}`} variant="outline" size="sm">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" /> WSUSA record
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Club record
             </ButtonLink>
           </>
         }
@@ -238,9 +241,9 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
         </>
       ) : (
         <Callout tone="info" title="No activity to chart yet">
-          {club.name} hasn&rsquo;t been approved, so it can&rsquo;t run events. Attendance, retention and connections start once WSUSA approves it.{" "}
+          {club.name} hasn&rsquo;t been approved, so it can&rsquo;t run events. Attendance, retention and connections start once it&rsquo;s approved.{" "}
           <Link href={`/admin/clubs/${club.id}`} className="font-medium underline underline-offset-2">
-            Open its WSUSA record
+            Open its club record
           </Link>
           .
         </Callout>
@@ -248,7 +251,7 @@ export default async function ClubAnalyticsDetailPage({ params, searchParams }: 
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <SeatsCard seats={seats} slug={club.slug} />
-        <FundingCard funding={funding} club={club} />
+        <FundingCard funding={funding} club={club} allRequests={canAdminFunding(user, club)} />
       </div>
 
       {ranEvents ? (
@@ -388,7 +391,8 @@ function SeatsCard({ seats, slug }: { seats: SeatCoverage; slug: string }) {
   );
 }
 
-function FundingCard({ funding, club }: { funding: FundingSummary; club: { college: { name: string } | null; department: { name: string } | null } }) {
+/** `allRequests`: the viewer decides this club's funding, so the Funding tool is theirs to open. */
+function FundingCard({ funding, club, allRequests }: { funding: FundingSummary; club: { college: { name: string } | null; department: { name: string } | null }; allRequests: boolean }) {
   const year = funding.yearLabel ? `${funding.yearLabel.replace("-", "–")} academic year` : "This academic year";
   return (
     <Card className="min-w-0">
@@ -396,9 +400,11 @@ function FundingCard({ funding, club }: { funding: FundingSummary; club: { colle
         title="Funding"
         description={year}
         action={
-          <Link href="/admin/funding" className="text-sm font-medium text-brand-600 hover:underline">
-            All requests
-          </Link>
+          allRequests ? (
+            <Link href="/admin/funding" className="text-sm font-medium text-brand-600 hover:underline">
+              All requests
+            </Link>
+          ) : null
         }
       />
       <CardBody className="space-y-4">
@@ -407,7 +413,7 @@ function FundingCard({ funding, club }: { funding: FundingSummary; club: { colle
             <dl className="grid grid-cols-3 gap-2">
               <MiniStat label="Requested" value={fmtMoney(funding.requestedCents)} hint={`${funding.counts.submitted} ${funding.counts.submitted === 1 ? "request" : "requests"}`} />
               <MiniStat label="Approved" value={fmtMoney(funding.approvedCents)} hint={funding.counts.denied ? `${funding.counts.denied} not approved` : `${funding.counts.approved} decided`} />
-              <MiniStat label="In WSUSA review" value={fmtMoney(funding.pendingCents)} hint={`${funding.counts.pending} waiting`} />
+              <MiniStat label="In review" value={fmtMoney(funding.pendingCents)} hint={`${funding.counts.pending} waiting`} />
             </dl>
             {funding.bySource.length > 1 ? (
               <div>
@@ -450,7 +456,7 @@ function FundingCard({ funding, club }: { funding: FundingSummary; club: { colle
             </div>
           </>
         ) : (
-          <p className="text-sm text-ink-3">No funding requests sent to WSUSA this academic year.</p>
+          <p className="text-sm text-ink-3">No funding requests sent this academic year.</p>
         )}
       </CardBody>
     </Card>

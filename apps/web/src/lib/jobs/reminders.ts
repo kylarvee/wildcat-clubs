@@ -4,6 +4,7 @@ import { tasksAwaitingGrade } from "@/lib/authz/requirements";
 import { eventFollowers } from "@/lib/domain/event-notices";
 import { notifyEach, notifyInBatches } from "@/lib/domain/notify";
 import { eventAudience, placeOf } from "@/lib/events/notices";
+import { UNDER_REVIEW } from "@/lib/events/review";
 import { dueSoonNotice, dueStage, PRUNED_KEY_PREFIXES, pruneBefore, reminderKeys, startingSoonNotice, startingSoonWindow } from "@/lib/jobs/reminder-rules";
 
 /**
@@ -14,7 +15,8 @@ import { dueSoonNotice, dueStage, PRUNED_KEY_PREFIXES, pruneBefore, reminderKeys
  *    members-only event: their members and leaders) who keep "Remind me before
  *    events" on and haven't checked in yet. University trainings remind only
  *    the people whose open WSUSA requirement asks them to attend. In-app and
- *    push, never email.
+ *    push, never email. Events still waiting for their office's review
+ *    (lib/events/review) aren't posted, so they remind nobody.
  *  - Requirements due: each open required task a week and a day before it's
  *    due (reminder-rules dueStage), in-app, by email and push. A test handed in
  *    on time that's waiting for grading is left alone. They go out together
@@ -54,8 +56,8 @@ async function remindEventsStartingSoon(now: Date): Promise<{ events: number; pe
     where: {
       status: "SCHEDULED",
       startsAt: { gte: from, lte: to },
-      // All-day events have no start time to remind about; unapproved clubs' events are hidden.
-      event: { status: "SCHEDULED", allDay: false, OR: [{ clubId: null }, { club: { status: "APPROVED" } }] },
+      // All-day events have no start time to remind about; unapproved clubs' events and events under review are hidden.
+      event: { status: "SCHEDULED", allDay: false, reviewStatus: { notIn: [...UNDER_REVIEW] }, OR: [{ clubId: null }, { club: { status: "APPROVED" } }] },
     },
     select: {
       id: true,

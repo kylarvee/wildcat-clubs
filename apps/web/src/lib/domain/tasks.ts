@@ -3,12 +3,14 @@ import type { Prisma, TaskKind } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { ALL_CAPABILITIES, CAPABILITIES, clubCapabilities, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
-import { capabilitiesByClub, clubCapabilityHolders } from "@/lib/authz/people";
-import { pausedClubsFromTasks, tasksAwaitingGrade } from "@/lib/authz/requirements";
+import { adminScope, ALL_CAPABILITIES, CAPABILITIES, getClubAccess, ROLE_LABEL, ROLE_RANK, type Capability } from "@/lib/authz";
+import { capabilitiesByClub, capabilitiesFromTasks, clubCapabilityHolders } from "@/lib/authz/people";
+import { tasksAwaitingGrade } from "@/lib/authz/requirements";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
 import { assertSignedIn, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
+import { unstaffedOfficeIds } from "@/lib/offices";
+import { routeAdminTask } from "@/lib/offices/rules";
 import { campusDate } from "@/lib/time";
 
 /**
@@ -28,11 +30,24 @@ import { campusDate } from "@/lib/time";
  * Required tasks are the ones WSUSA requires (officer and member
  * requirements, WSUSA-assigned tests and forms). The creating domain function
  * sets `required`; every list puts them first and marks them Required.
+ *
+ * ADMINS tasks belong to an office (Task.officeId, lib/offices; null = the
+ * umbrella, WSUSA). createTask routes them by lib/offices/rules routeAdminTask:
+ * a task about a club goes to the club's office, except platform-wide work
+ * (reports, review moderation, department requests, Google account checks:
+ * the umbrella) and funding (the club's office only when it decides funding).
+ * An explicit `officeId` or `umbrella: true` overrides that.
  */
 
 export type TaskAssignee =
   | { type: "USER"; userId: string }
-  | { type: "ADMINS" }
+  | {
+      type: "ADMINS";
+      /** This office's staff instead of the routed one (null = the umbrella), e.g. a platform test's office for its grading. */
+      officeId?: string | null;
+      /** Platform-wide work: always the umbrella's, whatever office oversees the club. */
+      umbrella?: true;
+    }
   | { type: "CLUB"; clubId: string; capability: Capability };
 
 export type NewTask = {
@@ -54,6 +69,7 @@ export const SELF_CLOSING_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "TEST"
 export const TASK_KINDS: TaskKind[] = ["APPROVAL", "REQUIREMENT", "TEST", "INVOICE", "CLUB", "PERSONAL"];
 
 export async function createTask(t: NewTask, tx: Tx = db) {
+  const clubId = t.assignee.type === "CLUB" ? t.assignee.clubId : (t.clubId ?? null);
   return tx.task.create({
     data: {
       kind: t.kind,
@@ -61,7 +77,7 @@ export async function createTask(t: NewTask, tx: Tx = db) {
       description: t.description,
       assigneeType: t.assignee.type,
       assigneeId: t.assignee.type === "USER" ? t.assignee.userId : null,
-      clubId: t.assignee.type === "CLUB" ? t.assignee.clubId : (t.clubId ?? null),
+      clubId,
       capability: t.assignee.type === "CLUB" ? t.assignee.capability : null,
       href: t.href,
       dueAt: t.dueAt ?? null,
@@ -69,8 +85,23 @@ export async function createTask(t: NewTask, tx: Tx = db) {
       sourceType: t.source?.type,
       sourceId: t.source?.id,
       createdById: t.createdById ?? null,
+      officeId: t.assignee.type === "ADMINS" ? await adminTaskOffice(t.assignee, t.source?.type ?? null, clubId, tx) : null,
     },
   });
+}
+
+/** The office an ADMINS task is for (the stored officeId: null is the umbrella, never its id). */
+async function adminTaskOffice(a: Extract<TaskAssignee, { type: "ADMINS" }>, sourceType: string | null, clubId: string | null, tx: Tx): Promise<string | null> {
+  if (a.umbrella) return null;
+  if (a.officeId !== undefined) {
+    if (a.officeId === null) return null;
+    const office = await tx.office.findUnique({ where: { id: a.officeId }, select: { umbrella: true } });
+    return office && !office.umbrella ? a.officeId : null;
+  }
+  if (!clubId) return null;
+  const club = await tx.club.findUnique({ where: { id: clubId }, select: { officeId: true, office: { select: { umbrella: true, decidesFunding: true } } } });
+  if (!club?.office || club.office.umbrella) return null;
+  return routeAdminTask(sourceType, { officeId: club.officeId, decidesFunding: club.office.decidesFunding });
 }
 
 /** Close every open task about a source (called when the thing is decided). */
@@ -91,7 +122,10 @@ export async function taskScopeFor(actor: Actor, opts: { pauses?: "live" | "task
   // authz/people rule, so paused officers and founding clubs match getClubAccess).
   const clubs = opts.pauses === "tasks" ? await capabilitiesFromTasks(actor.id) : await capabilitiesByClub(actor.id);
   const or: Prisma.TaskWhereInput[] = [{ assigneeType: "USER", assigneeId: actor.id }];
-  if (isAdmin(actor)) or.push({ assigneeType: "ADMINS" });
+  const admin = adminScope(actor);
+  // Platform admins work the umbrella's queue and that of any office nobody staffs; office staff their offices'.
+  if (admin.all) or.push({ assigneeType: "ADMINS", OR: [{ officeId: null }, { officeId: { in: await unstaffedOfficeIds() } }] });
+  if (admin.officeIds.length) or.push({ assigneeType: "ADMINS", officeId: { in: admin.officeIds } });
   for (const cap of ALL_CAPABILITIES) {
     const clubIds = clubs.filter(([, caps]) => caps.has(cap)).map(([clubId]) => clubId);
     if (clubIds.length) or.push({ assigneeType: "CLUB", capability: cap, clubId: { in: clubIds } });
@@ -104,6 +138,8 @@ const taskInclude = {
   createdBy: { select: { name: true, handle: true } },
   completedBy: { select: { name: true } },
   assignee: { select: { name: true, handle: true } },
+  // On ADMINS tasks, whose queue it's in; on required tasks, who requires it (null: WSUSA).
+  office: { select: { shortName: true } },
 } satisfies Prisma.TaskInclude;
 
 export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskInclude }> & {
@@ -146,24 +182,6 @@ export async function listTasks(actor: Actor | null, opts: ListTasksOpts = {}): 
   return waiting.size ? rows.map((t) => (waiting.has(t.id) ? { ...t, awaitingGrade: true } : t)) : rows;
 }
 
-/**
- * capabilitiesByClub without re-checking requirements: getClubAccess's
- * capability rule on the person's own roles (top role per club), with the
- * pause read from their open required tasks (pausedClubsFromTasks).
- */
-async function capabilitiesFromTasks(userId: string): Promise<[clubId: string, caps: Set<Capability>][]> {
-  const rows = await db.roleAssignment.findMany({
-    where: { userId, endedAt: null },
-    select: { clubId: true, role: true, permissions: true, startedAt: true, club: { select: { status: true, approvedAt: true } } },
-  });
-  const byClub = new Map<string, typeof rows>();
-  for (const r of rows) byClub.set(r.clubId, [...(byClub.get(r.clubId) ?? []), r]);
-  // getClubAccess's pick: the highest-ranked role in each club.
-  const tops = [...byClub.values()].map((list) => [...list].sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role])[0]);
-  const gated = tops.filter((t) => t.club.status === "APPROVED" && ROLE_RANK[t.role] >= 1 && t.role !== "ADVISOR");
-  const paused = await pausedClubsFromTasks(userId, gated.map((t) => ({ clubId: t.clubId, role: t.role, startedAt: t.startedAt, clubApprovedAt: t.club.approvedAt })));
-  return tops.map((top) => [top.clubId, clubCapabilities({ clubStatus: top.club.status, role: top.role, assignments: byClub.get(top.clubId)!, full: top.role === "ADVISOR", suspended: paused.has(top.clubId) })]);
-}
 
 /** The header's count of your open tasks: a plain count over your inbox, never re-checking requirements. */
 export async function countOpenTasks(actor: Actor) {

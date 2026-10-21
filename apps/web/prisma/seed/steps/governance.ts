@@ -401,6 +401,170 @@ export function buildGovernance(ctx: Ctx) {
       status: "OPEN", sourceType: "testAttempt", sourceId: a.id as string, createdAt: a.submittedAt as Date,
     });
   }
+
+  officeAndPermissionRequirements(ctx, currentAy);
+}
+
+// ─── An office's requirement, and one about a single permission ─────────────
+
+const SAFETY_TRAINING_INTRO =
+  "<p>A short refresher for anyone who plans club events: what to check in the Events Builder before you post, who reviews events that need a second look, and what to do if something goes wrong. Pass it once each academic year.</p><ul><li>About 10 minutes, 5 questions.</li><li>You need 80% to pass. You can retake it.</li></ul>";
+
+const SAFETY_TRAINING_QUESTIONS: QuestionDef[] = [
+  {
+    type: "SINGLE_CHOICE",
+    prompt: "<p>Your social will probably draw more than 100 people. What do you do in the Events Builder?</p>",
+    options: [{ id: "a", text: "Nothing; big events are fine" }, { id: "b", text: "Check “More than 100 people” so your club's office can review the plan first" }, { id: "c", text: "Make it members only" }],
+    correct: ["b"],
+  },
+  {
+    type: "MULTI_CHOICE",
+    prompt: "<p>Which of these send an event to your club's office for review before it's posted? Select all that apply.</p>",
+    options: [{ id: "a", text: "Travel or an overnight stay" }, { id: "b", text: "People under 18" }, { id: "c", text: "Your weekly meeting in the usual room" }, { id: "d", text: "Collecting money" }],
+    correct: ["a", "b", "d"],
+  },
+  {
+    type: "SINGLE_CHOICE",
+    prompt: "<p>Who may drive members to an off-campus event?</p>",
+    options: [{ id: "a", text: "Anyone with a car" }, { id: "b", text: "The drivers listed with the trip in the Events Builder" }, { id: "c", text: "Whoever gets there first" }],
+    correct: ["b"],
+  },
+  {
+    type: "SINGLE_CHOICE",
+    prompt: "<p>Someone is hurt at your event. After calling 911 if it's needed, who do you tell?</p>",
+    options: [{ id: "a", text: "Nobody" }, { id: "b", text: "Your advisor and your club's office, the same day" }, { id: "c", text: "Your club's group chat" }],
+    correct: ["b"],
+  },
+  {
+    type: "SINGLE_CHOICE",
+    prompt: "<p>Where do you find a building's emergency exits?</p>",
+    options: [{ id: "a", text: "On the evacuation map by each stairwell and elevator" }, { id: "b", text: "Nowhere; ask security" }, { id: "c", text: "On the club page" }],
+    correct: ["a"],
+  },
+];
+
+const SPORT_FORMS_INTRO =
+  "<p>Campus Recreation asks the officers of every sport club to sign these once each academic year, so the club's travel, injury and facility rules are understood before the season. It takes about two minutes.</p>";
+
+const SPORT_FORMS_QUESTIONS: QuestionDef[] = [
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Sport Club Handbook.</strong> I've read Campus Recreation's Sport Club Handbook, including its travel, injury-reporting and facility rules, and I'll follow them.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Rosters and waivers.</strong> Our club keeps its roster and emergency contacts current, and every member who takes part has a participation waiver on file.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SINGLE_CHOICE", prompt: "<p><strong>Trips.</strong> Before any trip, we add the destination, dates and drivers to the event in the Events Builder, so Campus Recreation can review it.</p>", options: [{ id: "agree", text: "I agree" }] },
+  { type: "SHORT_ANSWER", prompt: "<p>Type your full name to sign.</p>" },
+];
+
+/** Questions for a seeded test, numbered in order (no generator draws). */
+function plainQuestions(ctx: Ctx, testId: string, defs: QuestionDef[]) {
+  return defs.map((q, i) => {
+    const id = ctx.id();
+    ctx.rows.questions.push({
+      id, testId, order: i + 1, type: q.type, promptHtml: q.prompt, options: (q.options ?? []) as unknown as Prisma.InputJsonValue, correctOptionIds: q.correct ?? [], modelAnswer: q.modelAnswer ?? null, points: 1,
+    });
+    return { def: q, id };
+  });
+}
+
+/** A graded, passing attempt with every answer right (a signed form when there's nothing to score). */
+function passingAttempt(ctx: Ctx, opts: { testId: string; questions: ReturnType<typeof plainQuestions>; userId: string; cycleKey: string; submittedAt: Date; scored: boolean }) {
+  const id = ctx.id();
+  ctx.rows.attempts.push({
+    id, testId: opts.testId, userId: opts.userId, cycleKey: opts.cycleKey, startedAt: addMin(opts.submittedAt, -6), deadlineAt: null, submittedAt: opts.submittedAt, autoSubmitted: false,
+    status: "GRADED", scorePercent: opts.scored ? 100 : null, passed: true, gradedById: null, gradedAt: opts.submittedAt,
+  });
+  for (const q of opts.questions) {
+    ctx.rows.answers.push({
+      id: ctx.id(), attemptId: id, questionId: q.id, selectedOptionIds: q.def.correct ?? (q.def.options ? [q.def.options[0].id] : []), text: q.def.options ? null : ctx.person(opts.userId).name,
+      pointsAwarded: opts.scored && q.def.options ? 1 : null, reviewerComment: null,
+    });
+  }
+}
+
+/**
+ * The newer kinds of requirement (lib/authz/requirement-rules
+ * requirementReaches), built without the seed's generator, so the rest of
+ * the seed stays exactly where it was:
+ *  - Event Safety Training: WSUSA's short test for anyone with the Events
+ *    permission (gatesCapability "events"; presidents and VPs hold every
+ *    permission), seeded off so WSUSA can turn it on. Overdue, it pauses only
+ *    Events. Priya already passed it this year; Vanessa hasn't, so turning it
+ *    on pauses only her Events in SWE (it was added three weeks ago with a
+ *    14-day grace), and Oscar, a Treasurer without Events, never owes it.
+ *  - Sport club safety forms: Campus Recreation's form (Test.officeId),
+ *    required of its sport clubs' officers only (RoleRequirement.officeId),
+ *    on, added 12 days ago with 30 days' grace, so nobody's late yet. Each
+ *    officer gets the task and assignment the sweep would make; two in three
+ *    have signed.
+ */
+function officeAndPermissionRequirements(ctx: Ctx, ay: { label: string; start: Date }) {
+  const { NOW } = ctx;
+  const alex = ctx.p("alex").id;
+  const campusRec = ctx.offices.get("campus-rec")!;
+
+  // Event Safety Training (off).
+  const safetyId = ctx.id();
+  const safetyCreated = addDays(NOW, -21.3);
+  ctx.refs.safetyTrainingTestId = safetyId;
+  ctx.rows.tests.push({
+    id: safetyId, clubId: null, officeId: null, title: "Event Safety Training", introHtml: SAFETY_TRAINING_INTRO, timeLimitMinutes: 15, passingPercent: 80, maxAttempts: null,
+    status: "PUBLISHED", audience: "ROLE_REQUIREMENT", recurrence: "ACADEMIC_YEAR", dueDays: 14, closesAt: null, automations: [], createdById: alex, createdAt: safetyCreated, updatedAt: safetyCreated,
+  });
+  const safetyQs = plainQuestions(ctx, safetyId, SAFETY_TRAINING_QUESTIONS);
+  ctx.refs.safetyRequirementId = ctx.id();
+  ctx.rows.requirements.push({
+    id: ctx.refs.safetyRequirementId, name: "Event Safety Training", description: "Pass WSUSA's short event safety training once each academic year. It's for anyone with the Events permission; until it's done, only Events pauses.",
+    appliesTo: ["OFFICER", "VP", "PRESIDENT"], kind: "TEST", testId: safetyId, renewal: "ACADEMIC_YEAR", graceDays: 14, active: false, gatesCapability: "events", officeId: null, createdAt: safetyCreated,
+  });
+  passingAttempt(ctx, { testId: safetyId, questions: safetyQs, userId: ctx.p("priya").id, cycleKey: ay.label, submittedAt: addDays(NOW, -9.2), scored: true });
+
+  // Campus Recreation's sport club safety forms (on).
+  const formId = ctx.id();
+  const formCreated = addDays(NOW, -12.3);
+  const rowan = ctx.p("rowan").id;
+  ctx.refs.sportFormsTestId = formId;
+  ctx.rows.tests.push({
+    id: formId, clubId: null, officeId: campusRec.id, title: "Sport club safety forms", isForm: true, introHtml: SPORT_FORMS_INTRO, timeLimitMinutes: null, passingPercent: 0, maxAttempts: 1,
+    status: "PUBLISHED", audience: "ROLE_REQUIREMENT", recurrence: "ACADEMIC_YEAR", dueDays: 30, closesAt: null, automations: [], createdById: rowan, createdAt: formCreated, updatedAt: formCreated,
+  });
+  const formQs = plainQuestions(ctx, formId, SPORT_FORMS_QUESTIONS);
+  const reqId = ctx.id();
+  ctx.refs.sportFormsRequirementId = reqId;
+  const description = "Campus Recreation asks the officers of every sport club to sign its safety forms once each academic year.";
+  ctx.rows.requirements.push({
+    id: reqId, name: "Sport club safety forms", description, appliesTo: ["OFFICER", "VP", "PRESIDENT"], kind: "TEST", testId: formId, renewal: "ACADEMIC_YEAR", graceDays: 30, active: true,
+    gatesCapability: null, officeId: campusRec.id, createdAt: formCreated,
+  });
+
+  // Who it reaches, as the sweep reads it: current officer, VP and President seats in Campus Rec's approved clubs, active people only.
+  const seats = ctx.clubs
+    .filter((c) => c.status === "APPROVED" && c.officeId === campusRec.id)
+    .flatMap((c) => c.assignments.filter((a) => !a.endedAt && a.startedAt <= NOW && LEAD.has(a.role) && ctx.person(a.userId).status === "ACTIVE").map((a) => ({ c, a })))
+    .sort((x, y) => x.a.startedAt.getTime() - y.a.startedAt.getTime() || x.a.id.localeCompare(y.a.id));
+  const owed = new Map<string, { dueAt: Date; clubId: string }>();
+  for (const { c, a } of seats) {
+    const dueAt = addDays(maxDate(maxDate(a.startedAt, c.approvedAt ?? a.startedAt), maxDate(ay.start, formCreated)), 30);
+    const cur = owed.get(a.userId);
+    if (!cur || dueAt < cur.dueAt) owed.set(a.userId, { dueAt, clubId: c.id });
+  }
+  let i = 0;
+  for (const [userId, { dueAt, clubId }] of owed) {
+    const clock = addDays(dueAt, -30);
+    const signed = i++ % 3 !== 2 && clock < addDays(NOW, -1);
+    const submittedAt = signed ? minDate(addDays(clock, 1 + (i % 7) * 0.9), addMin(NOW, -90)) : null;
+    if (signed) passingAttempt(ctx, { testId: formId, questions: formQs, userId, cycleKey: ay.label, submittedAt: submittedAt!, scored: false });
+    ctx.rows.testAssignments.push({ id: ctx.id(), testId: formId, userId, cycleKey: ay.label, dueAt, status: signed ? "COMPLETED" : "ASSIGNED", createdAt: clock, resolvedAt: submittedAt });
+    // A leader's requirement task names the club whose permissions it gates (requirements.syncUserRequirements).
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "REQUIREMENT", title: "Fill out: Sport club safety forms", description, assigneeType: "USER", assigneeId: userId, clubId, href: `/tests/${formId}`, dueAt, required: true, officeId: campusRec.id,
+      status: signed ? "DONE" : "OPEN", sourceType: "requirement", sourceId: `${reqId}:${userId}`, createdAt: clock, completedAt: submittedAt, completedById: signed ? userId : null,
+    });
+    if (!signed) {
+      ctx.rows.notifications.push({
+        id: ctx.id(), userId, kind: "requirement.assigned", title: "A Campus Recreation requirement to finish",
+        body: `Finish Sport club safety forms by ${dueAt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" })} to keep your permissions on.`,
+        href: "/tasks", createdAt: addMin(clock, 4), readAt: null,
+      });
+    }
+  }
 }
 
 type RequiredFormDef = {

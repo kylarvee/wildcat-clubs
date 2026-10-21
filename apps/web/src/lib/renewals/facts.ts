@@ -35,7 +35,8 @@ export type RenewalRecord = {
 };
 
 export type ClubRenewalState = {
-  club: { id: string; name: string; slug: string; type: ClubType; status: ClubStatus; approvedAt: Date | null; logoUrl: string | null; logoColor: string };
+  /** `office`: the office the club renews with (lib/offices), null for WSUSA. */
+  club: { id: string; name: string; slug: string; type: ClubType; status: ClubStatus; approvedAt: Date | null; logoUrl: string | null; logoColor: string; office: { name: string } | null };
   presidents: RenewalPerson[];
   vicePresidents: RenewalPerson[];
   advisors: RenewalPerson[];
@@ -66,18 +67,20 @@ const clubSelect = {
   departmentId: true,
   requestedDepartmentName: true,
   category: true,
+  office: { select: { name: true } },
 } satisfies Prisma.ClubSelect;
 
 /**
  * Renewal state for the clubs in `clubIds` (any status), or for every approved
- * club except College Ambassadors programs. Sorted by club name.
+ * club except College Ambassadors programs, narrowed by `clubs` (an office's
+ * clubs: lib/authz adminClubWhere). Sorted by club name.
  */
 export async function loadRenewalStates(
   client: Client,
-  opts: { window: RenewalWindow | null; term: RenewalTerm | null; now: Date; clubIds?: string[] },
+  opts: { window: RenewalWindow | null; term: RenewalTerm | null; now: Date; clubIds?: string[]; clubs?: Prisma.ClubWhereInput },
 ): Promise<ClubRenewalState[]> {
   const clubs = await client.club.findMany({
-    where: opts.clubIds ? { id: { in: opts.clubIds } } : { status: "APPROVED", type: { not: "COLLEGE_AMBASSADORS" } },
+    where: opts.clubIds ? { id: { in: opts.clubIds } } : { AND: [{ status: "APPROVED", type: { not: "COLLEGE_AMBASSADORS" } }, opts.clubs ?? {}] },
     orderBy: { name: "asc" },
     select: clubSelect,
   });
@@ -147,7 +150,7 @@ export async function loadRenewalStates(
     const renewal: RenewalRecord | null = row ? { id: row.id, academicYear: row.academicYear, submittedAt: row.submittedAt, note: row.note, checks: row.checks, submittedBy: row.submittedBy } : null;
     const exemption = renewalExemption(club, opts.window);
     return {
-      club: { id: club.id, name: club.name, slug: club.slug, type: club.type, status: club.status, approvedAt: club.approvedAt, logoUrl: club.logoUrl, logoColor: club.logoColor },
+      club: { id: club.id, name: club.name, slug: club.slug, type: club.type, status: club.status, approvedAt: club.approvedAt, logoUrl: club.logoUrl, logoColor: club.logoColor, office: club.office },
       presidents,
       vicePresidents,
       advisors,

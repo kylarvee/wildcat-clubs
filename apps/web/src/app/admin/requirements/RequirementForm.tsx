@@ -24,10 +24,17 @@ export type RequirementFormValues = {
   renewal: RenewalPeriod;
   graceDays: number;
   active: boolean;
+  /** "" = every leader permission; else the one permission it's about (a Capability). */
+  gatesCapability: string;
+  /** "" = WSUSA's, for every club; else the office whose clubs it reaches. */
+  officeId: string;
 };
 
-type TestOption = { id: string; title: string; status: string; audience: string; isForm: boolean };
+type TestOption = { id: string; title: string; status: string; audience: string; isForm: boolean; officeId: string | null };
 type EventOption = { id: string; title: string; kind: string };
+type OfficeOption = { id: string; name: string };
+/** The club permissions a requirement can be about (lib/authz CAPABILITIES). */
+export type PermissionOption = { value: string; label: string };
 
 const ROLE_CHOICES: { value: ClubRole; label: string }[] = [
   { value: "MEMBER", label: "Every club member" },
@@ -39,17 +46,58 @@ const ROLE_CHOICES: { value: ClubRole; label: string }[] = [
 
 const RENEWALS: RenewalPeriod[] = ["ACADEMIC_YEAR", "SEMESTER", "ANNUAL", "NONE"];
 
-/** Create or edit a requirement: a test to pass, a form to fill out or a training to attend, for members and/or leader roles, with a grace period. */
-export function RequirementForm({ id, initial, tests, events }: { id: string | null; initial: RequirementFormValues; tests: TestOption[]; events: EventOption[] }) {
+/**
+ * Create or edit a requirement: a test to pass, a form to fill out or a
+ * training to attend, for members and/or leader roles (optionally only those
+ * holding one permission), with a grace period. WSUSA's admins choose whose
+ * it is (WSUSA's for every club, or an office's for its clubs); an office's
+ * staff always file their own office's, using its own tests and forms.
+ */
+export function RequirementForm({
+  id,
+  initial,
+  tests,
+  events,
+  offices,
+  umbrella,
+  permissions,
+}: {
+  id: string | null;
+  initial: RequirementFormValues;
+  tests: TestOption[];
+  events: EventOption[];
+  /** Offices this person can file a requirement under (besides WSUSA, for WSUSA's admins). */
+  offices: OfficeOption[];
+  /** WSUSA's admins (every office's requirements); false for an office's staff. */
+  umbrella: boolean;
+  permissions: PermissionOption[];
+}) {
   const router = useRouter();
   const [v, setV] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const kindName = useId();
+  const permId = useId();
   const set = <K extends keyof RequirementFormValues>(k: K, val: RequirementFormValues[K]) => setV((s) => ({ ...s, [k]: val }));
 
-  const usableTests = tests.filter((t) => t.status === "PUBLISHED" && t.audience === "ROLE_REQUIREMENT");
-  const otherTests = tests.filter((t) => !usableTests.includes(t));
+  const office = offices.find((o) => o.id === v.officeId) ?? null;
+  const owner = office?.name ?? "WSUSA";
+  // A requirement uses its own office's tests and forms; an office's is always a test or form.
+  const mine = tests.filter((t) => (t.officeId ?? "") === v.officeId);
+  const usableTests = mine.filter((t) => t.status === "PUBLISHED" && t.audience === "ROLE_REQUIREMENT");
+  const otherTests = mine.filter((t) => !usableTests.includes(t));
+  const kinds = (
+    [
+      ["TEST", "Pass a test or fill out a form", "Met by passing a university test, or by submitting a university form."],
+      ["TRAINING", "Attend a training", "Met by a check-in at any session of a university training."],
+      ["PROFILE", "Confirm member details", "Met when someone's member details (Settings → Member details) are complete and confirmed this period."],
+    ] as const
+  ).filter(([value]) => !v.officeId || value === "TEST");
+  const gated = v.gatesCapability !== "";
+  const permissionLabel = permissions.find((p) => p.value === v.gatesCapability)?.label ?? "that";
+
+  const chooseOffice = (officeId: string) =>
+    setV((s) => ({ ...s, officeId, testId: tests.some((t) => t.id === s.testId && (t.officeId ?? "") === officeId) ? s.testId : "", kind: officeId ? "TEST" : s.kind }));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,6 +107,8 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
         ...v,
         testId: v.kind === "TEST" ? v.testId || null : null,
         trainingEventId: v.kind === "TRAINING" ? v.trainingEventId || null : null,
+        gatesCapability: v.gatesCapability || null,
+        officeId: v.officeId || null,
       }).catch(() => null);
       if (!r) return setError("We couldn't reach the server. Try again.");
       if (!r.ok) return setError(r.error);
@@ -72,7 +122,37 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
       <Card>
         <CardHeader title="What's required" />
         <CardBody className="space-y-4">
-          <Field label="Name" required hint="Shown in people's tasks, marked Required by WSUSA.">
+          {umbrella && offices.length ? (
+            <Field label="Whose requirement" hint={v.officeId ? `It reaches only ${owner}'s clubs, and uses ${owner}'s own tests and forms.` : "WSUSA's requirements reach every approved club."}>
+              {(fid) => (
+                <Select id={fid} value={v.officeId} onChange={(e) => chooseOffice(e.target.value)}>
+                  <option value="">WSUSA (every club)</option>
+                  {offices.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} (its clubs only)
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : !umbrella && offices.length > 1 ? (
+            <Field label="Whose requirement" hint="It reaches only that office's clubs.">
+              {(fid) => (
+                <Select id={fid} value={v.officeId} onChange={(e) => chooseOffice(e.target.value)}>
+                  {offices.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : !umbrella && office ? (
+            <p className="rounded-xl bg-muted/70 px-3.5 py-3 text-sm text-ink-2">
+              A {office.name} requirement: it reaches only {office.name}&apos;s clubs and uses your office&apos;s own tests and forms.
+            </p>
+          ) : null}
+          <Field label="Name" required hint={`Shown in people's tasks, marked Required (it's ${owner}'s).`}>
             {(fid) => <Input id={fid} value={v.name} maxLength={120} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Club Officer Policy Test" />}
           </Field>
           <Field label="Description" hint="Optional. What it covers and why it matters.">
@@ -81,13 +161,7 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-ink">Kind</legend>
             <div className="grid gap-2 sm:grid-cols-3">
-              {(
-                [
-                  ["TEST", "Pass a test or fill out a form", "Met by passing a university test, or by submitting a university form."],
-                  ["TRAINING", "Attend a training", "Met by a check-in at any session of a university training."],
-                  ["PROFILE", "Confirm member details", "Met when someone's member details (Settings → Member details) are complete and confirmed this period."],
-                ] as const
-              ).map(([value, label, detail]) => (
+              {kinds.map(([value, label, detail]) => (
                 <label key={value} className={cn("flex cursor-pointer gap-3 rounded-xl border p-3", v.kind === value ? "border-brand bg-brand-50/60" : "border-line hover:bg-muted/50")}>
                   <input type="radio" name={kindName} checked={v.kind === value} onChange={() => set("kind", value)} className="mt-1 accent-[var(--color-brand)]" />
                   <span>
@@ -108,7 +182,7 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
               required
               hint={
                 <>
-                  Published university tests and forms whose audience is “WSUSA requirement”. Build or change one in{" "}
+                  Published {v.officeId ? `${owner} ` : "WSUSA "}tests and forms whose audience is “WSUSA requirement”. Build or change one in{" "}
                   <Link href="/admin/tests" className="font-medium text-brand-600 hover:underline">
                     Tests
                   </Link>
@@ -178,13 +252,39 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
                 <Checkbox
                   key={r.value}
                   label={r.label}
-                  checked={v.appliesTo.includes(r.value)}
+                  // Members hold no club permissions, so a one-permission requirement is for leaders only.
+                  disabled={r.value === "MEMBER" && gated}
+                  checked={v.appliesTo.includes(r.value) && !(r.value === "MEMBER" && gated)}
                   onChange={() => set("appliesTo", v.appliesTo.includes(r.value) ? v.appliesTo.filter((x) => x !== r.value) : [...v.appliesTo, r.value])}
                 />
               ))}
             </div>
+            <div className="mt-3 rounded-xl border border-line p-3">
+              <Checkbox
+                label="Only people with one permission"
+                description="Narrows the leader roles above to people who hold it (presidents and vice presidents hold every permission). When it's overdue, only that permission pauses."
+                checked={gated}
+                onChange={() => setV((s) => ({ ...s, gatesCapability: s.gatesCapability ? "" : (permissions[0]?.value ?? ""), appliesTo: s.gatesCapability ? s.appliesTo : s.appliesTo.filter((x) => x !== "MEMBER") }))}
+              />
+              {gated ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 pl-7 text-sm text-ink-2">
+                  <label htmlFor={permId}>Only people with the</label>
+                  <Select id={permId} value={v.gatesCapability} onChange={(e) => set("gatesCapability", e.target.value)} className="w-auto min-w-[12rem]">
+                    {permissions.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <span>permission</span>
+                </div>
+              ) : null}
+            </div>
             <p className="mt-2 text-xs text-ink-3">
-              Students in approved clubs only; advisors are never asked. When it&apos;s overdue, leaders&apos; permissions pause. Members have nothing to pause, so it stays on their task list marked overdue.
+              {v.officeId ? `Students in ${owner}'s approved clubs only` : "Students in approved clubs only"}; advisors are never asked.{" "}
+              {gated
+                ? `When it's overdue, only ${permissionLabel} pauses; the rest of their role keeps working.`
+                : "When it's overdue, leaders' permissions pause. Members have nothing to pause, so it stays on their task list marked overdue."}
             </p>
           </fieldset>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -207,8 +307,10 @@ export function RequirementForm({ id, initial, tests, events }: { id: string | n
           </div>
           <p className="text-sm text-ink-2">
             {v.graceDays === 0
-              ? "Leaders' permissions stay paused until this is done (their title stays)."
-              : `People have ${v.graceDays} ${v.graceDays === 1 ? "day" : "days"} from the latest of joining the club or taking the role, the club's approval, and the start of each renewal period. After that, leaders' permissions pause until it's done.`}
+              ? gated
+                ? `${permissionLabel} stays paused until this is done (their title and other permissions stay).`
+                : "Leaders' permissions stay paused until this is done (their title stays)."
+              : `People have ${v.graceDays} ${v.graceDays === 1 ? "day" : "days"} from the latest of joining the club or taking the role, the club's approval, and the start of each renewal period. After that, ${gated ? `${permissionLabel} pauses` : "leaders' permissions pause"} until it's done.`}
           </p>
           <label className="flex items-center gap-3">
             <Switch checked={v.active} onCheckedChange={(c) => set("active", c)} aria-label="Requirement is on" />

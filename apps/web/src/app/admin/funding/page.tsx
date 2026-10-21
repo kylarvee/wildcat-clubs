@@ -19,7 +19,7 @@ import { FundingFilters } from "@/components/budget/admin/FundingFilters";
 export const metadata: Metadata = { title: "Funding" };
 
 const QUEUES: { key: AdminQueue; label: string; hint: string }[] = [
-  { key: "submitted", label: "In WSUSA review", hint: "Oldest first." },
+  { key: "submitted", label: "In review", hint: "Oldest first." },
   { key: "approved", label: "Approved · invoice open", hint: "Approved requests until their invoice is processed, oldest decision first." },
   { key: "all", label: "All requests", hint: "Everything clubs have submitted, newest first. Drafts stay private to the club." },
 ];
@@ -27,9 +27,11 @@ const QUEUES: { key: AdminQueue; label: string; hint: string }[] = [
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 /**
- * WSUSA's funding desk: decide submitted requests (approving one creates its
- * invoice), then process each invoice. Requests past WSUSA's review time and
- * invoices past due are counted here as they are in the WSUSA queue
+ * The funding desk: decide submitted requests (approving one creates its
+ * invoice), then process each invoice. WSUSA's admins see every club's; an
+ * office that decides its clubs' funding sees its own (lib/authz
+ * adminFundingClubWhere). Requests past the deciding office's review time and
+ * invoices past due are counted here as they are in the office queue
  * (lib/funding/review). Requires admin.funding.
  */
 export default async function AdminFundingPage({ searchParams }: { searchParams: SearchParams }) {
@@ -43,7 +45,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
   const queue: AdminQueue = QUEUES.some((q) => q.key === str("queue")) ? (str("queue") as AdminQueue) : "submitted";
   const source = SOURCE_ORDER.includes(str("source") as FundingSource) ? (str("source") as FundingSource) : null;
 
-  const [clubs, counts, overview] = await Promise.all([clubsWithRequests(), adminFundingCounts(), adminFundingOverview(user)]);
+  const [clubs, counts, overview] = await Promise.all([clubsWithRequests(user), adminFundingCounts(user), adminFundingOverview(user)]);
   const clubId = clubs.some((c) => c.id === str("club")) ? str("club") : null;
   const { rows, total } = await adminFundingQueue(user, { queue, source, clubId });
 
@@ -71,7 +73,7 @@ export default async function AdminFundingPage({ searchParams }: { searchParams:
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
-          label="In WSUSA review"
+          label="In review"
           value={overview.waiting.count}
           hint={overview.waiting.count ? `${fmtMoney(overview.waiting.cents)} requested${oldestDays ? ` · oldest ${plural(oldestDays, "day")}` : ""}` : "Nothing waiting"}
         />

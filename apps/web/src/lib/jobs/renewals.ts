@@ -4,6 +4,7 @@ import { currentRenewalWindow } from "@/lib/domain/renewals";
 import { notify } from "@/lib/domain/notify";
 import { createTask } from "@/lib/domain/tasks";
 import { loadRenewalStates } from "@/lib/renewals/facts";
+import { umbrellaOffice } from "@/lib/offices";
 import { RENEWAL_SOURCE, RENEWAL_TASK_DESCRIPTION, renewalDueNotice, renewalHref, renewalSourceId, renewalTaskTitle } from "@/lib/renewals/rules";
 import { fmtLongDate } from "@/lib/time";
 
@@ -76,6 +77,8 @@ export async function syncRenewalTasks(now: Date = new Date()): Promise<RenewalJ
   if (redate.length) await db.task.updateMany({ where: { id: { in: redate } }, data: { dueAt: window.dueAt } });
 
   const late = now > window.dueAt;
+  // Each club renews with the office that oversees it (lib/offices; none = WSUSA).
+  const umbrella = (await umbrellaOffice()).name;
   for (const s of states) {
     if (s.exemption && !s.renewal) continue;
     result.expected++;
@@ -101,7 +104,7 @@ export async function syncRenewalTasks(now: Date = new Date()): Promise<RenewalJ
     }
     result.opened += people.length;
     result.clubs++;
-    await notify({ userIds: people.map((p) => p.id), kind: "club.renewal_due", ...renewalDueNotice(s.club.name, window, late), href });
+    await notify({ userIds: people.map((p) => p.id), kind: "club.renewal_due", ...renewalDueNotice(s.club.name, window, late, s.club.office?.name ?? umbrella), href });
   }
   return result;
 }

@@ -6,11 +6,16 @@ import { getTerms } from "@/lib/terms";
 import {
   awaitingGrade,
   fulfillmentOf,
+  NO_PAUSE,
+  pauseFor,
   periodStartIn,
+  requirementReaches,
   requirementState,
   seatDueAt,
   seatStatus,
   type Fulfillment,
+  type Holdings,
+  type Pause,
   type RequirementEvidence,
   type RequirementState,
   type SeatClock,
@@ -38,10 +43,16 @@ import {
  * with the pure rule in requirement-rules. "Met" depends only on the person
  * and the period, so it's decided once per person and requirement; the
  * deadline, and with it due, overdue or waiting for grading, per seat.
+ *
+ * Who a requirement reaches through a seat (requirement-rules
+ * requirementReaches): its roles, only its office's clubs when an office owns
+ * it, and only leaders holding its one permission when it gates one. What
+ * being overdue pauses (pauseFor): every leader permission, or just the gated
+ * ones. The seat says its club's office and what the person holds there.
  */
 
 export type RequirementItem = {
-  requirement: Pick<RoleRequirement, "id" | "name" | "description" | "kind" | "testId" | "trainingEventId" | "renewal" | "graceDays">;
+  requirement: Pick<RoleRequirement, "id" | "name" | "description" | "kind" | "testId" | "trainingEventId" | "renewal" | "graceDays" | "officeId" | "gatesCapability">;
   met: boolean;
   /** Handed in by the deadline and waiting for a grader: not met yet, but not overdue either. */
   awaitingGrade: boolean;
@@ -53,7 +64,17 @@ export type RequirementItem = {
   state: RequirementState;
 };
 
-export type RequirementStatus = { items: RequirementItem[]; overdue: boolean; allMet: boolean };
+export type RequirementStatus = {
+  items: RequirementItem[];
+  /** Something reaching this seat is overdue. */
+  overdue: boolean;
+  allMet: boolean;
+  /** What that pauses: every leader permission, or only the gated ones (getClubAccess's rule). */
+  pause: Pause;
+};
+
+/** Where a seat's club is and what the person holds there, for who requirements reach (missing = the umbrella's clubs, no permissions known). */
+export type SeatScope = { clubOfficeId?: string | null; holds?: Holdings | null };
 
 /** Requirements in the order the rule walks them (and task notices name them): oldest first, then by name. */
 export const REQUIREMENT_ORDER = [{ createdAt: "asc" }, { name: "asc" }, { id: "asc" }] satisfies Prisma.RoleRequirementOrderByWithRelationInput[];
@@ -152,8 +173,8 @@ export type RequirementBatch = {
   person(userId: string): RequirementEvidence["person"];
   /** One requirement through one seat (requirementStatus's item). */
   item(userId: string, r: RoleRequirement, seat: SeatClock): RequirementItem;
-  /** requirementStatus for one person in a role. */
-  status(userId: string, role: ClubRole, seat: SeatClock): RequirementStatus;
+  /** requirementStatus for one person in a role: the requirements that reach them through the seat. */
+  status(userId: string, role: ClubRole, seat: SeatClock & SeatScope): RequirementStatus;
 };
 
 function makeBatch(at: Date, requirements: readonly RoleRequirement[], terms: Term[], starts: Map<RenewalPeriod, Date>, evidence: Map<string, RequirementEvidence>): RequirementBatch {
@@ -174,8 +195,9 @@ function makeBatch(at: Date, requirements: readonly RoleRequirement[], terms: Te
     person: (userId) => evidence.get(userId)?.person ?? null,
     item,
     status(userId, role, seat) {
-      const items = requirements.filter((r) => r.appliesTo.includes(role)).map((r) => item(userId, r, seat));
-      return { items, overdue: items.some((i) => i.overdue), allMet: items.every((i) => i.met) };
+      const items = requirements.filter((r) => requirementReaches(r, { role, clubOfficeId: seat.clubOfficeId, holds: seat.holds })).map((r) => item(userId, r, seat));
+      const late = items.filter((i) => i.overdue);
+      return { items, overdue: late.length > 0, allMet: items.every((i) => i.met), pause: late.length ? pauseFor(late.map((i) => i.requirement)) : NO_PAUSE };
     },
   };
 }
@@ -192,14 +214,20 @@ export async function loadRequirementBatch(userIds: readonly string[], opts: { a
 /** One person's evidence, read once per request however many clubs and roles ask (getClubAccess asks per club). */
 const personEvidence = cache(async (userId: string, tests: number, trainings: number) => (await loadEvidence([userId], await activeRequirements(), { tests, trainings })).get(userId) ?? emptyEvidence());
 
-export async function requirementStatus(userId: string, role: ClubRole, ctx: { assignmentStartedAt: Date; clubApprovedAt: Date | null; at?: Date }): Promise<RequirementStatus> {
+/**
+ * Where one person stands in one role. `clubOfficeId` and `holds` say which
+ * office oversees the seat's club and what the person holds there, so office
+ * and single-permission requirements reach the right people (left out: only
+ * the umbrella's requirements that gate no single permission).
+ */
+export async function requirementStatus(userId: string, role: ClubRole, ctx: { assignmentStartedAt: Date; clubApprovedAt: Date | null; at?: Date } & SeatScope): Promise<RequirementStatus> {
   const at = ctx.at ?? new Date();
   const all = await activeRequirements();
-  if (!all.some((r) => r.appliesTo.includes(role))) return { items: [], overdue: false, allMet: true };
+  if (!all.some((r) => r.appliesTo.includes(role))) return { items: [], overdue: false, allMet: true, pause: NO_PAUSE };
   const terms = all.some((r) => readsTerms(r.renewal)) ? await getTerms() : [];
   const { starts, since } = periodStarts(all, at, terms);
   const evidence = new Map([[userId, await personEvidence(userId, since.tests, since.trainings)]]);
-  return makeBatch(at, all, terms, starts, evidence).status(userId, role, { startedAt: ctx.assignmentStartedAt, clubApprovedAt: ctx.clubApprovedAt });
+  return makeBatch(at, all, terms, starts, evidence).status(userId, role, { startedAt: ctx.assignmentStartedAt, clubApprovedAt: ctx.clubApprovedAt, clubOfficeId: ctx.clubOfficeId, holds: ctx.holds });
 }
 
 type TaskLike = { id: string; status: string; sourceType: string | null; sourceId: string | null; assigneeId: string | null; dueAt: Date | null };
@@ -248,41 +276,42 @@ export async function tasksAwaitingGrade(tasks: readonly TaskLike[], at: Date = 
   return out;
 }
 
-/** A person's top role in one approved club, when it's a student leader role (the role getClubAccess checks). */
-export type LeaderSeat = SeatClock & { clubId: string; role: ClubRole };
+/** A person's top role in one approved club, when it's a student leader role (the role getClubAccess checks), with its club's office and what they hold there. */
+export type LeaderSeat = SeatClock & SeatScope & { clubId: string; role: ClubRole };
 
 /**
  * getClubAccess's pause, read from the person's open required tasks instead
  * of re-checking the evidence. It's for the header's task count, which
- * renders on every page. In a club, the person is paused when a requirement
- * on their top role there is still owed (its task is open), is past that
- * seat's deadline, and isn't waiting for a grader. The sweep and the event
- * path keep tasks in step with the evidence, so this matches getClubAccess.
- * Anything that acts on a permission asks getClubAccess itself.
+ * renders on every page. In a club, a requirement reaching their top role
+ * there pauses them when it's still owed (its task is open), is past that
+ * seat's deadline, and isn't waiting for a grader; what it pauses is
+ * pauseFor's (everything, or just its one permission). The sweep and the
+ * event path keep tasks in step with the evidence, so this matches
+ * getClubAccess. Anything that acts on a permission asks getClubAccess itself.
+ * Returns the paused clubs only.
  */
-export async function pausedClubsFromTasks(userId: string, seats: readonly LeaderSeat[], at: Date = new Date()): Promise<Set<string>> {
-  const paused = new Set<string>();
+export async function pausesFromTasks(userId: string, seats: readonly LeaderSeat[], at: Date = new Date()): Promise<Map<string, Pause>> {
+  const paused = new Map<string, Pause>();
   if (!seats.length) return paused;
   // A task is due at the earliest of the person's deadlines, so every pause has a task past due.
   const late = await db.task.findMany({ where: { assigneeId: userId, sourceType: "requirement", status: "OPEN", dueAt: { lt: at } }, select: { sourceId: true } });
   if (!late.length) return paused;
   const owed = new Set(late.map((t) => t.sourceId?.split(":")[0]));
-  const reqs = (await activeRequirements()).filter((r) => owed.has(r.id) && seats.some((s) => r.appliesTo.includes(s.role)));
+  const reqs = (await activeRequirements()).filter((r) => owed.has(r.id) && seats.some((s) => requirementReaches(r, s)));
   if (!reqs.length) return paused;
   const terms = reqs.some((r) => readsTerms(r.renewal)) ? await getTerms() : [];
   const testIds = [...new Set(reqs.flatMap((r) => (r.kind === "TEST" && r.testId ? [r.testId] : [])))];
   const waiting = testIds.length ? await db.testAttempt.findMany({ where: { userId, status: "NEEDS_REVIEW", testId: { in: testIds } }, select: { testId: true, status: true, submittedAt: true } }) : [];
   for (const s of seats) {
+    const overdue: RoleRequirement[] = [];
     for (const r of reqs) {
-      if (!r.appliesTo.includes(s.role)) continue;
+      if (!requirementReaches(r, s)) continue;
       const start = periodStartIn(r.renewal, at, terms);
       const dueAt = seatDueAt(r, start, s);
       const mine = waiting.filter((a) => a.testId === r.testId && a.submittedAt !== null && a.submittedAt >= start);
-      if (requirementState({ met: false, awaitingGrade: awaitingGrade(mine, dueAt), dueAt, at }) === "overdue") {
-        paused.add(s.clubId);
-        break;
-      }
+      if (requirementState({ met: false, awaitingGrade: awaitingGrade(mine, dueAt), dueAt, at }) === "overdue") overdue.push(r);
     }
+    if (overdue.length) paused.set(s.clubId, pauseFor(overdue));
   }
   return paused;
 }

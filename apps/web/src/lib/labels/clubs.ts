@@ -6,8 +6,9 @@ import type { ClubCategory, ClubScope, ClubStatus, ClubType, JoinPolicy } from "
  * the assistant all say the same thing.
  *
  * A club has two separate facts that read alike, so they never share words:
- *   - Recognition (Club.status): where WSUSA's approval stands — "Approved",
- *     "In WSUSA review", "Retired"…
+ *   - Recognition (Club.status): where the club's approval stands, with WSUSA
+ *     or the office that oversees it (lib/offices) — "Approved", "In review",
+ *     "Retired"…
  *   - Standing (lib/metrics): whether an approved club is meeting WSUSA's
  *     activity standard — "Active", "Pilot period" or "Inactive".
  * An approved club can be inactive, so a screen that shows both shows them
@@ -89,7 +90,7 @@ export const JOIN_POLICY_SHORT: Record<JoinPolicy, string> = { OPEN: "Open", APP
 
 export const CLUB_STATUS_LABEL: Record<ClubStatus, string> = {
   DRAFT: "Draft",
-  SUBMITTED: "In WSUSA review",
+  SUBMITTED: "In review",
   CHANGES_REQUESTED: "Changes requested",
   APPROVED: "Approved",
   REJECTED: "Not approved",

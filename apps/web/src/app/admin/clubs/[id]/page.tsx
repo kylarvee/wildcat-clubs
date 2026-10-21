@@ -4,8 +4,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import type { ClubDecisionAction } from "@prisma/client";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
-import { can, ROLE_LABEL } from "@/lib/authz";
+import { adminScope, can, canAdminClub, ROLE_LABEL } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { listOffices, officeById } from "@/lib/offices";
 import { fmtLongDate } from "@/lib/time";
 import { fileUrl } from "@/lib/domain/files";
 import { foundingChecklist } from "@/lib/domain/clubs";
@@ -23,14 +24,17 @@ import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { ReinstateForm } from "@/components/founding/admin/ReinstateForm";
 import { GoogleAccountVerification } from "@/components/founding/admin/GoogleAccountVerification";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
+import { ClubOfficeForm } from "@/components/offices/ClubOfficeForm";
+import { OfficeContact } from "@/components/offices/OfficeContact";
 import { SUCCESSION_LABEL } from "@/components/founding/copy";
 import { CLUB_SCOPE_LABEL as SCOPE_LABEL, CLUB_STATUS_LABEL as STATUS_LABEL, CLUB_STATUS_TONE as STATUS_TONE, CLUB_TYPE_LABEL as TYPE_LABEL, JOIN_POLICY_LABEL as JOIN_LABEL, JOIN_POLICY_SHORT } from "@/lib/labels/clubs";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  // Metadata resolves before the admin layout's redirect, so only admins get the club's name.
-  if (!can(await getCurrentUser(), "admin.clubs")) return { title: "Club approvals" };
-  const club = await db.club.findUnique({ where: { id: (await params).id }, select: { name: true } });
-  return { title: club ? `${club.name} · Club approvals` : "Club approvals" };
+  // Metadata resolves before the admin layout's redirect, so only the club's admins get its name.
+  const viewer = await getCurrentUser();
+  if (!can(viewer, "admin.clubs")) return { title: "Club approvals" };
+  const club = await db.club.findUnique({ where: { id: (await params).id }, select: { name: true, officeId: true } });
+  return { title: club && canAdminClub(viewer, club) ? `${club.name} · Club approvals` : "Club approvals" };
 }
 
 const DECISION_LABEL: Record<ClubDecisionAction, string> = {
@@ -61,7 +65,15 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
       createdBy: { select: { name: true, email: true } },
     },
   });
-  if (!club) notFound();
+  // Another office's club is not found (lib/authz canAdminClub).
+  if (!club || !canAdminClub(user, club)) notFound();
+  // Platform-wide parts (the department list, Google accounts, which office oversees the club) are WSUSA's.
+  const umbrella = adminScope(user).all;
+  const [office, offices, openTasks] = await Promise.all([
+    officeById(club.officeId),
+    umbrella ? listOffices() : Promise.resolve([]),
+    umbrella ? db.task.count({ where: { clubId: club.id, assigneeType: "ADMINS", status: "OPEN" } }) : Promise.resolve(0),
+  ]);
 
   const [check, documents, leaders, invites, decisions, colleges, members, registered, verifier] = await Promise.all([
     foundingChecklist(club.id),
@@ -92,7 +104,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
         ? `Approve or return the custom ${label} below — an approved club needs one in effect.`
         : `The club has no ${label} in effect. Request changes so the founders can adopt one.`;
   const approveBlockers = [
-    deptPending ? `Add “${club.requestedDepartmentName}” to the department list (below).` : null,
+    deptPending ? (umbrella ? `Add “${club.requestedDepartmentName}” to the department list (below).` : `WSUSA adds “${club.requestedDepartmentName}” to the department list first. It's in WSUSA's queue.`) : null,
     docBlocker("CONSTITUTION", "constitution"),
     docBlocker("BYLAWS", "bylaws"),
     !check.advisor.done ? "The club has no advisor. Request changes so the founders can invite one." : null,
@@ -130,7 +142,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
         </Card>
       ) : null}
 
-      {deptPending ? (
+      {deptPending && umbrella ? (
         <Card>
           <CardHeader title="Department request" description={`The founders chose “Other” and typed “${club.requestedDepartmentName}”. Add it to the department list (or type an existing department's exact name to link it).`} />
           <CardBody>
@@ -170,7 +182,11 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
             <div id="google-account" className="scroll-mt-24" />
             <CardHeader
               title="Club Google account"
-              description="Google Drive, Calendar and Chat sync run as this account. Verify it only if WSU IT set it up for this club."
+              description={
+                umbrella
+                  ? "Google Drive, Calendar and Chat sync run as this account. Verify it only if WSU IT set it up for this club."
+                  : "Google Drive, Calendar and Chat sync run as this account. WSUSA verifies club Google accounts."
+              }
               action={club.contactEmail ? <Badge tone={club.googleAccountVerifiedAt ? "success" : "warning"}>{club.googleAccountVerifiedAt ? "Verified" : "Not verified"}</Badge> : null}
             />
             <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -180,9 +196,11 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                     <span className="break-all font-medium text-ink">{club.contactEmail}</span>
                     {club.googleAccountVerifiedAt
                       ? ` · verified ${fmtLongDate(club.googleAccountVerifiedAt)}${verifier ? ` by ${verifier.name}` : ""}`
-                      : " · Google sync won't use it until you verify it."}
+                      : umbrella
+                        ? " · Google sync won't use it until you verify it."
+                        : " · Google sync won't use it until WSUSA verifies it."}
                   </p>
-                  <GoogleAccountVerification clubId={club.id} email={club.contactEmail} verified={Boolean(club.googleAccountVerifiedAt)} />
+                  {umbrella ? <GoogleAccountVerification clubId={club.id} email={club.contactEmail} verified={Boolean(club.googleAccountVerifiedAt)} /> : null}
                 </>
               ) : (
                 <p className="text-sm text-ink-3">The club hasn&apos;t added one.</p>
@@ -240,7 +258,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                           joining is <span className="font-medium">{s.joinPolicy ? JOIN_POLICY_SHORT[s.joinPolicy].toLowerCase() : "(unchanged)"}</span>. The way leaders are chosen stays as it is.
                         </>
                       )}{" "}
-                      Members and WSUSA are told if it changes.
+                      Members and {office.name} are told if it changes.
                     </p>
                     {s.note ? <p className="whitespace-pre-line text-sm text-ink-2">“{s.note}”</p> : null}
                     <DocumentDecision docId={d.id} label={`Custom ${label}`} />
@@ -288,6 +306,15 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
         </div>
 
         <aside className="space-y-6">
+          <Card>
+            <div id="office" className="scroll-mt-24" />
+            <CardHeader title={`Overseen by ${office.name}`} description={umbrella ? "The office that handles this club's approvals, renewal and other requests." : "Your office handles this club's approvals, renewal and other requests."} />
+            <CardBody className="space-y-4">
+              <OfficeContact office={office} />
+              {umbrella ? <ClubOfficeForm clubId={club.id} clubName={club.name} current={office.id} offices={offices.map((o) => ({ id: o.id, name: o.name }))} openTasks={openTasks} /> : null}
+            </CardBody>
+          </Card>
+
           <Card>
             <CardHeader title="Advisor & founders" />
             <CardBody className="space-y-3">

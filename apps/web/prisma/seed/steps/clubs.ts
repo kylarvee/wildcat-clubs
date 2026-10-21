@@ -3,6 +3,7 @@ import { seatsFor } from "@/lib/roles/defaults";
 import type { ClubM, Ctx, Engagement, Member, Person } from "../ctx";
 import { CLUBS, type ClubDef, type Topic } from "../data/clubs";
 import { addDays, campusDate, DAY, maxDate, minDate } from "../lib/dates";
+import { officeIdForDef } from "./offices";
 import { generatedStudents } from "./people";
 import { fallStartDate, mayGraduation, springStartDate } from "./reference";
 
@@ -137,6 +138,8 @@ export function buildClubs(ctx: Ctx) {
       type: def.type,
       status: def.status,
       scope: def.scope,
+      // Club sports to Campus Recreation, FSL chapters to Fraternity & Sorority Life, the rest WSUSA (null).
+      officeId: officeIdForDef(ctx, def),
       collegeKey: def.college ?? null,
       collegeId: def.college ? ctx.colleges.get(def.college)!.id : null,
       departmentId: def.department ? (ctx.departments.get(def.department)?.id ?? null) : null,

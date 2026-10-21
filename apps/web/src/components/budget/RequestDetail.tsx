@@ -22,8 +22,9 @@ type RequestFacts = {
 };
 
 /**
- * Where a decided (or waiting) request stands, in a sentence, with WSUSA's
- * note. `audience` words it for the club or for admins. Approvals say which
+ * Where a decided (or waiting) request stands, in a sentence, with the
+ * deciding office's note (`office`: WSUSA, or the club's office when it
+ * decides funding). `audience` words it for the club or for admins. Approvals say which
  * source funded it; partial ones count the lines that got less (they're
  * unlocked, so the club can ask another source: `askAgainHref`).
  */
@@ -31,6 +32,7 @@ export function DecisionCallout({
   request: r,
   audience,
   reviewDays,
+  office = "WSUSA",
   fundedLabel,
   reducedLines = 0,
   askAgainHref,
@@ -38,6 +40,8 @@ export function DecisionCallout({
   request: RequestFacts;
   audience: "club" | "admin";
   reviewDays?: number;
+  /** The office deciding it (lib/offices). */
+  office?: string;
   /** The source that funded it ("Department · Nursing"). */
   fundedLabel?: string | null;
   /** Lines approved for less than they asked. */
@@ -50,9 +54,9 @@ export function DecisionCallout({
   switch (r.status) {
     case "SUBMITTED":
       return (
-        <Callout tone="info" icon={<Clock />} title="In WSUSA review">
+        <Callout tone="info" icon={<Clock />} title={`In review with ${office}`}>
           {audience === "club"
-            ? `WSUSA staff are reviewing it${reviewDays ? ` and usually respond within about ${reviewDays} business days` : ""}. They may fund it from another source than the one you expect. You'll get a notification when they decide.`
+            ? `${office} staff are reviewing it${reviewDays ? ` and usually respond within about ${reviewDays} business days` : ""}. They may fund it from another source than the one you expect. You'll get a notification when they decide.`
             : `Submitted ${r.submittedAt ? fmtLongDate(r.submittedAt) : ""}${r.submittedBy ? ` by ${r.submittedBy.name}` : ""}.`}
         </Callout>
       );

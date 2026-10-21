@@ -2,11 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowRight, BarChart3, CheckCircle2, Network, Sprout, TrendingDown } from "lucide-react";
+import type { Actor } from "@/lib/auth/session";
 import { requireUser } from "@/lib/auth/session";
-import { can } from "@/lib/authz";
-import { platformSummary } from "@/lib/metrics";
+import { adminClubWhere, adminScope, can } from "@/lib/authz";
+import { db } from "@/lib/db";
+import { clubActivityMany, platformSummary } from "@/lib/metrics";
+import { getTerms, termAt } from "@/lib/terms";
 import { fmtAgo, fmtDate, fmtLongDate } from "@/lib/time";
-import { atRiskClubs, clubCounts, recentPlatformActivity, wsusaQueue, type AtRiskClub, type QueueRow } from "@/lib/analytics/admin";
+import { atRiskClubs, clubCounts, officeQueue, queueScopeFor, recentPlatformActivity, type AtRiskClub, type QueueFilter, type QueueRow } from "@/lib/analytics/admin";
 import { CLUB_STATUS_LABEL, CLUB_TYPE_LABEL as CLUB_TYPE_NAMES, STANDING_HINT, STANDING_LABEL } from "@/lib/labels/clubs";
 import { GAP_LABEL } from "@/lib/staffing/rules";
 import { Avatar } from "@/components/ui/avatar";
@@ -27,15 +30,20 @@ const pctOf = (part: number, whole: number) => (whole > 0 ? `${Math.round((part 
 /**
  * WSUSA's front page: this term's headline numbers (all from lib/metrics
  * platformSummary), check-ins by month, what's waiting on WSUSA (the same
- * queue as the dashboard and the side nav's counts), clubs at risk of going
- * inactive, approved clubs missing a President or advisor, and recent
- * platform activity. Reports appear only as a count.
+ * queue as the dashboard and the side nav's counts; `?office=` switches it to
+ * one office's or all of them), clubs at risk of going inactive, approved
+ * clubs missing a President or advisor, and recent platform activity.
+ * Reports appear only as a count. An office's staff get the same page for
+ * their office's clubs only (OfficeOverview).
  */
-export default async function AdminOverviewPage() {
+export default async function AdminOverviewPage({ searchParams }: { searchParams: Promise<{ office?: string }> }) {
   const user = await requireUser("/admin");
   if (!can(user, "admin.access")) notFound();
+  const sp = await searchParams;
   const now = new Date();
-  const [summary, waiting, atRisk, counts, feed] = await Promise.all([platformSummary(now), wsusaQueue(), atRiskClubs(now), clubCounts(), recentPlatformActivity(12)]);
+  const queue = await queueScopeFor(user, sp.office);
+  if (!adminScope(user).all) return <OfficeOverview user={user} now={now} name={queue.name} waiting={await officeQueue(queue.scope, now)} />;
+  const [summary, waiting, atRisk, counts, feed] = await Promise.all([platformSummary(now), officeQueue(queue.scope, now), atRiskClubs(now), clubCounts(), recentPlatformActivity(12)]);
 
   const term = summary.termName ?? "this term";
   const onRecord = summary.activeClubs - summary.pilotClubs;
@@ -107,7 +115,7 @@ export default async function AdminOverviewPage() {
           />
           <Link href="#waiting" className="group block rounded-[var(--radius-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
             <Stat
-              label="Waiting on WSUSA"
+              label={`Waiting on ${queue.name}`}
               value={fmt(waiting.total)}
               hint={waiting.total ? `Across ${busyQueues} ${busyQueues === 1 ? "queue" : "queues"}` : "Nothing waiting"}
               className={cn("h-full transition-colors group-hover:border-brand-200", waiting.total ? "bg-brand-50/40" : "")}
@@ -136,9 +144,14 @@ export default async function AdminOverviewPage() {
 
         <Card id="waiting" className="min-w-0 scroll-mt-24">
           <CardHeader
-            title="Waiting on WSUSA"
-            description={waiting.total ? `${fmt(waiting.total)} open ${waiting.total === 1 ? "item" : "items"} for any admin to pick up.` : "All caught up."}
+            title={`Waiting on ${queue.name}`}
+            description={
+              waiting.total
+                ? `${fmt(waiting.total)} open ${waiting.total === 1 ? "item" : "items"} ${queue.filter === queue.offices[0]?.key ? "for any admin to pick up, including the work of any office with no staff yet" : queue.filter === "all" ? "across every office" : "for that office's staff to pick up"}.`
+                : "All caught up."
+            }
           />
+          <QueueFilters filters={queue.filters} current={queue.filter} />
           <QueueList queues={waiting.rows} now={now} />
         </Card>
       </div>
@@ -204,6 +217,151 @@ export default async function AdminOverviewPage() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * An office's own Overview, for its staff: what's waiting on the office, and
+ * how its clubs are doing (standing from lib/metrics, at-risk clubs, where its
+ * clubs stand, recent activity), nothing about other offices' clubs.
+ */
+async function OfficeOverview({ user, now, name, waiting }: { user: Actor; now: Date; name: string; waiting: Awaited<ReturnType<typeof officeQueue>> }) {
+  const where = adminClubWhere(user);
+  const approved = await db.club.findMany({ where: { AND: [where, { status: "APPROVED" }] }, select: { id: true } });
+  const ids = approved.map((c) => c.id);
+  const [activity, atRisk, counts, feed, terms] = await Promise.all([
+    ids.length ? clubActivityMany(ids, now) : Promise.resolve(new Map()),
+    atRiskClubs(now, ids),
+    clubCounts(where),
+    recentPlatformActivity(12, where),
+    getTerms(),
+  ]);
+  const term = termAt(terms, now)?.name ?? "this term";
+  let active = 0;
+  let pilot = 0;
+  for (const a of activity.values()) {
+    if (a.inPilot) pilot++;
+    else if (a.active) active++;
+  }
+  const inactive = ids.length - active - pilot;
+  const founding = (counts.byStatus.DRAFT ?? 0) + (counts.byStatus.SUBMITTED ?? 0) + (counts.byStatus.CHANGES_REQUESTED ?? 0);
+  const busyQueues = waiting.rows.filter((q) => q.count > 0).length;
+  const stages: BarItem[] = [
+    { key: "active", label: STANDING_LABEL.active, value: active, href: "/admin/analytics?status=active" },
+    { key: "pilot", label: STANDING_LABEL.pilot, value: pilot, href: "/admin/analytics?status=pilot" },
+    { key: "inactive", label: STANDING_LABEL.inactive, value: inactive, href: "/admin/analytics?status=inactive" },
+    { key: "founding", label: "In founding", value: founding, hint: foundingHint(counts.byStatus), href: "/admin/analytics?status=founding" },
+    { key: "retired", label: CLUB_STATUS_LABEL.RETIRED, value: counts.byStatus.RETIRED ?? 0, href: "/admin/analytics?status=retired" },
+  ];
+  const leaders: BarItem[] = [
+    { key: "noPresident", label: GAP_LABEL.president, value: counts.missing.president, href: "/admin/analytics?missing=president" },
+    { key: "noAdvisor", label: GAP_LABEL.advisor, value: counts.missing.advisor, href: "/admin/analytics?missing=advisor" },
+  ];
+  const barMax = Math.max(...stages.map((s) => s.value), ...leaders.map((l) => l.value));
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Overview"
+        description={`How ${name}'s clubs are doing in ${term}, and what's waiting on ${name}.`}
+        actions={
+          <ButtonLink href="/admin/analytics" variant="outline" size="sm">
+            <BarChart3 className="h-4 w-4" aria-hidden="true" /> Club analytics
+          </ButtonLink>
+        }
+        className="mb-0"
+      />
+      <section aria-labelledby="glance-title">
+        <h2 id="glance-title" className="sr-only">
+          {term} at a glance
+        </h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Stat label="Active clubs" value={fmt(active)} hint={STANDING_HINT.active} />
+          <Stat label="Clubs in pilot period" value={fmt(pilot)} hint="New clubs, counted as active until it ends" />
+          <Stat label="Inactive clubs" value={fmt(inactive)} hint="Approved, but below the activity standard" />
+          <Link href="#waiting" className="group block rounded-[var(--radius-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+            <Stat
+              label={`Waiting on ${name}`}
+              value={fmt(waiting.total)}
+              hint={waiting.total ? `Across ${busyQueues} ${busyQueues === 1 ? "queue" : "queues"}` : "Nothing waiting"}
+              className={cn("h-full transition-colors group-hover:border-brand-200", waiting.total ? "bg-brand-50/40" : "")}
+            />
+          </Link>
+        </div>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
+        <Card id="waiting" className="min-w-0 scroll-mt-24">
+          <CardHeader title={`Waiting on ${name}`} description={waiting.total ? `${fmt(waiting.total)} open ${waiting.total === 1 ? "item" : "items"} for your office's staff to pick up.` : "All caught up."} />
+          <QueueList queues={waiting.rows} now={now} />
+        </Card>
+        <Card className="min-w-0">
+          <CardHeader title="Where your clubs stand" description={`The clubs ${name} oversees, by status.`} />
+          <CardBody className="space-y-6">
+            <BarList items={stages} max={barMax} label="Clubs by status" />
+            <RenewalProgress actor={user} />
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Approved clubs missing a leader</h3>
+              <BarList items={leaders} max={barMax} label="Approved clubs missing a leader" />
+            </div>
+          </CardBody>
+        </Card>
+      </div>
+
+      <Card className="min-w-0">
+        <CardHeader title="Clubs at risk" description="Approved clubs below the activity bar now, or likely to fall below it." />
+        <AtRiskList clubs={atRisk} />
+      </Card>
+
+      <Card>
+        <CardHeader title="Recent activity" description={`The latest public changes in ${name}'s clubs: approvals, new officers, events and more.`} />
+        {feed.length ? (
+          <ol className="divide-y divide-line">
+            {feed.map((f) => (
+              <li key={f.id} className="flex items-start gap-3 px-5 py-3 text-sm">
+                <Avatar name={f.actor?.name ?? "Wildcat Clubs"} src={f.actor?.avatarUrl} color={f.actor?.avatarColor ?? "#77707f"} size="xs" className="mt-0.5" />
+                <p className="min-w-0 flex-1 text-ink-2">
+                  <span className="font-medium text-ink">{f.actor?.name ?? "Wildcat Clubs"}</span> {f.text}
+                  {f.club ? (
+                    <Link href={`/admin/analytics/${f.club.id}`} className="block text-xs font-medium text-ink-3 hover:text-brand-600 hover:underline">
+                      {f.club.name}
+                    </Link>
+                  ) : null}
+                </p>
+                <time dateTime={f.at.toISOString()} title={fmtLongDate(f.at)} className="shrink-0 text-xs text-ink-3">
+                  {fmtAgo(f.at)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <CardBody>
+            <p className="text-sm text-ink-3">Nothing yet. Approvals, new officers and new events in your clubs show up here.</p>
+          </CardBody>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/** WSUSA admins' queue filter: WSUSA (the default), one office, or all offices. */
+function QueueFilters({ filters, current }: { filters: QueueFilter[]; current: string | null }) {
+  if (filters.length < 3) return null;
+  return (
+    <nav aria-label="Whose queue" className="flex flex-wrap gap-1.5 border-b border-line px-5 pb-3">
+      {filters.map((f, i) => (
+        <Link
+          key={f.key}
+          href={i === 0 ? "/admin#waiting" : `/admin?office=${encodeURIComponent(f.key)}#waiting`}
+          aria-current={current === f.key ? "true" : undefined}
+          className={cn(
+            "inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+            current === f.key ? "border-brand bg-brand text-white" : "border-line text-ink-2 hover:border-brand-200 hover:text-brand-600",
+          )}
+        >
+          {f.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 

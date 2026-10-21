@@ -5,10 +5,14 @@ import { getTerms } from "@/lib/terms";
 import { fileUrl } from "@/lib/domain/files";
 import { googleCalendarReady } from "@/lib/integrations/google-calendar";
 import { costLineLocks } from "@/lib/domain/events";
+import { getConfig } from "@/lib/config";
+import { officeForClub } from "@/lib/offices";
 import { splitEventLinks } from "@/lib/events/links";
+import { readTravel, UNDER_REVIEW } from "@/lib/events/review";
 import { describeRecurrence } from "@/lib/events/summary";
 import type { TermJson } from "@/lib/events/types";
 import type { EditorEvent } from "@/components/events/EventEditor";
+import type { ReviewSettings } from "@/components/events/RiskReviewFields";
 import type { IncomingCohost, OutgoingCohost } from "@/components/events/BuilderPanels";
 
 /**
@@ -32,7 +36,8 @@ export async function loadBuilderData(clubId: string | null) {
   const [incomingRows, outgoingRows, buildings, terms, google] = await Promise.all([
     clubId
       ? db.eventCohost.findMany({
-          where: { clubId, status: { in: ["PENDING", "APPROVED"] }, event: { status: "SCHEDULED" } },
+          // An invitation to an event still waiting for its office's review isn't shown until it's approved (lib/events/review).
+          where: { clubId, status: { in: ["PENDING", "APPROVED"] }, event: { status: "SCHEDULED", reviewStatus: { notIn: [...UNDER_REVIEW] } } },
           orderBy: { createdAt: "desc" },
           include: {
             requestedBy: { select: { name: true } },
@@ -114,9 +119,32 @@ async function coverFolderId(clubId: string | null): Promise<string | null> {
   return folder?.id ?? null;
 }
 
+/**
+ * The "Does this event involve…" settings for a club's editor: whether review
+ * is on, the crowd threshold, the club's office (who reviews and how long it
+ * takes) and the people a trip's drivers can be picked from (its members and
+ * leaders). Null for university events, which are never reviewed.
+ */
+async function reviewSettings(clubId: string | null): Promise<ReviewSettings | null> {
+  if (!clubId) return null;
+  const [cfg, office, members, leaders] = await Promise.all([
+    getConfig(),
+    officeForClub(clubId),
+    db.membership.findMany({ where: { clubId, status: "ACTIVE", user: { status: "ACTIVE" } }, select: { user: { select: { id: true, name: true } } } }),
+    db.roleAssignment.findMany({ where: { clubId, endedAt: null, user: { status: "ACTIVE" } }, select: { user: { select: { id: true, name: true } } } }),
+  ]);
+  const people = new Map([...members, ...leaders].map((r) => [r.user.id, r.user]));
+  return {
+    on: cfg["events.riskReview"],
+    largeCrowd: cfg["events.largeCrowd"],
+    office: { name: office.name, reviewDays: office.reviewDays },
+    drivers: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
 /** Everything the full editor needs. Returns null when the event isn't this host's. */
 export async function loadEditorData(clubId: string | null, eventId: string | null) {
-  const [event, buildings, clubs, terms, google, coverFolder] = await Promise.all([
+  const [event, buildings, clubs, terms, google, coverFolder, review] = await Promise.all([
     eventId
       ? db.event.findUnique({
           where: { id: eventId },
@@ -125,6 +153,7 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
             attachments: { include: { file: { select: { id: true, name: true, mimeType: true, trashedAt: true } } } },
             costItems: { orderBy: { createdAt: "asc" } },
             requirements: { where: { active: true }, select: { name: true }, take: 1 },
+            reviewedBy: { select: { name: true } },
             _count: { select: { occurrences: true } },
           },
         })
@@ -136,6 +165,7 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
     getTerms(),
     googleCalendarReady(clubId),
     coverFolderId(clubId),
+    reviewSettings(clubId),
   ]);
   if (eventId && (!event || event.clubId !== clubId)) return null;
 
@@ -184,7 +214,15 @@ export async function loadEditorData(clubId: string | null, eventId: string | nu
       })),
       attendanceCount,
       requirementName: event.requirements[0]?.name ?? null,
+      riskFlags: event.riskFlags,
+      travel: readTravel(event.travel),
+      review: {
+        status: event.reviewStatus,
+        note: event.reviewNote,
+        reviewedAt: event.reviewedAt?.toISOString() ?? null,
+        reviewedBy: event.reviewedBy?.name ?? null,
+      },
     };
   }
-  return { event: editor, buildings, clubs, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null, coverFolderId: coverFolder };
+  return { event: editor, buildings, clubs, terms: termsJson(terms), googleLive: google.live, googleReason: google.reason ?? null, coverFolderId: coverFolder, review };
 }

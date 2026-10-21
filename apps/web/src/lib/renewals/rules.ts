@@ -73,19 +73,23 @@ export function renewalExemption(club: { status: string; type: string; approvedA
   return null;
 }
 
-/** The bell when someone's renewal task opens (lib/jobs/renewals and the seed). `late`: it opened after the due date. */
-export function renewalDueNotice(clubName: string, window: RenewalWindow, late: boolean): { title: string; body: string } {
+/**
+ * The bell when someone's renewal task opens (lib/jobs/renewals and the seed).
+ * `late`: it opened after the due date. `office`: who the club renews with
+ * (the office that oversees it, lib/offices).
+ */
+export function renewalDueNotice(clubName: string, window: RenewalWindow, late: boolean, office = "WSUSA"): { title: string; body: string } {
   return {
     title: `Time to renew ${clubName} for ${window.year}`,
     body: late
-      ? `${clubName}'s renewal with WSUSA was due ${fmtLongDate(window.dueAt)}. Check the club's details and renew when you can.`
-      : `WSUSA re-registers every club once a year. Check ${clubName}'s details and renew by ${fmtDate(window.dueAt, "MMM d")}.`,
+      ? `${clubName}'s renewal with ${office} was due ${fmtLongDate(window.dueAt)}. Check the club's details and renew when you can.`
+      : `${office} re-registers its clubs once a year. Check ${clubName}'s details and renew by ${fmtDate(window.dueAt, "MMM d")}.`,
   };
 }
 
 /** The bell for the club's other Presidents and advisors once someone renewed: their task closed. */
-export function renewedNotice(clubName: string, year: string, byName: string): { title: string; body: string } {
-  return { title: `${clubName} is re-registered for ${year}`, body: `${byName} renewed the club with WSUSA, so your renewal task is done.` };
+export function renewedNotice(clubName: string, year: string, byName: string, office = "WSUSA"): { title: string; body: string } {
+  return { title: `${clubName} is re-registered for ${year}`, body: `${byName} renewed the club with ${office}, so your renewal task is done.` };
 }
 
 // ─── Status ──────────────────────────────────────────────────────────────────

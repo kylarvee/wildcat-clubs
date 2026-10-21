@@ -18,6 +18,7 @@ import {
   type RepeatRule,
   type Snapshot,
 } from "@/lib/events/notices";
+import { underReview } from "@/lib/events/review";
 
 /**
  * Event-change notices for the Events Builder's write path (lib/domain/events):
@@ -27,12 +28,15 @@ import {
  * club with a thousand followers doesn't slow the save. Co-host leaders keep
  * their own notice (events.tellCohostsAboutChange); when they got one for the
  * same change, this one leaves them out. Nothing here can fail the write.
+ * An event waiting for its office's review (lib/events/review) was never
+ * posted, so nobody hears anything about it until it's approved.
  */
 
 const EVENT_SELECT = {
   id: true,
   title: true,
   status: true,
+  reviewStatus: true,
   clubId: true,
   visibility: true,
   recurrence: true,
@@ -76,7 +80,7 @@ async function snapshotOf(e: EventRow, now: Date): Promise<Snapshot> {
 export async function snapshotEvent(eventId: string, now: Date): Promise<Snapshot | null> {
   try {
     const e = await loadEvent(eventId);
-    return e && e.status === "SCHEDULED" ? await snapshotOf(e, now) : null;
+    return e && e.status === "SCHEDULED" && !underReview(e) ? await snapshotOf(e, now) : null;
   } catch (err) {
     console.error("[event notices] couldn't read the event before the change", err);
     return null;
@@ -148,7 +152,7 @@ export type DeletedEvent = { e: EventRow; dates: DateRow[] } | null;
 export async function beforeDelete(eventId: string, now: Date): Promise<DeletedEvent> {
   try {
     const e = await loadEvent(eventId);
-    return e && e.status === "SCHEDULED" ? { e, dates: await upcomingDates(eventId, now) } : null;
+    return e && e.status === "SCHEDULED" && !underReview(e) ? { e, dates: await upcomingDates(eventId, now) } : null;
   } catch (err) {
     console.error("[event notices] couldn't read the event before deleting it", err);
     return null;
@@ -209,7 +213,8 @@ async function memberIdsOf(clubIds: string[]): Promise<string[]> {
 
 /** Fans a notice out after the response, in batches of 100 (notifyInBatches). */
 function send(e: EventRow, notice: EventNotice | null, ctx: NoticeContext & { cohostsTold?: boolean }, href?: string) {
-  if (!notice) return;
+  // Not posted yet (waiting for review): there's nobody who knows about it to tell.
+  if (!notice || underReview(e)) return;
   later(async () => {
     const { followerIds, memberIds } = await eventFollowers({ id: e.id, clubId: e.clubId, visibility: e.visibility, cohostClubIds: e.cohosts.map((c) => c.clubId) });
     // Co-host leaders already heard about this change from their own notice.

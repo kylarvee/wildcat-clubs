@@ -7,10 +7,12 @@ import { fmtLongDate } from "@/lib/time";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Stat } from "@/components/ui/layout";
 import { ActivityFeed } from "@/components/founding/ActivityFeed";
-import { WsusaContacts } from "@/components/founding/WsusaContacts";
+import { ClubOfficeContacts } from "@/components/founding/ClubOfficeContacts";
+import { officeForClub } from "@/lib/offices";
 
-/** RETIRED: what the club left behind. Everything stays readable; only WSUSA can reinstate. */
+/** RETIRED: what the club left behind. Everything stays readable; only its office (or WSUSA) can reinstate. */
 export async function RetiredSummary({ club }: { club: Club }) {
+  const office = await officeForClub(club.id);
   const [roles, people, alumni, held, files] = await Promise.all([
     db.roleAssignment.count({ where: { clubId: club.id, role: { not: "MEMBER" } } }),
     db.roleAssignment.findMany({ where: { clubId: club.id, role: { not: "MEMBER" } }, distinct: ["userId"], select: { userId: true } }),
@@ -56,7 +58,7 @@ export async function RetiredSummary({ club }: { club: Club }) {
           <ActivityFeed clubId={club.id} take={8} />
         </CardBody>
       </Card>
-      <WsusaContacts title="Want to bring the club back?" description="Only WSUSA can reinstate a retired club. Reach out to start that conversation." />
+      <ClubOfficeContacts clubId={club.id} title="Want to bring the club back?" description={`Only ${office.name} can reinstate a retired club. Reach out to start that conversation.`} />
     </div>
   );
 }

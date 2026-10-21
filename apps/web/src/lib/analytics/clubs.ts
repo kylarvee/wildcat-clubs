@@ -1,5 +1,5 @@
 import "server-only";
-import type { ClubRole, FundingSource, FundingStatus } from "@prisma/client";
+import type { ClubRole, FundingSource, FundingStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { clubActivityMany, clubAverageAttendance, clubListMetrics, clubServiceTotals, type OccurrenceAttendance, type ServiceTotal } from "@/lib/metrics";
 import { lastBuckets } from "@/lib/metrics/pure";
@@ -33,9 +33,11 @@ export async function termWindow(now: Date) {
 
 
 /** One row per club (every status), for the analytics table and its CSV. */
-export async function clubAnalyticsRows(now = new Date()): Promise<{ rows: ClubAnalyticsRow[]; termName: string | null }> {
+/** `clubs` narrows the table (lib/authz adminClubWhere: an office's staff see their own office's clubs). */
+export async function clubAnalyticsRows(now = new Date(), scope: Prisma.ClubWhereInput = {}): Promise<{ rows: ClubAnalyticsRow[]; termName: string | null }> {
   const [clubs, term] = await Promise.all([
     db.club.findMany({
+      where: scope,
       orderBy: { name: "asc" },
       select: { id: true, name: true, slug: true, type: true, status: true, scope: true, collegeId: true, college: { select: { name: true, shortName: true } } },
     }),

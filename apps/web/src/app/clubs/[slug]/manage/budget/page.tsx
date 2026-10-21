@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getTerms } from "@/lib/terms";
 import { fmtMoney } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
+import { fundingOfficeForClub } from "@/lib/offices";
 import { budgetTermForEvent, budgetTermOptions, loadClubTermBudget } from "@/lib/domain/funding";
 import { defaultFundingSource } from "@/lib/funding/defaults";
 import { plural, sourceNames } from "@/lib/funding/labels";
@@ -36,7 +37,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
     return (
       <EmptyState
         icon={<Lock />}
-        title={club.status === "RETIRED" ? "This club is retired" : "Budgets open once WSUSA approves the club"}
+        title={club.status === "RETIRED" ? "This club is retired" : "Budgets open once the club is approved"}
         description={
           club.status === "RETIRED"
             ? "Its past funding requests and invoices are kept on record with WSUSA."
@@ -74,6 +75,8 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
   const budget = await loadClubTermBudget(club.id, termId);
   const names = sourceNames(club);
   const term = budget.term;
+  // Who decides this club's requests (lib/offices): its own office when that office decides funding, else WSUSA.
+  const decider = await fundingOfficeForClub(club.id);
   const canEditEvents = access.capabilities.has("events");
   const focusGroup = focusEvent ? budget.eventGroups.find((g) => g.event.id === focusEvent.id) : null;
   const newRequest = (eventId?: string) => `${base}/requests/new?term=${term.id}${eventId ? `&event=${eventId}` : ""}`;
@@ -224,7 +227,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
 
       <Section
         title="Funding requests"
-        description={`Requests for ${term.name}. Each lists the lines it covers and the source you expect; WSUSA reviews every request and may fund it from another source.`}
+        description={`Requests for ${term.name}. Each lists the lines it covers and the source you expect; ${decider.name} reviews every request and may fund it from another source.`}
         action={
           <Link href={`${base}/requests`} className="shrink-0 text-sm font-medium text-brand-600 hover:underline">
             All requests

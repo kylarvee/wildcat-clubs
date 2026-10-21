@@ -26,4 +26,5 @@ export const PERSONAS: Persona[] = [
   { key: "nathan", name: "Prof. Nathan Reed", email: "nathan.reed@weber.edu", group: "Faculty & staff", label: "Invited advisor", blurb: "Has a pending request to advise a new club." },
   { key: "alex", name: "Alex Morgan", email: "alex.morgan@weber.edu", group: "Administration", label: "Administrator (WSUSA)", blurb: "Reviews clubs, funding, policy, tests and reports." },
   { key: "sydney", name: "Sydney Park", email: "sydney.park@weber.edu", group: "Administration", label: "System administrator", blurb: "Everything, plus system settings, AI switches and admins." },
+  { key: "rowan", name: "Rowan Ashby", email: "rowan.ashby@weber.edu", group: "Administration", label: "Campus Recreation staff", blurb: "Oversees the sport clubs only: their queue, approvals, renewals and funding." },
 ];

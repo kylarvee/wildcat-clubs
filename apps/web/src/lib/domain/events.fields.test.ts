@@ -5,17 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * newer fields: the cover must be one of the host club's public image files,
  * service minutes can't be more than the event's length (Service projects
  * count by default), perks are stored once each, and an in-person event may
- * keep an online link (hybrid). The database is faked; the write stops at the
- * first insert, which is where the stored row is checked.
+ * keep an online link (hybrid), and the "Does this event involve…" answers
+ * decide the review (lib/events/review) with the trip checked against the
+ * dates. The database is faked; the write stops at the first insert, which
+ * is where the stored row is checked.
  */
 
 class Stop extends Error {}
 
-const state = vi.hoisted(() => ({ files: new Map<string, Record<string, unknown>>(), created: null as Record<string, unknown> | null }));
+const state = vi.hoisted(() => ({ files: new Map<string, Record<string, unknown>>(), created: null as Record<string, unknown> | null, config: [] as { key: string; value: unknown }[] }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     club: { findUnique: async () => ({ id: "club1", name: "RC Wrecker Bots Club", slug: "rc-wrecker-bots-club", type: "REGISTERED", status: "APPROVED", departmentId: null }) },
+    systemConfig: { findMany: async () => state.config },
     building: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id }) },
     fileItem: { findUnique: async ({ where }: { where: { id: string } }) => state.files.get(where.id) ?? null },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -37,7 +40,7 @@ vi.mock("@/lib/terms", async (original) => ({ ...(await original<object>()), get
 
 import { createEvent } from "@/lib/domain/events";
 
-const priya = { id: "u1", email: "priya.patel@mail.weber.edu", name: "Priya Patel", handle: "priyapatel", kind: "STUDENT", platformRole: "USER", status: "ACTIVE", avatarColor: "#492365", avatarUrl: null } as const;
+const priya = { id: "u1", email: "priya.patel@mail.weber.edu", name: "Priya Patel", handle: "priyapatel", kind: "STUDENT", platformRole: "USER", status: "ACTIVE", avatarColor: "#492365", avatarUrl: null, officeIds: [] as string[], fundingOfficeIds: [] as string[] } as const;
 const buildNight = { clubId: "club1", title: "Build Night", kind: "MEETING", startsAt: "2026-11-04T01:00:00.000Z", durationMinutes: 120, locationType: "CAMPUS", buildingId: "nb", room: "150" } as const;
 
 const file = (id: string, over: Record<string, unknown> = {}) =>
@@ -52,6 +55,7 @@ async function stored(input: Record<string, unknown>) {
 beforeEach(() => {
   state.files.clear();
   state.created = null;
+  state.config = [];
 });
 
 describe("cover image", () => {
@@ -101,5 +105,38 @@ describe("perks and hybrid", () => {
     expect(offCampus).toMatchObject({ locationType: "ADDRESS", virtualUrl: "https://zoom.us/j/1" });
     expect((await stored({ locationType: "TBD", buildingId: null, virtualUrl: "https://zoom.us/j/1" })).virtualUrl).toBeNull();
     await expect(createEvent(priya, { ...buildNight, virtualUrl: "meet.google.com/abc" })).rejects.toThrow(/https:\/\//);
+  });
+});
+
+describe("does this event involve…", () => {
+  const trip = { destination: "Weber County Library, Ogden", departsAt: "2026-11-03T23:30:00.000Z", returnsAt: "2026-11-04T04:00:00.000Z", overnight: false, drivers: [{ name: "Coach Dana" }], notes: "" };
+
+  it("publishes an event with nothing checked, as before", async () => {
+    const row = await stored({});
+    expect([row.reviewStatus, row.riskFlags]).toEqual(["NONE", []]);
+  });
+
+  it("sends an event with anything checked to the club's office, answers in checklist order", async () => {
+    const row = await stored({ riskFlags: ["MONEY", "MINORS"] });
+    expect([row.reviewStatus, row.riskFlags]).toEqual(["PENDING", ["MINORS", "MONEY"]]);
+  });
+
+  it("asks for the trip when Travel is checked, and stores it", async () => {
+    await expect(createEvent(priya, { ...buildNight, riskFlags: ["TRAVEL"] })).rejects.toThrow(/Add the trip/);
+    const row = await stored({ riskFlags: ["TRAVEL", "MINORS"], travel: trip });
+    expect(row.reviewStatus).toBe("PENDING");
+    expect(row.travel).toEqual({ destination: "Weber County Library, Ogden", departsAt: "2026-11-03T23:30:00.000Z", returnsAt: "2026-11-04T04:00:00.000Z", overnight: false, drivers: [{ userId: null, name: "Coach Dana" }], notes: null });
+  });
+
+  it("refuses a trip that doesn't cover the event, or comes back before it leaves", async () => {
+    await expect(createEvent(priya, { ...buildNight, riskFlags: ["TRAVEL"], travel: { ...trip, departsAt: "2026-11-10T15:00:00.000Z", returnsAt: "2026-11-10T20:00:00.000Z" } })).rejects.toThrow(/cover the event/);
+    await expect(createEvent(priya, { ...buildNight, riskFlags: ["TRAVEL"], travel: { ...trip, returnsAt: "2026-11-03T20:00:00.000Z" } })).rejects.toThrow(/come back after it leaves/);
+    expect(state.created).toBeNull();
+  });
+
+  it("saves the answers but doesn't wait while review is off in System settings", async () => {
+    state.config = [{ key: "events.riskReview", value: false }];
+    const row = await stored({ riskFlags: ["ALCOHOL"] });
+    expect([row.reviewStatus, row.riskFlags]).toEqual(["NONE", ["ALCOHOL"]]);
   });
 });

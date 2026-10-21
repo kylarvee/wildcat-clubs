@@ -26,7 +26,7 @@ export function BudgetTiles({ planned, money: m, lineCount, termName }: { planne
         value={<TileMoney cents={planned.unrequestedCents} />}
         hint={!lineCount ? "Add costs to request funding" : planned.unrequestedCents ? "Lines in no request yet, and what wasn't funded" : "Every line is covered"}
       />
-      <Stat label="Requested" value={<TileMoney cents={m.requested} />} hint={m.pending ? `${fmtMoney(m.pending)} still in WSUSA review` : m.requested ? "Every request is decided" : "Nothing submitted yet"} />
+      <Stat label="Requested" value={<TileMoney cents={m.requested} />} hint={m.pending ? `${fmtMoney(m.pending)} still in review` : m.requested ? "Every request is decided" : "Nothing submitted yet"} />
       <Stat label="Approved" value={<TileMoney cents={m.approved} />} hint={share === null ? "Decisions show up here" : `${share}% of what you asked for`} />
     </div>
   );

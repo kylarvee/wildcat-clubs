@@ -1,4 +1,4 @@
-import type { AttemptStatus, RenewalPeriod, RequirementKind, UserKind } from "@prisma/client";
+import type { AttemptStatus, ClubRole, RenewalPeriod, RequirementKind, UserKind } from "@prisma/client";
 import { TZDate } from "@date-fns/tz";
 import { detailsCurrent, type DetailsLike } from "@/lib/details/rules";
 import { TZ } from "@/lib/time";
@@ -131,4 +131,57 @@ export function seatStatus(r: Pick<RuleRequirement, "graceDays" | "createdAt">, 
   const gradingPending = !f.met && f.attempts.some((a) => a.status === "NEEDS_REVIEW");
   const state = requirementState({ met: f.met, awaitingGrade: waiting, dueAt, at });
   return { met: f.met, awaitingGrade: waiting, gradingPending, periodStart, dueAt, overdue: state === "overdue", state };
+}
+
+// ─── Who a requirement reaches, and what it pauses ───────────────────────────
+// A requirement may belong to an office (RoleRequirement.officeId): it reaches
+// only the members and leaders of that office's clubs; null is the umbrella's
+// (WSUSA), which reaches every club. It may also gate one permission
+// (gatesCapability, like "events"): it reaches only leaders who hold that
+// permission, and when it's overdue only that permission pauses. Presidents,
+// VPs and advisors hold every permission; other seats hold what their seat
+// grants. Holding is read from the person's roles, never from their pauses,
+// so a requirement doesn't stop applying because it paused someone.
+
+/** What the reach rule reads from a requirement (fields missing on older rows read as null). */
+export type ReachRule = { appliesTo: readonly ClubRole[]; officeId?: string | null; gatesCapability?: string | null };
+
+/** The permissions a person's roles in one club give them before any pause: "all" for presidents, VPs and advisors. */
+export type Holdings = "all" | ReadonlySet<string>;
+
+/** One seat as the reach rule reads it: its role, its club's office (null = the umbrella) and what the person holds there. */
+export type SeatReach = { role: ClubRole; clubOfficeId?: string | null; holds?: Holdings | null };
+
+/** What a person's current roles in one club give them (clubCapabilities' rule, without pauses or the club's phase). */
+export function heldCapabilities(assignments: readonly { role: ClubRole; permissions: readonly string[] }[]): Holdings {
+  if (assignments.some((a) => a.role === "PRESIDENT" || a.role === "VP" || a.role === "ADVISOR")) return "all";
+  return new Set(assignments.flatMap((a) => a.permissions));
+}
+
+export function holdsCapability(h: Holdings | null | undefined, capability: string): boolean {
+  return h === "all" || Boolean(h?.has(capability));
+}
+
+/** Does the requirement reach someone through this seat? Its roles, its office's clubs, and its one permission's holders. */
+export function requirementReaches(r: ReachRule, seat: SeatReach): boolean {
+  if (!r.appliesTo.includes(seat.role)) return false;
+  if (r.officeId != null && r.officeId !== (seat.clubOfficeId ?? null)) return false;
+  // Members hold no permissions, so a single-permission requirement never reaches them.
+  if (r.gatesCapability != null) return seat.role !== "MEMBER" && holdsCapability(seat.holds, r.gatesCapability);
+  return true;
+}
+
+/** What overdue requirements pause in one club: every leader permission (`all`), or just the ones listed. */
+export type Pause = { all: boolean; capabilities: string[] };
+
+export const NO_PAUSE: Pause = { all: false, capabilities: [] };
+
+/**
+ * The pause for a person's overdue requirements in one club: everything when
+ * any of them gates no single permission, else exactly the permissions they gate.
+ */
+export function pauseFor(overdue: readonly { gatesCapability?: string | null }[]): Pause {
+  if (!overdue.length) return NO_PAUSE;
+  if (overdue.some((r) => r.gatesCapability == null)) return { all: true, capabilities: [] };
+  return { all: false, capabilities: [...new Set(overdue.map((r) => r.gatesCapability!))].sort() };
 }

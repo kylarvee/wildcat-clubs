@@ -54,6 +54,8 @@ export type RequestBuilderProps = {
   /** ?from=<request>: start with these lines picked (what that request didn't fund), and this title. */
   preselect?: { lineIds: string[]; title: string } | null;
   reviewDays: number;
+  /** The office that decides the club's funding (lib/offices: its own when that office decides funding, else WSUSA). */
+  office?: string;
   minJustification: number;
 };
 
@@ -140,7 +142,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
     if (!submit) return null;
     if (!chosen.length) return "Pick at least one cost line to request.";
     if (total <= 0) return "The lines you picked add up to $0.00. Add the costs before asking for money.";
-    if (justification.trim().length < p.minJustification) return "Add a sentence or two about what this money is for and who it helps — WSUSA reads that first.";
+    if (justification.trim().length < p.minJustification) return `Add a sentence or two about what this money is for and who it helps — ${p.office ?? "WSUSA"} reads that first.`;
     return null;
   }
 
@@ -166,7 +168,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
           budgetItemIds: chosen.map((l) => l.id),
         });
         if (r.ok) {
-          toast.success(r.data.submitted ? "Request submitted. WSUSA will take it from here." : "Draft saved.");
+          toast.success(r.data.submitted ? `Request submitted. ${p.office ?? "WSUSA"} will take it from here.` : "Draft saved.");
           if (r.data.submitted || !p.initial) router.push(`${base}/requests/${r.data.id}`);
           return;
         }
@@ -248,7 +250,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
                     {l.lockedBy ? (
                       <span className="mt-1 flex items-center gap-1 text-xs text-ink-2">
                         <Lock className="h-3 w-3" aria-hidden />
-                        {l.lockedBy.status === "SUBMITTED" ? `Already in “${l.lockedBy.title}” (in WSUSA review)` : `Funded in full by “${l.lockedBy.title}”`}
+                        {l.lockedBy.status === "SUBMITTED" ? `Already in “${l.lockedBy.title}” (in review)` : `Funded in full by “${l.lockedBy.title}”`}
                       </span>
                     ) : !l.requestable ? (
                       <span className="mt-1 flex items-center gap-1 text-xs text-ink-2">
@@ -287,7 +289,7 @@ export function RequestBuilder(p: RequestBuilderProps) {
         <Field label="Title" required hint="Short and specific, like “Fall speaker series”.">
           {(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} placeholder="What's this request for?" required />}
         </Field>
-        <Field label="Expected source" required hint="Where you expect the money to come from. WSUSA reviews every request and may fund it from another source.">
+        <Field label="Expected source" required hint={`Where you expect the money to come from. ${p.office ?? "WSUSA"} reviews every request and may fund it from another source.`}>
           {(id) => (
             <Select id={id} value={source} onChange={(e) => setSource(e.target.value as FundingSource)}>
               {FUNDING_SOURCES.map((s) => (
@@ -385,8 +387,8 @@ export function RequestBuilder(p: RequestBuilderProps) {
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Send ${fmtMoney(total)} to WSUSA for review?`}
-        description={`You expect it from ${p.sourceNames[source]}. WSUSA reviews every request, usually within about ${p.reviewDays} business days, and may fund it from another source. Until they decide you can withdraw it, and ${chosen.length === 1 ? "its line stays" : `its ${chosen.length} lines stay`} locked so the budget matches what you asked for.`}
+        title={`Send ${fmtMoney(total)} to ${p.office ?? "WSUSA"} for review?`}
+        description={`You expect it from ${p.sourceNames[source]}. ${p.office ?? "WSUSA"} reviews every request, usually within about ${p.reviewDays} business days, and may fund it from another source. Until they decide you can withdraw it, and ${chosen.length === 1 ? "its line stays" : `its ${chosen.length} lines stay`} locked so the budget matches what you asked for.`}
         confirmLabel="Submit request"
         onConfirm={() => save(true)}
       >

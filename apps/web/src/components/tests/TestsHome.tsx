@@ -19,7 +19,7 @@ const pct = (rate: number | null) => (rate === null ? "—" : `${Math.round(rate
  * or pass rates). Shared by /admin/tests and /clubs/[slug]/manage/tests.
  */
 export async function TestsHome({ scope }: { scope: TestScope }) {
-  const tests = await listManagedTests(scope.clubId);
+  const tests = await listManagedTests(scope.clubId, scope.kind === "university" ? scope.officeIds : null);
   const graded = tests.filter((t) => !t.isForm);
   const forms = tests.length - graded.length;
   const all = combineStats(graded.map((t) => t.stats));
@@ -33,7 +33,9 @@ export async function TestsHome({ scope }: { scope: TestScope }) {
         description={
           kind === "club"
             ? `Quizzes, checks and forms for ${scope.ownerName}'s members — safety briefings, training refreshers, sign-up questions. Multiple choice is scored instantly; written answers come to you for review. Forms aren't graded.`
-            : "University tests and forms for student leaders and students: officer policy tests, refreshers, contact forms and acknowledgements. Attach a test or form to a requirement in Admin → Requirements to make it a gate."
+            : scope.kind === "university" && scope.officeIds
+              ? `${scope.ownerName}'s tests and forms for the clubs it oversees: safety briefings, waivers, contact forms and acknowledgements. Attach one to a requirement in Admin → Requirements to make it a gate for your clubs.`
+              : "University tests and forms for student leaders and students: officer policy tests, refreshers, contact forms and acknowledgements. Attach a test or form to a requirement in Admin → Requirements to make it a gate."
         }
         actions={tests.length ? <CreateTestButton clubId={scope.clubId} basePath={scope.basePath} /> : null}
       />

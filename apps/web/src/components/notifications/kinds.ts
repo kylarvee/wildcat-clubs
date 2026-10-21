@@ -2,6 +2,7 @@ import {
   AlarmClock,
   Award,
   Bell,
+  Building2,
   CalendarClock,
   CalendarDays,
   CalendarX2,
@@ -14,6 +15,7 @@ import {
   Megaphone,
   MessageSquare,
   ShieldAlert,
+  ShieldCheck,
   SquarePen,
   Star,
   UserCheck,
@@ -31,6 +33,7 @@ import {
  */
 const ICONS: [prefix: string, icon: LucideIcon][] = [
   ["event.cohost", Handshake],
+  ["event.review", ShieldCheck],
   ["event.starting_soon", AlarmClock],
   ["event.cancelled", CalendarX2],
   ["event.changed", CalendarClock],
@@ -54,6 +57,8 @@ const ICONS: [prefix: string, icon: LucideIcon][] = [
   ["ambassador.", Handshake],
   ["advisor.", GraduationCap],
   ["profile.alumni", GraduationCap],
+  ["club.office_changed", Building2],
+  ["office.", Building2],
   ["club.", FileText],
   ["constitution.", FileText],
   ["complaint.", ShieldAlert],

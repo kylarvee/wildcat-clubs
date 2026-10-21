@@ -201,6 +201,9 @@ model User {
   cohostRequests      EventCohost[]          @relation("CohostRequester")
   cohostDecisions     EventCohost[]          @relation("CohostDecider")
   clubRenewals        ClubRenewal[]          @relation("ClubRenewalSubmitter")
+  officeMemberships   OfficeMember[]         @relation("OfficeStaff")
+  officeStaffAdded    OfficeMember[]         @relation("OfficeStaffAdder")
+  eventsReviewed      Event[]                @relation("EventReviewer")
 }
 
 model UserMajor {
@@ -392,6 +395,9 @@ model Club {
   websiteUrl                String?
   /// [{ platform: "instagram" | "facebook" | "x" | "tiktok" | "discord" | "linkedin" | "youtube" | "other", url }]
   socialLinks               Json             @default("[]")
+  /// The office that oversees the club (lib/offices). Null = the umbrella office (WSUSA).
+  officeId                  String?
+  office                    Office?          @relation(fields: [officeId], references: [id], onDelete: SetNull)
 
   documents            ClubDocument[]
   decisions            ClubDecision[]
@@ -418,6 +424,53 @@ model Club {
   activity             ActivityLog[]
 
   @@index([status])
+  @@index([officeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Offices: who oversees clubs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A campus office that oversees clubs: WSUSA, Campus Recreation, Fraternity &
+/// Sorority Life. One office is the umbrella (WSUSA). Nothing points at the
+/// umbrella by id: a null officeId (Club, Task, RoleRequirement, Test) means
+/// the umbrella. Its staff are the platform admins; every other office's
+/// staff are its OfficeMember rows, who oversee only that office's clubs.
+model Office {
+  id             String            @id @default(cuid())
+  /// Stable key for code and the seed ("wsusa", "campus-rec", "fsl").
+  key            String            @unique
+  name           String
+  shortName      String
+  umbrella       Boolean           @default(false)
+  /// Decides its clubs' funding requests. When false they go to the umbrella.
+  decidesFunding Boolean           @default(false)
+  location       String?
+  hours          String?
+  email          String?
+  phone          String?
+  /// How long a review usually takes, in days (shown to founders and on funding requests).
+  reviewDays     Int               @default(10)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  members        OfficeMember[]
+  clubs          Club[]
+  requirements   RoleRequirement[]
+  tests          Test[]
+  tasks          Task[]
+}
+
+model OfficeMember {
+  officeId  String
+  office    Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("OfficeStaff", fields: [userId], references: [id], onDelete: Cascade)
+  addedAt   DateTime @default(now())
+  addedById String?
+  addedBy   User?    @relation("OfficeStaffAdder", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@id([officeId, userId])
+  @@index([userId])
 }
 
 enum ClubDecisionAction {
@@ -656,6 +709,13 @@ model RoleRequirement {
   renewal         RenewalPeriod   @default(ACADEMIC_YEAR)
   graceDays       Int             @default(30) // 0 = strict gate
   active          Boolean         @default(true)
+  /// Whose requirement it is: only this office's clubs. Null = every club (the umbrella's).
+  officeId        String?
+  office          Office?         @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  /// One permission (a Capability, like "events"): the requirement binds only leaders who hold
+  /// it, and when it's overdue only that permission pauses. Null = binds by appliesTo and
+  /// pauses all of a leader's permissions.
+  gatesCapability String?
   createdAt       DateTime        @default(now())
 }
 
@@ -744,13 +804,24 @@ model Event {
   perks              EventPerk[]
   /// Service hours each attendee earns per date they check in, in minutes. Null = doesn't count.
   serviceMinutes     Int?
+  /// The Events Builder's "Does this event involve…" answers. Any flag sends the event to the
+  /// club's office for review before it's published (when review is on in System settings).
+  riskFlags          EventRisk[]
+  reviewStatus       EventReview  @default(NONE)
+  /// The office's note when it asks for changes (or approves with a condition).
+  reviewNote         String?
+  reviewedById       String?
+  reviewedBy         User?        @relation("EventReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt         DateTime?
+  /// With TRAVEL: { destination, departsAt, returnsAt, overnight, drivers: [{ userId?, name }], notes }.
+  travel             Json?
 
-  cohostAllClubs     Boolean      @default(false)
-  googleEventId      String?
-  createdById        String
-  createdBy          User         @relation(fields: [createdById], references: [id])
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  cohostAllClubs Boolean  @default(false)
+  googleEventId  String?
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   occurrences  EventOccurrence[]
   cohosts      EventCohost[]
@@ -759,6 +830,24 @@ model Event {
   requirements RoleRequirement[]
 
   @@index([clubId, status])
+  @@index([reviewStatus])
+}
+
+/// What an event involves that its club's office reviews first.
+enum EventRisk {
+  OUTDOOR_SPACE // an outdoor common space on campus
+  MINORS // people under 18
+  TRAVEL // travel or an overnight stay
+  LARGE_CROWD // more people expected than System settings' threshold
+  MONEY // collecting money
+  ALCOHOL
+}
+
+enum EventReview {
+  NONE // nothing to review: published
+  PENDING // waiting on the office: only the club's leaders and the office see it
+  APPROVED // reviewed and published
+  CHANGES_REQUESTED // sent back with a note: still hidden
 }
 
 enum OccurrenceStatus {
@@ -1211,6 +1300,9 @@ model Test {
   createdBy        User              @relation(fields: [createdById], references: [id])
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+  /// For a platform test (no club): the office that owns it, whose staff grade it. Null = the umbrella.
+  officeId         String?
+  office           Office?           @relation(fields: [officeId], references: [id], onDelete: SetNull)
   questions        TestQuestion[]
   attempts         TestAttempt[]
   assignments      TestAssignment[]
@@ -1484,8 +1576,13 @@ model Task {
   completedAt   DateTime?
   completedById String?
   completedBy   User?            @relation("TaskCompleter", fields: [completedById], references: [id])
+  /// For ADMINS tasks: which office's staff it's for (lib/domain/tasks routes it). For required
+  /// tasks: the office that requires it ("Required by Campus Rec"). Null = the umbrella.
+  officeId      String?
+  office        Office?          @relation(fields: [officeId], references: [id], onDelete: SetNull)
 
   @@index([assigneeId, status])
+  @@index([assigneeType, status, officeId])
   @@index([sourceType, sourceId])
   @@index([clubId, status])
 }
@@ -1577,18 +1674,18 @@ model AiMessage {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model ActivityLog {
-  id         BigInt   @id @default(autoincrement())
-  at         DateTime @default(now())
-  actorId    String? // null for system jobs and anonymous complaints
-  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  action     String // "attendance.checkin", "club.approved", "role.assigned", …
-  entityType String
-  entityId   String
-  clubId     String?
-  club       Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
-  data       Json?
+  id            BigInt   @id @default(autoincrement())
+  at            DateTime @default(now())
+  actorId       String? // null for system jobs and anonymous complaints
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action        String // "attendance.checkin", "club.approved", "role.assigned", …
+  entityType    String
+  entityId      String
+  clubId        String?
+  club          Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  data          Json?
   /// true only for actions safe to show on a profile or club feed
-  isPublic   Boolean  @default(false)
+  isPublic      Boolean  @default(false)
   /// The person the row is about (data.userId, or an election's winner), for profile feeds.
   subjectUserId String?
 

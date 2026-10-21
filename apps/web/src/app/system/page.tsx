@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Info, TriangleAlert } from "lucide-react";
+import { Info } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { CONFIG_DEFAULTS, getConfig, type ConfigKey } from "@/lib/config";
@@ -10,12 +10,13 @@ import { fmtLongDate } from "@/lib/time";
 import { Callout, PageHeader } from "@/components/ui/layout";
 import { CONFIG_COPY } from "@/components/system/config-copy";
 import { RulesSection, type RuleField, type RuleSummary } from "@/components/system/RulesSection";
-import { WsusaContactsForm } from "@/components/system/WsusaContactsForm";
+import { WsusaReviewersForm } from "@/components/system/WsusaReviewersForm";
 
 export const metadata: Metadata = { title: "System settings" };
 
 type IntKey = { [K in ConfigKey]: (typeof CONFIG_DEFAULTS)[K] extends number ? K : never }[ConfigKey];
 type StringKey = { [K in ConfigKey]: (typeof CONFIG_DEFAULTS)[K] extends string ? K : never }[ConfigKey];
+type BoolKey = { [K in ConfigKey]: (typeof CONFIG_DEFAULTS)[K] extends boolean ? K : never }[ConfigKey];
 
 const SECTIONS: { id: string; title: string; description: string; summary: RuleSummary; keys: IntKey[] }[] = [
   {
@@ -87,8 +88,18 @@ export default async function SystemSettingsPage() {
     const c = CONFIG_COPY[key];
     return { kind: "email", key, label: c.label, help: c.help, placeholder, value: cfg[key], defaultValue: CONFIG_DEFAULTS[key] };
   };
+  const boolField = (key: BoolKey): RuleField => {
+    const c = CONFIG_COPY[key];
+    return { kind: "bool", key, label: c.label, help: c.help, value: cfg[key], defaultValue: CONFIG_DEFAULTS[key] };
+  };
 
-  const jump = [...SECTIONS.map((s) => ({ id: s.id, label: s.title })), { id: "wsusa", label: "WSUSA contacts" }, { id: "help", label: "Help email" }, { id: "app", label: "Mobile app links" }];
+  const jump = [
+    ...SECTIONS.map((s) => ({ id: s.id, label: s.title })),
+    { id: "events", label: "Event review" },
+    { id: "wsusa", label: "WSUSA reviewers" },
+    { id: "help", label: "Help email" },
+    { id: "app", label: "Mobile app links" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -97,16 +108,6 @@ export default async function SystemSettingsPage() {
         description="The rules every club, page and report on Wildcat Clubs follows. Changes apply right away — numbers like activity and review eligibility are recomputed from attendance, so nothing needs re-running."
       />
 
-      {/* Until a sysadmin saves or confirms them once, the WSUSA contacts are only what weber.edu publishes. */}
-      {!stored.has("wsusa.office") ? (
-        <Callout tone="warning" icon={<TriangleAlert />} title="Confirm WSUSA's contact details">
-          Founders see the review office and reviewers after they submit a club, and the assistant quotes them. They came from Student Involvement &amp; Leadership&apos;s pages on weber.edu. Check them with WSUSA, then save or confirm them in{" "}
-          <a href="#wsusa" className="font-medium underline underline-offset-2">
-            WSUSA contacts
-          </a>
-          .
-        </Callout>
-      ) : null}
 
       <nav aria-label="Sections on this page" className="flex gap-1.5 overflow-x-auto pb-1">
         {jump.map((j) => (
@@ -132,12 +133,17 @@ export default async function SystemSettingsPage() {
         <RulesSection key={s.id} id={s.id} title={s.title} description={s.description} summary={s.summary} fields={s.keys.map(intField)} lastChanged={lastChanged(s.keys)} />
       ))}
 
-      <WsusaContactsForm
-        office={cfg["wsusa.office"]}
-        reviewers={cfg["wsusa.reviewers"]}
-        placeholder={!stored.has("wsusa.office") || !stored.has("wsusa.reviewers")}
-        lastChanged={lastChanged(["wsusa.office", "wsusa.reviewers"])}
+      <RulesSection
+        id="events"
+        title="Event review"
+        description="Which club events wait for their club's office (WSUSA, Campus Recreation, Fraternity & Sorority Life) to review them before they're posted. The office sees them in Event reviews; university events never wait."
+        summary="events"
+        fields={[boolField("events.riskReview"), intField("events.largeCrowd")]}
+        lastChanged={lastChanged(["events.riskReview", "events.largeCrowd"])}
       />
+
+      {/* Offices' contacts and review times (WSUSA's too) are in Admin → Offices, which asks for them to be confirmed. */}
+      <WsusaReviewersForm reviewers={cfg["wsusa.reviewers"]} placeholder={!stored.has("wsusa.reviewers")} lastChanged={lastChanged(["wsusa.reviewers"])} />
 
       <RulesSection
         id="help"

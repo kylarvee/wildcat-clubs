@@ -6,24 +6,24 @@ import { Panel } from "@/components/dashboard/Panel";
 import type { QueueRow } from "@/lib/analytics/admin";
 
 /**
- * WSUSA staff: the shared admin queue (lib/analytics/admin wsusaQueue, the
- * same numbers as the admin Overview), counted by kind, each linking to the
- * tool that handles it. It's the admin's switchboard, so it takes the left
- * column (where students see their clubs).
+ * WSUSA and office staff: their office's shared queue (lib/analytics/admin
+ * queueFor, the same numbers as the admin Overview), counted by kind, each
+ * linking to the tool that handles it. It's the admin's switchboard, so it
+ * takes the left column (where students see their clubs).
  */
-export function AdminQueue({ rows }: { rows: QueueRow[] }) {
+export function AdminQueue({ rows, name, umbrella }: { rows: QueueRow[]; name: string; umbrella: boolean }) {
   const total = rows.reduce((n, r) => n + r.count, 0);
   return (
     <Panel
       id="dash-admin"
       title={
         <>
-          WSUSA queue
+          {name} queue
           {total ? <span className="rounded-full bg-warning-50 px-2 py-0.5 text-xs font-semibold text-warning">{total} waiting</span> : null}
         </>
       }
       icon={<Shield />}
-      description="Shared by the admin team. Whoever opens one first handles it."
+      description={umbrella ? "Shared by the admin team. Whoever opens one first handles it." : `Shared by the ${name} team, for your office's clubs. Whoever opens one first handles it.`}
       bodyClassName="p-0 sm:p-0"
     >
       {rows.length ? (
@@ -40,7 +40,7 @@ export function AdminQueue({ rows }: { rows: QueueRow[] }) {
         </ul>
       ) : (
         <p className="flex items-center gap-2 px-4 py-4 text-sm text-ink-2 sm:px-5">
-          <CheckCircle2 className="h-4 w-4 text-success" aria-hidden /> Nothing is waiting: no submissions, funding requests, invoices or reports.
+          <CheckCircle2 className="h-4 w-4 text-success" aria-hidden /> {umbrella ? "Nothing is waiting: no submissions, funding requests, invoices or reports." : "Nothing is waiting on your office right now."}
         </p>
       )}
       <div className="flex flex-wrap gap-2 border-t border-line px-4 py-3 sm:px-5">

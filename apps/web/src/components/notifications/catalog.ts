@@ -23,7 +23,12 @@
 
 /** Settings → Notifications rows, in order. `key` is what User.notificationPrefs stores. */
 export const NOTIFICATION_CATEGORIES = [
-  { key: "events", label: "Events & reminders", hint: "Cancellations, moves and reminders for events at clubs you're in or follow, check-ins a leader adds for you, and co-hosting." },
+  {
+    key: "events",
+    label: "Events & reminders",
+    hint: "Cancellations, moves and reminders for events at clubs you're in or follow, check-ins a leader adds for you, co-hosting, and your club's event reviews.",
+    adminHint: "Events sent to your office for review come in your daily digest.",
+  },
   { key: "membership", label: "Membership", hint: "Join requests and their answers, and to-dos your clubs give you." },
   {
     key: "leadership",
@@ -59,8 +64,9 @@ export type KindRule = {
   /** Account and security notices: in-app, email and push for everyone, whatever their settings say (even with email off). */
   always?: true;
   /**
-   * WSUSA admins hear about it by email in the daily digest instead of one
-   * email each; in-app and push still arrive at once. Admins who turn the
+   * WSUSA admins (and an office's staff, for their office's work) hear about
+   * it by email in the daily digest instead of one email each; in-app and
+   * push still arrive at once. Admins who turn the
    * digest off get these emails one at a time. Everyone else follows `email`.
    */
   admins?: "digest";
@@ -82,6 +88,8 @@ export const NOTIFICATION_REGISTRY = {
   "club.changes_requested": { category: "leadership", email: true, push: true },
   "club.department_added": { category: "leadership", email: false, push: true },
   "club.google_account_verified": { category: "leadership", email: false, push: true },
+  // WSUSA moved the club to another office (lib/domain/offices): its leaders hear who oversees it now.
+  "club.office_changed": { category: "leadership", email: true, push: true },
   "club.reinstated": { category: "leadership", email: true, push: true },
   "club.rejected": { category: "leadership", email: true, push: true },
   "club.renewal_due": { category: "requirements", email: true, push: true },
@@ -122,6 +130,12 @@ export const NOTIFICATION_REGISTRY = {
   "event.cohost_declined": { category: "events", email: false, push: true },
   // Inviting every club at once stays off email (the call site says so).
   "event.cohost_request": { category: "events", email: true, push: true },
+  // The club's office approved an event it reviewed (lib/events/review): its creator and events holders hear.
+  "event.review_approved": { category: "events", email: true, push: true },
+  // The office sent an event back with a note.
+  "event.review_changes_requested": { category: "events", email: true, push: true },
+  // An event sent to the club's office for review (notifyOffice); office staff and admins get it in the digest.
+  "event.review_requested": { category: "events", email: false, push: true, admins: "digest" },
   "event.starting_soon": { category: "events", email: false, push: true },
   "file.shared": { category: "messages", email: true, push: false },
   "funding.approved": { category: "funding", email: true, push: true },
@@ -141,6 +155,9 @@ export const NOTIFICATION_REGISTRY = {
   "membership.requested": { category: "membership", email: false, push: true },
   "message.group_added": { category: "messages", email: false, push: true },
   "message.new": { category: "messages", email: false, push: true },
+  // Admin access for an office's clubs (lib/domain/offices), like an administrator's.
+  "office.staff_added": { category: "account", email: true, push: true, always: true },
+  "office.staff_removed": { category: "account", email: true, push: true, always: true },
   "profile.alumni": { category: "account", email: true, push: true, always: true },
   "project.added": { category: "leadership", email: false, push: true },
   "requirement.assigned": { category: "requirements", email: true, push: true },

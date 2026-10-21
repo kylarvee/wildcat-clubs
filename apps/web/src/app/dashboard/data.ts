@@ -5,7 +5,7 @@ import type { Actor } from "@/lib/auth/session";
 import { can, isAdmin, ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
 import { eventVisibilityWhere } from "@/lib/authz/events";
 import { listTasks } from "@/lib/domain/tasks";
-import { wsusaQueue, type QueueRow } from "@/lib/analytics/admin";
+import { queueFor, type QueueRow } from "@/lib/analytics/admin";
 import { clubLeaderCompliance, requirementsOverview } from "@/lib/domain/requirements";
 import { feedOccurrences, viewerContext, type FeedOccurrence, type ViewerContext } from "@/lib/events/feed";
 import { shortLocationText } from "@/lib/events/labels";
@@ -111,9 +111,14 @@ async function myClubs(user: Actor, ctx: ViewerContext, now: Date): Promise<Dash
   return clubs.sort((a, b) => Number(b.leads) - Number(a.leads) || Number(a.pending) - Number(b.pending) || a.name.localeCompare(b.name));
 }
 
-/** WSUSA's shared queue: the rows of lib/analytics/admin's wsusaQueue (the admin Overview's too) that have something waiting. */
-async function adminQueue(): Promise<QueueRow[]> {
-  return (await wsusaQueue()).rows.filter((r) => r.count > 0);
+/**
+ * The viewer's office queue: the rows of lib/analytics/admin's queueFor (the
+ * admin Overview's and nav's too) that have something waiting. WSUSA staff see
+ * WSUSA's; an office's staff see their office's.
+ */
+async function adminQueue(user: Actor): Promise<{ rows: QueueRow[]; name: string }> {
+  const q = await queueFor(user);
+  return { rows: q.rows.filter((r) => r.count > 0), name: q.name };
 }
 
 function toAgendaItem(o: FeedOccurrence, ctx: ViewerContext): AgendaItem {
@@ -143,13 +148,15 @@ async function weekAgenda(ctx: ViewerContext, now: Date): Promise<AgendaItem[]> 
 export async function loadDashboard(user: Actor) {
   const now = new Date();
   const admin = isAdmin(user);
+  // Platform admins and office staff each work a shared queue.
+  const staff = can(user, "admin.access");
   const ctx = await viewerContext(user);
   const [me, clubs, openTasks, terms, queue, overview] = await Promise.all([
     db.user.findUnique({ where: { id: user.id }, select: { hasMobileApp: true, appPromptDismissedAt: true, graduatedAt: true, status: true } }),
     myClubs(user, ctx, now),
     listTasks(user, { status: "OPEN", take: 300 }),
     getTerms(),
-    admin ? adminQueue() : Promise.resolve([] as QueueRow[]),
+    staff ? adminQueue(user) : Promise.resolve({ rows: [] as QueueRow[], name: "" }),
     admin && (can(user, "admin.tests") || can(user, "admin.trainings")) ? requirementsOverview(user, now) : Promise.resolve(null),
   ]);
 
@@ -163,10 +170,12 @@ export async function loadDashboard(user: Actor) {
     now,
     me,
     clubs,
-    // Admins see the shared WSUSA work in the queue, so their task card holds only what's theirs.
-    tasks: admin ? openTasks.filter((t) => t.assigneeType !== "ADMINS") : openTasks,
+    // Admins and office staff see the shared work in their queue, so their task card holds only what's theirs.
+    tasks: staff ? openTasks.filter((t) => t.assigneeType !== "ADMINS") : openTasks,
     term: termAt(terms, now),
-    queue,
+    queue: queue.rows,
+    queueName: queue.name,
+    staff,
     overview,
     officers,
     agenda,

@@ -29,23 +29,26 @@ export type TimelineInput = {
   /** Approvals: the source that funded it ("Department · Nursing"). */
   fundedBy?: string | null;
   invoice: { number: string; status: InvoiceStatus; createdAt: Date; processedAt: Date | null } | null;
+  /** The office deciding it (lib/offices: WSUSA, or the club's office when it decides funding). */
+  office?: string;
 };
 
 export function requestTimeline(r: TimelineInput): TimelineStep[] {
+  const office = r.office ?? "WSUSA";
   const steps: TimelineStep[] = [{ key: "draft", label: "Draft started", state: "done", tone: "neutral", at: r.createdAt }];
 
   steps.push(
     r.submittedAt
       ? { key: "submitted", label: "Submitted for review", state: "done", tone: "neutral", at: r.submittedAt, by: r.submittedBy }
-      : { key: "submitted", label: "Submit for review", state: "current", tone: "neutral", at: null, detail: "Still a draft — WSUSA can't see it yet." },
+      : { key: "submitted", label: "Submit for review", state: "current", tone: "neutral", at: null, detail: `Still a draft — ${office} can't see it yet.` },
   );
 
   switch (r.status) {
     case "DRAFT":
-      steps.push({ key: "decision", label: "WSUSA decides", state: "upcoming", tone: "neutral", at: null });
+      steps.push({ key: "decision", label: `${office} decides`, state: "upcoming", tone: "neutral", at: null });
       break;
     case "SUBMITTED":
-      steps.push({ key: "decision", label: "In WSUSA review", state: "current", tone: "neutral", at: null, detail: "WSUSA staff are reviewing it." });
+      steps.push({ key: "decision", label: "In review", state: "current", tone: "neutral", at: null, detail: `${office} staff are reviewing it.` });
       break;
     case "APPROVED":
       steps.push({ key: "decision", label: "Approved", state: "done", tone: "success", at: r.decidedAt, by: r.decidedBy, detail: r.fundedBy ? `Funded by ${r.fundedBy}.` : null });

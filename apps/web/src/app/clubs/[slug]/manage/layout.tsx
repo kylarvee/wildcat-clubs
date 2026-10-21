@@ -3,6 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { ROLE_LABEL } from "@/lib/authz";
 import { clubActivity } from "@/lib/metrics";
+import { officeForClub } from "@/lib/offices";
 import { CLUB_STATUS_LABEL, CLUB_STATUS_TONE, STANDING_HINT, STANDING_LABEL, STANDING_TONE, standingOf } from "@/lib/labels/clubs";
 import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,8 @@ export default async function ManageLayout({ children, params }: { children: Rea
   const has = (c: Parameters<typeof access.capabilities.has>[0]) => access.capabilities.has(c);
   const approved = club.status === "APPROVED";
   const standing = approved ? standingOf(await clubActivity(club.id)) : null;
+  // Office staff act for the office that oversees the club (lib/offices).
+  const office = access.viaPlatform === "OFFICE" ? await officeForClub(club.id) : null;
 
   const links: WorkspaceLink[] = [
     { key: "overview", label: "Overview", href: base },
@@ -70,7 +73,9 @@ export default async function ManageLayout({ children, params }: { children: Rea
             ) : null}
           </dl>
           <p className="mt-1 text-sm text-ink-3">
-            {access.viaPlatform ? `Viewing as ${access.viaPlatform === "SYSADMIN" ? "system administrator" : "administrator"}` : `You're ${access.role ? ROLE_LABEL[access.role] : "a leader"}`}
+            {access.viaPlatform
+              ? `Viewing as ${access.viaPlatform === "SYSADMIN" ? "system administrator" : office ? `${office.name} staff` : "administrator"}`
+              : `You're ${access.role ? ROLE_LABEL[access.role] : "a leader"}`}
           </p>
         </div>
         {club.status === "APPROVED" || club.status === "RETIRED" ? (
@@ -80,7 +85,7 @@ export default async function ManageLayout({ children, params }: { children: Rea
         ) : null}
       </div>
       {/* Names what's overdue for their role here and how to clear it. */}
-      {access.suspended ? <PausedBanner actor={user} clubId={club.id} className="mb-6" /> : null}
+      {access.suspended || access.pausedCapabilities.length ? <PausedBanner actor={user} clubId={club.id} className="mb-6" /> : null}
       {club.status === "RETIRED" ? (
         <Callout tone="info" className="mb-6" title="This club is retired">
           Its history, roles and files are kept. Only an administrator can reinstate it.

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlarmClock, Bell, CalendarDays, CheckCircle2, Inbox, Info, ListChecks, Mail, Smartphone } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { can, isAdmin } from "@/lib/authz";
+import { can, isAdmin, isOfficeStaff } from "@/lib/authz";
 import { integrationLive } from "@/lib/config";
 import { db } from "@/lib/db";
 import { shouldPromptForApp } from "@/lib/clubs/queries";
@@ -39,7 +39,8 @@ export default async function NotificationSettingsPage() {
   ]);
   if (!user || !prefs) notFound();
   const phones = prefs._count.pushTokens;
-  const admin = isAdmin(actor);
+  // Office staff read the daily digest too (their own office's queue), like WSUSA's admins.
+  const admin = isAdmin(actor) || isOfficeStaff(actor);
   const choices = readPrefs(prefs.notificationPrefs);
   const rows: CategoryRow[] = NOTIFICATION_CATEGORIES.map((c) => {
     const always = categoryAlways(c.key);
@@ -81,7 +82,7 @@ export default async function NotificationSettingsPage() {
       {admin ? (
         <Card className="p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
-            <Inbox className="h-5 w-5 text-ink-3" aria-hidden /> WSUSA digest
+            <Inbox className="h-5 w-5 text-ink-3" aria-hidden /> {isAdmin(actor) ? "WSUSA digest" : "Daily digest"}
           </h2>
           <div className="mt-4">
             <DigestToggle initial={digestOn(choices)} emailOn={user.emailNotifications} />

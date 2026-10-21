@@ -3,8 +3,9 @@ import type { Prisma, Test, TestAttempt, TestAudience } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { loadActor, type Actor } from "@/lib/auth/session";
-import { can, getClubAccess } from "@/lib/authz";
-import { adminIds, clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
+import { adminScope, can, getClubAccess } from "@/lib/authz";
+import { clubAdvisors, clubCapabilityHolders } from "@/lib/authz/people";
+import { officeStaffIds } from "@/lib/offices";
 import { aiLive } from "@/lib/config";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, parse } from "@/lib/domain/kit";
@@ -44,7 +45,9 @@ import {
 /**
  * The Test Tool — the one write path for tests, questions, assignments,
  * attempts, answers and grades. University tests (clubId null) are managed
- * with admin.tests; club tests with the club's "tests" capability.
+ * with admin.tests by the office that owns them (Test.officeId: null is
+ * WSUSA's, managed by the platform admins; an office's by its staff, who
+ * grade them); club tests with the club's "tests" capability.
  *
  * Lifecycle: build (DRAFT) → publish (assigns the audience for the current
  * cycle) → people take it (attempts; choice questions score instantly) →
@@ -72,9 +75,9 @@ import {
 
 const DAY = 86_400_000;
 
-type TestRow = Test & { club: { id: string; name: string; slug: string; status: string } | null };
+type TestRow = Test & { club: { id: string; name: string; slug: string; status: string } | null; office: { name: string; shortName: string } | null };
 
-const testInclude = { club: { select: { id: true, name: true, slug: true, status: true } } } as const;
+const testInclude = { club: { select: { id: true, name: true, slug: true, status: true } }, office: { select: { name: true, shortName: true } } } as const;
 
 async function loadTest(testId: string): Promise<TestRow> {
   const t = await db.test.findUnique({ where: { id: testId }, include: testInclude });
@@ -88,19 +91,30 @@ const timeLimitOf = (t: Pick<Test, "isForm" | "timeLimitMinutes">) => (t.isForm 
 
 // ─── Permission ──────────────────────────────────────────────────────────────
 
-/** Who may build, publish and grade a test: admins for university tests, the club's "tests" holders for club tests. */
-export async function assertCanManageTest(actor: Actor | null, test: { clubId: string | null }): Promise<Actor> {
+/**
+ * A university test's office may manage it: WSUSA's admins any of them, an
+ * office's staff only their office's (Test.officeId; missing or null = WSUSA's).
+ */
+function ownsUniversityTest(actor: Actor | null, test: { officeId?: string | null }): boolean {
+  const s = adminScope(actor);
+  return s.all || (Boolean(test.officeId) && s.officeIds.includes(test.officeId!));
+}
+
+/** Who may build, publish and grade a test: the owning office's admins for university tests, the club's "tests" holders for club tests. */
+export async function assertCanManageTest(actor: Actor | null, test: { clubId: string | null; officeId?: string | null }): Promise<Actor> {
   if (test.clubId === null) {
     assertCan(actor, "admin.tests");
+    // Another office's test is "not found", so ids reveal nothing.
+    if (!ownsUniversityTest(actor, test)) throw notFound("Test");
     return actor;
   }
   await assertClubCap(actor, test.clubId, "tests");
   return actor!;
 }
 
-export async function canManageTest(actor: Actor | null, test: { clubId: string | null }): Promise<boolean> {
+export async function canManageTest(actor: Actor | null, test: { clubId: string | null; officeId?: string | null }): Promise<boolean> {
   if (!actor) return false;
-  if (test.clubId === null) return can(actor, "admin.tests");
+  if (test.clubId === null) return can(actor, "admin.tests") && ownsUniversityTest(actor, test);
   const access = await getClubAccess(actor, test.clubId);
   return Boolean(access?.capabilities.has("tests"));
 }
@@ -241,14 +255,16 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
         // Not a WSUSA requirement (those are lib/domain/requirements' REQUIREMENT tasks): a test someone assigned.
         kind: "TEST" as const,
         title: `${test.isForm ? "Fill out" : "Take"}: ${test.title}`,
-        description: test.club ? `Assigned by ${test.club.name}.` : "Assigned by WSUSA.",
+        description: test.club ? `Assigned by ${test.club.name}.` : `Assigned by ${test.office?.name ?? "WSUSA"}.`,
         assigneeType: "USER" as const,
         assigneeId: a.userId,
         clubId: test.clubId,
         href: `/tests/${test.id}`,
         dueAt: a.dueAt,
-        // Anything WSUSA assigns is required; a club's own tests and forms aren't.
+        // Anything WSUSA (or another office) assigns is required; a club's own tests and forms aren't.
         required: test.clubId === null,
+        // Who requires it, for the badge ("Required by Campus Rec"); null is WSUSA.
+        officeId: test.clubId === null ? (test.officeId ?? null) : null,
         sourceType: "testAssignment",
         sourceId: a.id,
       })),
@@ -257,7 +273,7 @@ export async function syncAssignments(testId: string, now: Date = new Date()): P
       userIds: rows.map((r) => r.userId),
       kind: "test.assigned",
       title: `New ${noun}: ${test.title}`,
-      body: `${test.club ? `${test.club.name} asked you` : "WSUSA asked you"} to ${testVerb(test.isForm)} this ${noun} by ${fmtDate(dueAt, "EEE, MMM d")}.`,
+      body: `${test.club ? `${test.club.name} asked you` : `${test.office?.shortName ?? "WSUSA"} asked you`} to ${testVerb(test.isForm)} this ${noun} by ${fmtDate(dueAt, "EEE, MMM d")}.`,
       href: `/tests/${test.id}`,
       // Campus-wide tests reach hundreds of people: in-app and push only.
       email: rows.length <= 60,
@@ -273,15 +289,25 @@ const CreateInput = z.object({
   clubId: z.string().min(1).nullable(),
   title: z.string().trim().min(3, "Give it a title (at least 3 characters).").max(LIMITS.title, `Titles can be up to ${LIMITS.title} characters.`),
   isForm: z.boolean().optional().default(false),
+  /** A university test's office, for staff of more than one; defaults to theirs (WSUSA's for platform admins). */
+  officeId: z.string().min(1).max(64).nullish(),
 });
 
-/** Start a new draft test or form. University ones start OPEN; club ones start assigned to the club's members. */
+/**
+ * Start a new draft test or form. University ones start OPEN, owned by the
+ * creator's office (WSUSA's for platform admins, else the office they staff),
+ * so an office's requirements can use its own forms; club ones start assigned
+ * to the club's members.
+ */
 export async function createTest(actor: Actor | null, input: unknown): Promise<{ id: string }> {
   const v = parse(CreateInput, input);
-  const a = await assertCanManageTest(actor, { clubId: v.clubId });
+  const scope = adminScope(actor);
+  const officeId = v.clubId ? null : v.officeId && scope.officeIds.includes(v.officeId) ? v.officeId : scope.all ? null : (scope.officeIds[0] ?? null);
+  const a = await assertCanManageTest(actor, { clubId: v.clubId, officeId });
   const test = await db.test.create({
     data: {
       clubId: v.clubId,
+      officeId,
       title: v.title,
       isForm: v.isForm,
       audience: v.clubId ? "CLUB_MEMBERS" : "OPEN",
@@ -394,6 +420,9 @@ export async function saveTest(actor: Actor | null, testId: string, input: unkno
   if (closesAt && test.closesAt?.getTime() !== closesAt.getTime() && closesAt <= new Date()) throw invalid("Choose a closing time in the future.");
   const allowed = scope === "club" ? ["CLUB_MEMBERS", "SELECTED_USERS", "OPEN"] : ["ROLE_REQUIREMENT", "ALL_STUDENTS", "SELECTED_USERS", "OPEN"];
   if (!allowed.includes(v.audience)) throw invalid(`That audience isn't available for this ${noun}.`);
+  // Sending a test to every student is WSUSA's: an office's tests reach its requirements and the people it picks.
+  if (!test.clubId && test.officeId && v.audience === "ALL_STUDENTS" && test.audience !== "ALL_STUDENTS")
+    throw invalid(`Only WSUSA sends a ${noun} to every student. Use it in a requirement for your office's clubs, or choose the people it goes to.`);
   if (v.automations.some((x) => !automationAllowed(x, scope, v.isForm))) throw invalid("One of the automations can't run after that result. Pick a different step for it.");
   if (test.clubId) {
     // Club steps run in the creator's name, so adding one takes the permission to take that step by hand
@@ -884,7 +913,8 @@ export async function finishAttempt(attemptId: string, opts: { auto: boolean; ac
       kind: "APPROVAL",
       title: `Grade: ${test.title} — ${taker?.name ?? "a test taker"}`,
       description: `${score.pendingQuestionIds.length} written answer${score.pendingQuestionIds.length === 1 ? "" : "s"} to review.`,
-      assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS" },
+      // A university test's answers go to its office's staff (WSUSA's for officeId null).
+      assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS", officeId: test.officeId ?? null },
       href: manageHref(test, `review/${attemptId}`),
       source: { type: "testAttempt", id: attemptId },
     });
@@ -1150,7 +1180,7 @@ export async function runAutomations(trigger: AutomationTrigger, automations: Au
     });
   }
   if (actions.has("NOTIFY_ADMINS")) {
-    const ids = test.clubId ? await clubCapabilityHolders(test.clubId, "tests") : await adminIds();
+    const ids = test.clubId ? await clubCapabilityHolders(test.clubId, "tests") : await officeStaffIds(test.officeId ?? null);
     await notify({ userIds: ids, kind: "test.automation", title: `${taker.name} ${verb} ${test.title}${scoreNote}`, href: resultsHref, exceptUserId: taker.id });
   }
   if (actions.has("CREATE_ADMIN_TASK") && trigger !== "PASSED") {
@@ -1161,7 +1191,7 @@ export async function runAutomations(trigger: AutomationTrigger, automations: Au
         kind: "CLUB",
         title: `Follow up: ${taker.name} ${verb} ${test.title}`,
         description: trigger === "FAILED" ? `Score${scoreNote || ": —"}. Check in with them about a retake.` : "Check in with them about finishing it.",
-        assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS" },
+        assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS", officeId: test.officeId ?? null },
         href: resultsHref,
         dueAt: new Date(Date.now() + 7 * DAY),
         source: { type: "testFollowUp", id: sourceId },
@@ -1174,7 +1204,7 @@ export async function runAutomations(trigger: AutomationTrigger, automations: Au
         kind: "CLUB",
         title: `${taker.name} ${verb} ${test.title}${scoreNote}`,
         description: "Take whatever step comes next for them (for example, approving a role or access).",
-        assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS" },
+        assignee: test.clubId ? { type: "CLUB", clubId: test.clubId, capability: "tests" } : { type: "ADMINS", officeId: test.officeId ?? null },
         href: resultsHref,
         source: { type: "testFollowUp", id: sourceId },
       });
@@ -1311,7 +1341,7 @@ export async function submitAbandonedAttempts(now: Date = new Date()): Promise<{
   // Attempts waiting on a reviewer always have a task (covers attempts from before tasks existed).
   const waiting = await db.testAttempt.findMany({
     where: { status: "NEEDS_REVIEW" },
-    select: { id: true, testId: true, user: { select: { name: true } }, test: { select: { title: true, clubId: true, club: { select: { slug: true } } } } },
+    select: { id: true, testId: true, user: { select: { name: true } }, test: { select: { title: true, clubId: true, officeId: true, club: { select: { slug: true } } } } },
   });
   let reviewTasks = 0;
   if (waiting.length) {
@@ -1324,7 +1354,7 @@ export async function submitAbandonedAttempts(now: Date = new Date()): Promise<{
         kind: "APPROVAL",
         title: `Grade: ${w.test.title} — ${w.user.name}`,
         description: "Written answers to review.",
-        assignee: w.test.clubId ? { type: "CLUB", clubId: w.test.clubId, capability: "tests" } : { type: "ADMINS" },
+        assignee: w.test.clubId ? { type: "CLUB", clubId: w.test.clubId, capability: "tests" } : { type: "ADMINS", officeId: w.test.officeId },
         href: manageHref({ id: w.testId, clubId: w.test.clubId, club: w.test.club }, `review/${w.id}`),
         source: { type: "testAttempt", id: w.id },
       });
@@ -1344,7 +1374,9 @@ export type TestPersonOption = { id: string; name: string; handle: string; email
  * name, email or handle; returns at most 20.
  */
 export async function searchTestPeople(actor: Actor | null, input: { clubId: string | null; q: string }): Promise<TestPersonOption[]> {
-  await assertCanManageTest(actor, { clubId: input.clubId });
+  // University tests pick from every account, for any office's test builder.
+  if (input.clubId === null) assertCan(actor, "admin.tests");
+  else await assertCanManageTest(actor, { clubId: input.clubId });
   const q = String(input.q ?? "").trim().slice(0, 80);
   if (q.length < 2) return [];
   const text = { contains: q, mode: "insensitive" as const };

@@ -31,6 +31,8 @@ export type CalendarEventProps = {
   kind: EventKind;
   visibility: Visibility;
   cancelled: boolean;
+  /** Waiting for its office's review (only its leaders and the office see it), or sent back for changes; null once published. */
+  review: "PENDING" | "CHANGES_REQUESTED" | null;
   note: string | null;
   /** Real instants (ISO, UTC). `start`/`end` on the event are campus wall clock. */
   startsAt: string;

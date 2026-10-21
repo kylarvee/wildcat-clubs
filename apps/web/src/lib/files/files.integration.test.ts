@@ -76,12 +76,14 @@ suite("Club Files (scratch database)", async () => {
     const role = (r: "ADVISOR" | "OFFICER") => db.roleAssignment.findFirstOrThrow({ where: { clubId: club.id, role: r, endedAt: null, user: { status: "ACTIVE" } }, select: { userId: true } });
     const [adv, off] = await Promise.all([role("ADVISOR"), role("OFFICER")]);
     const leaders = (await db.roleAssignment.findMany({ where: { clubId: club.id, endedAt: null }, select: { userId: true } })).map((r) => r.userId);
+    // As actors: none of these people staff an office (lib/offices).
+    const asActor = async <T extends object>(row: Promise<T>) => ({ ...(await row), officeIds: [] as string[], fundingOfficeIds: [] as string[] });
     const [advisor, officer, member, outsider, admin] = await Promise.all([
-      db.user.findUniqueOrThrow({ where: { id: adv.userId }, select }),
-      db.user.findUniqueOrThrow({ where: { id: off.userId }, select }),
-      db.user.findFirstOrThrow({ where: { status: "ACTIVE", kind: "STUDENT", id: { notIn: leaders }, memberships: { some: { clubId: club.id, status: "ACTIVE" } } }, select }),
-      db.user.findFirstOrThrow({ where: { status: "ACTIVE", kind: "STUDENT", platformRole: "USER", memberships: { none: { clubId: club.id } }, roleAssignments: { none: { clubId: club.id } } }, select }),
-      db.user.findFirstOrThrow({ where: { platformRole: "ADMIN", status: "ACTIVE" }, select }),
+      asActor(db.user.findUniqueOrThrow({ where: { id: adv.userId }, select })),
+      asActor(db.user.findUniqueOrThrow({ where: { id: off.userId }, select })),
+      asActor(db.user.findFirstOrThrow({ where: { status: "ACTIVE", kind: "STUDENT", id: { notIn: leaders }, memberships: { some: { clubId: club.id, status: "ACTIVE" } } }, select })),
+      asActor(db.user.findFirstOrThrow({ where: { status: "ACTIVE", kind: "STUDENT", platformRole: "USER", memberships: { none: { clubId: club.id } }, roleAssignments: { none: { clubId: club.id } } }, select })),
+      asActor(db.user.findFirstOrThrow({ where: { platformRole: "ADMIN", status: "ACTIVE" }, select })),
     ]);
     return { club, advisor, officer, member, outsider, admin };
   }

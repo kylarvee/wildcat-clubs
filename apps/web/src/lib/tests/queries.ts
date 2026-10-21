@@ -148,10 +148,14 @@ export type ManagedTestRow = {
 
 const STATUS_ORDER: Record<TestStatus, number> = { PUBLISHED: 0, DRAFT: 1, ARCHIVED: 2 };
 
-/** Tests a scope manages: one club's tests, or WSUSA's university tests (clubId null). */
-export async function listManagedTests(clubId: string | null): Promise<ManagedTestRow[]> {
+/**
+ * Tests a scope manages: one club's tests, or university tests (clubId null):
+ * every office's when `officeIds` is null (WSUSA's admins), else those
+ * offices' own (Test.officeId).
+ */
+export async function listManagedTests(clubId: string | null, officeIds: string[] | null = null): Promise<ManagedTestRow[]> {
   const tests = await db.test.findMany({
-    where: { clubId },
+    where: clubId === null && officeIds ? { clubId: null, officeId: { in: officeIds } } : { clubId },
     orderBy: { updatedAt: "desc" },
     include: {
       _count: { select: { questions: true } },
@@ -537,8 +541,10 @@ export type MyTestItem = {
   testId: string;
   title: string;
   isForm: boolean;
-  /** WSUSA assigned it (a club's own tests and forms aren't required). */
+  /** WSUSA (or another office) assigned it (a club's own tests and forms aren't required). */
   required: boolean;
+  /** Who assigned a required one: "WSUSA", or the office's short name ("Campus Rec"). */
+  requiredBy: string | null;
   clubName: string | null;
   cycleKey: string;
   dueAt: Date | null;
@@ -553,13 +559,13 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
     db.testAssignment.findMany({
       where: { userId: actor.id, status: { in: ["ASSIGNED", "MISSED"] }, test: { status: "PUBLISHED" } },
       orderBy: { dueAt: "asc" },
-      select: { testId: true, cycleKey: true, dueAt: true, status: true, test: { select: { title: true, isForm: true, clubId: true, audience: true, recurrence: true, club: { select: { name: true, status: true } } } } },
+      select: { testId: true, cycleKey: true, dueAt: true, status: true, test: { select: { title: true, isForm: true, clubId: true, audience: true, recurrence: true, club: { select: { name: true, status: true } }, office: { select: { shortName: true } } } } },
     }),
     db.testAttempt.findMany({
       where: { userId: actor.id },
       orderBy: { startedAt: "desc" },
       take: 60,
-      select: { id: true, testId: true, cycleKey: true, status: true, passed: true, scorePercent: true, submittedAt: true, test: { select: { title: true, isForm: true, clubId: true, club: { select: { name: true } } } } },
+      select: { id: true, testId: true, cycleKey: true, status: true, passed: true, scorePercent: true, submittedAt: true, test: { select: { title: true, isForm: true, clubId: true, club: { select: { name: true } }, office: { select: { shortName: true } } } } },
     }),
   ]);
   const todo: MyTestItem[] = [];
@@ -575,6 +581,7 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
       title: a.test.title,
       isForm: a.test.isForm,
       required: a.test.clubId === null,
+      requiredBy: a.test.clubId === null ? (a.test.office?.shortName ?? "WSUSA") : null,
       clubName: a.test.club?.name ?? null,
       cycleKey: a.cycleKey,
       dueAt: a.dueAt,
@@ -590,6 +597,7 @@ export async function myTests(actor: Actor): Promise<{ todo: MyTestItem[]; histo
       title: a.test.title,
       isForm: a.test.isForm,
       required: a.test.clubId === null,
+      requiredBy: a.test.clubId === null ? (a.test.office?.shortName ?? "WSUSA") : null,
       clubName: a.test.club?.name ?? null,
       cycleKey: a.cycleKey,
       dueAt: a.submittedAt,

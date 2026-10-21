@@ -32,6 +32,7 @@ export const occurrenceInclude = {
       address: true,
       building: { select: { name: true, code: true } },
       serviceMinutes: true,
+      reviewStatus: true,
       club: { select: { ...clubRefSelect, status: true } },
       cohosts: { where: { status: "APPROVED" }, select: { club: { select: clubRefSelect } } },
     },

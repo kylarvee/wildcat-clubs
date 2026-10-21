@@ -6,9 +6,10 @@ import type { Actor } from "@/lib/auth/session";
 import { getClubAccess } from "@/lib/authz";
 import { clubsWhereUserHolds } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
-import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
+import { assertCanAdminClub, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
-import { notify, notifyAdmins, notifyClubCapability } from "@/lib/domain/notify";
+import { notify, notifyClubCapability } from "@/lib/domain/notify";
+import { notifyOffice, officeForClub } from "@/lib/offices";
 import { checkUpload, ensureClubFolder, parseForm, slugify, storeClubFile } from "@/lib/domain/clubs";
 import { defaultDraftData, draftProblems, joinPolicyOf, normalizeDraftData, successionOf, type ClubFacts, type DocKind, type DraftData } from "@/lib/constitution/templates";
 import { docToHtml, EMPTY_FACTS, renderDoc } from "@/lib/constitution/render";
@@ -170,9 +171,9 @@ function keptAnswers(data: DraftData): Prisma.InputJsonValue {
 }
 
 /**
- * When adopting, or WSUSA approving a custom document, changes who can join
- * or how seats are filled: logged, and the club's members and WSUSA's
- * administrators are told in-app (admins also in their daily digest).
+ * When adopting, or the club's office approving a custom document, changes
+ * who can join or how seats are filled: logged, and the club's members and
+ * its office's staff are told in-app (staff also in their daily digest).
  */
 async function announceSettingsChange(actor: Actor, club: { id: string; name: string; slug: string }, change: SettingsChange, via: ChangeVia) {
   await logActivity({
@@ -186,7 +187,7 @@ async function announceSettingsChange(actor: Actor, club: { id: string; name: st
   const notice = settingsChangeNotice(club.name, change, via);
   const members = await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE" }, select: { userId: true } });
   await notify({ userIds: members.map((m) => m.userId), exceptUserId: actor.id, kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/clubs/${club.slug}` });
-  await notifyAdmins({ kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/admin/clubs/${club.id}`, exceptUserId: actor.id });
+  await notifyOffice({ clubId: club.id }, { kind: "constitution.settings_changed", title: notice.title, body: notice.body, href: `/admin/clubs/${club.id}`, exceptUserId: actor.id });
 }
 
 /**
@@ -301,7 +302,7 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
   const statedSuccessionMethod = governs === "successionMethod" ? (v.successionMethod ?? null) : null;
   const statedJoinPolicy = governs === "joinPolicy" ? (v.joinPolicy ?? null) : null;
   const pending = await db.clubDocument.findFirst({ where: { clubId: club.id, kind: v.kind, status: "PENDING_APPROVAL" } });
-  if (pending) throw conflict(`Your custom ${KIND_LABEL[v.kind].toLowerCase()} is already waiting for WSUSA. Withdraw it first to upload a new one.`);
+  if (pending) throw conflict(`Your custom ${KIND_LABEL[v.kind].toLowerCase()} is already waiting for ${(await officeForClub(club.id)).name}. Withdraw it first to upload a new one.`);
 
   const folder = await ensureClubFolder(club.id, CONSTITUTION_FOLDER, "PUBLIC", actor.id);
   // Leaders-only until WSUSA approves; approval makes it public like builder documents.
@@ -322,6 +323,7 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
       createdById: actor.id,
     },
   });
+  // Routed to the club's office (lib/domain/tasks createTask).
   await createTask({
     kind: "APPROVAL",
     title: `Review ${club.name}'s custom ${KIND_LABEL[v.kind].toLowerCase()}`,
@@ -333,13 +335,16 @@ export async function submitCustomDocument(actor: Actor | null, input: { file: {
     createdById: actor.id,
   });
   await logActivity({ actorId: actor.id, action: "constitution.custom_submitted", entityType: "clubDocument", entityId: doc.id, clubId: club.id, data: { kind: v.kind, successionMethod: statedSuccessionMethod, joinPolicy: statedJoinPolicy, note: v.note ?? null } });
-  await notifyAdmins({
-    kind: "constitution.custom_submitted",
-    title: `${club.name} uploaded a custom ${KIND_LABEL[v.kind].toLowerCase()} for approval`,
-    body: v.note ?? undefined,
-    href: `/admin/clubs/${club.id}#documents`,
-    exceptUserId: actor.id,
-  });
+  await notifyOffice(
+    { clubId: club.id },
+    {
+      kind: "constitution.custom_submitted",
+      title: `${club.name} uploaded a custom ${KIND_LABEL[v.kind].toLowerCase()} for approval`,
+      body: v.note ?? undefined,
+      href: `/admin/clubs/${club.id}#documents`,
+      exceptUserId: actor.id,
+    },
+  );
   return doc;
 }
 
@@ -374,12 +379,13 @@ const DecideDocInput = z
   .object({ docId: z.string().trim().min(1), approve: z.boolean(), note: z.string().trim().max(2000, "Keep the note under 2,000 characters.").nullish() })
   .refine((v) => v.approve || Boolean(v.note), "Add a note so the club knows what to fix.");
 
-/** WSUSA approves (it takes effect, the setting it governs applies, and a change is announced) or rejects a custom document. */
+/** The club's office (WSUSA, or the office that oversees it) approves (it takes effect, the setting it governs applies, and a change is announced) or rejects a custom document. */
 export async function decideCustomDocument(actor: Actor | null, input: unknown) {
-  assertCan(actor, "admin.clubs");
   const v = parseForm(DecideDocInput, input);
-  const doc = await db.clubDocument.findUnique({ where: { id: v.docId }, include: { club: { select: { id: true, name: true, slug: true, joinPolicy: true, successionMethod: true } } } });
+  const doc = await db.clubDocument.findUnique({ where: { id: v.docId }, include: { club: { select: { id: true, name: true, slug: true, joinPolicy: true, successionMethod: true, officeId: true } } } });
+  assertCanAdminClub(actor, "admin.clubs", doc?.club ?? { officeId: null });
   if (!doc || doc.kind === "OTHER") throw notFound("Document");
+  const office = await officeForClub(doc.clubId);
   if (doc.status !== "PENDING_APPROVAL") throw conflict("This document was already decided or withdrawn.");
   const stated = await statedSettings(doc.id);
   const now = new Date();
@@ -406,7 +412,7 @@ export async function decideCustomDocument(actor: Actor | null, input: unknown) 
   });
   await notifyClubCapability(doc.clubId, "constitution", {
     kind: v.approve ? "constitution.custom_approved" : "constitution.custom_rejected",
-    title: v.approve ? `WSUSA approved ${doc.club.name}'s custom ${label.toLowerCase()}` : `WSUSA didn't approve ${doc.club.name}'s custom ${label.toLowerCase()}`,
+    title: v.approve ? `${office.name} approved ${doc.club.name}'s custom ${label.toLowerCase()}` : `${office.name} didn't approve ${doc.club.name}'s custom ${label.toLowerCase()}`,
     body: v.note ?? (v.approve ? "It's now in effect, and your club settings follow it." : undefined),
     href: `/clubs/${doc.club.slug}/manage/constitution`,
   });

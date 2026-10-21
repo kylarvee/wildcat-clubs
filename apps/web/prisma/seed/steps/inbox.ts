@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { Assignment, ClubM, Ctx } from "../ctx";
 import { addDays, addHours, addMin, minDate } from "../lib/dates";
+import { replanRequirements } from "../lib/requirements";
 import { gapNotice, gapTask, ORPHAN_REQUESTS_SOURCE, orphanRequestsTask, STAFFING_SOURCE, staffingSourceId } from "@/lib/staffing/rules";
 import { addMember } from "./clubs";
 import { allEvents } from "./events";
@@ -477,9 +478,10 @@ function staffingStory(ctx: Ctx) {
   const size = (c: ClubM) => c.members.filter((m) => m.status === "ACTIVE").length;
   const leadsElsewhere = (a: Assignment) => ctx.clubs.some((c) => c.assignments.some((x) => x !== a && x.userId === a.userId && x.role !== "MEMBER" && activeAt(x)));
 
-  // A directory club with one President, an advisor and at least one more officer; the smallest with six members or more.
+  // A WSUSA directory club (an office's clubs go to that office's queue; steps/offices gives Campus Rec its own story)
+  // with one President, an advisor and at least one more officer; the smallest with six members or more.
   const candidates = ctx.clubs
-    .filter((c) => c.status === "APPROVED" && !c.def.story && c.type !== "COLLEGE_AMBASSADORS" && c.def.life !== "dormant")
+    .filter((c) => c.status === "APPROVED" && c.officeId === null && !c.def.story && c.type !== "COLLEGE_AMBASSADORS" && c.def.life !== "dormant")
     .map((club) => {
       const now = club.assignments.filter(activeAt);
       const presidents = now.filter((a) => a.role === "PRESIDENT");
@@ -495,11 +497,9 @@ function staffingStory(ctx: Ctx) {
     president.endedAt = endedAt;
     president.endReason = "RESIGNED";
     ctx.activity({ at: endedAt, actorId: advisorId, action: "role.ended", entityType: "roleAssignment", entityId: president.id, clubId: club.id, data: { userId: president.userId, role: "PRESIDENT", reason: "RESIGNED" }, isPublic: true });
-    // They lead nowhere else now, so the leader requirements they owed close with the seat (domain/requirements
-    // reopenRequirementTasks). Those tasks name a club; member requirements don't, and stay.
-    for (const t of ctx.rows.tasks) {
-      if (t.assigneeId === president.userId && t.kind === "REQUIREMENT" && t.status === "OPEN" && t.clubId) Object.assign(t, { status: "CANCELLED", completedAt: endedAt, completedById: null });
-    }
+    // They lead nowhere else now, so the leader requirements they owed close with the seat and their test
+    // assignments are excused (domain/requirements reopenRequirementTasks). Member requirements stay.
+    replanRequirements(ctx, president, endedAt);
     ctx.rows.notifications.push({
       id: ctx.id(), userId: president.userId, kind: "role.ended", title: `Your role as ${president.seatName ?? "President"} of ${club.name} ended`,
       body: "Resigned. Your time in the role stays in the club's history.", href: `/clubs/${club.slug}/history`, createdAt: addMin(endedAt, 1), readAt: addHours(endedAt, 6),

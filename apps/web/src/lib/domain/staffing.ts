@@ -3,8 +3,9 @@ import type { ClubStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
-import { notify, notifyAdmins } from "@/lib/domain/notify";
+import { notify } from "@/lib/domain/notify";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
+import { notifyOffice, officeForClub } from "@/lib/offices";
 import { clubRules } from "@/lib/constitution/club-rules";
 import { staffingDueAt } from "@/lib/constitution/rules";
 import {
@@ -110,13 +111,15 @@ export async function checkClubStaffing(clubId: string, opts: StaffingCheck = {}
   );
   if (!done) return { opened: [], closed: [] };
 
+  // The gap's task went to the club's office (lib/domain/tasks createTask), and so do these notices.
+  const office = done.stories.length ? await officeForClub(clubId) : null;
   for (const s of done.stories) {
     await logActivity({ actorId: null, action: "staffing.gap_flagged", entityType: "club", entityId: clubId, clubId, data: { gap: s.gap } });
-    const n = gapNotice(s);
+    const n = gapNotice({ ...s, office: office?.name });
     await notify({ userIds: done.leaders, exceptUserId: opts.actorId, kind: "staffing.gap", title: n.title, body: n.body, href: n.href });
-    // WSUSA hears right away too, with its task's wording (a staffing gap is never held for the daily digest).
+    // The office hears right away too, with its task's wording (a staffing gap is never held for the daily digest).
     const t = gapTask(s);
-    await notifyAdmins({ exceptUserId: opts.actorId, kind: "staffing.gap", title: t.title, body: t.description, href: t.href });
+    await notifyOffice({ clubId }, { exceptUserId: opts.actorId, kind: "staffing.gap", title: t.title, body: t.description, href: t.href });
   }
   return { opened: done.plan.open, closed: done.plan.close };
 }

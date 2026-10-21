@@ -8,11 +8,11 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/misc";
 import { submitForReviewAction } from "@/components/founding/actions";
 
-/** The last step of founding. Disabled (with the reasons) until the checklist is done. */
-export function SubmitForReview({ clubId, clubName, ready, resubmission, reviewDays }: { clubId: string; clubName: string; ready: boolean; resubmission: boolean; reviewDays: number }) {
+/** The last step of founding: send the club to the office that oversees it. Disabled (with the reasons) until the checklist is done. */
+export function SubmitForReview({ clubId, clubName, ready, resubmission, reviewDays, office = "WSUSA" }: { clubId: string; clubName: string; ready: boolean; resubmission: boolean; reviewDays: number; office?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const label = resubmission ? "Resubmit to WSUSA" : "Submit to WSUSA";
+  const label = resubmission ? `Resubmit to ${office}` : `Submit to ${office}`;
 
   if (!ready) {
     return (
@@ -29,8 +29,8 @@ export function SubmitForReview({ clubId, clubName, ready, resubmission, reviewD
           {pending ? "Submitting…" : label}
         </Button>
       }
-      title={`Send ${clubName} to WSUSA?`}
-      description={`A WSUSA reviewer will read your profile, advisor and documents, usually within ${reviewDays} days. You can keep editing your profile while you wait, and you'll get a notification and email when they decide.`}
+      title={`Send ${clubName} to ${office}?`}
+      description={`A reviewer at ${office} will read your profile, advisor and documents, usually within ${reviewDays} days. You can keep editing your profile while you wait, and you'll get a notification and email when they decide.`}
       confirmLabel={label}
       onConfirm={() =>
         start(async () => {
@@ -39,7 +39,7 @@ export function SubmitForReview({ clubId, clubName, ready, resubmission, reviewD
             toast.error(r.error);
             return;
           }
-          toast.success("Submitted! WSUSA has your club.");
+          toast.success(`Submitted! ${office} has your club.`);
           router.refresh();
         })
       }

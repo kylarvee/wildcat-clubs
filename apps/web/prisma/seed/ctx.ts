@@ -1,4 +1,5 @@
-import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, EventPerk, Gender, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
+import type { ClubRole, ClubScope, ClubStatus, ClubType, EventKind, EventPerk, EventReview, EventRisk, Gender, LocationType, MembershipSource, MembershipStatus, Prisma, Recurrence, RoleEndReason, Term, Visibility } from "@prisma/client";
+import type { TravelPlan } from "@/lib/events/review";
 import { createIdFactory, createRng, type Rng } from "./lib/rng";
 import type { ClubDef } from "./data/clubs";
 import type { CollegeKey } from "./data/reference";
@@ -119,6 +120,14 @@ export type Ev = {
   cost?: [string, number, number];
   /** Service hours each attendee earns per date they check in, in minutes (Event.serviceMinutes); null = doesn't count. */
   serviceMinutes: number | null;
+  /** "Does this event involve…" (lib/events/review) and where its office's review stands (steps/events reviewStories). Left out: none, never reviewed. */
+  riskFlags?: EventRisk[];
+  reviewStatus?: EventReview;
+  reviewNote?: string | null;
+  reviewedById?: string | null;
+  reviewedAt?: Date | null;
+  /** With TRAVEL: the trip (Event.travel). */
+  travel?: TravelPlan | null;
 };
 
 export type ClubM = {
@@ -129,6 +138,8 @@ export type ClubM = {
   type: ClubType;
   status: ClubStatus;
   scope: ClubScope;
+  /** The office that oversees it (steps/offices; lib/offices/rules officeKeyForClub). Null = the umbrella, WSUSA. */
+  officeId: string | null;
   collegeKey: CollegeKey | null;
   collegeId: string | null;
   departmentId: string | null;
@@ -148,6 +159,21 @@ export type ClubM = {
   advisorIds: string[];
 };
 
+/** A seeded office (steps/offices). Only non-umbrella ids are ever stored on rows: the umbrella is null (lib/offices/rules). */
+export type SeedOffice = {
+  id: string;
+  key: string;
+  name: string;
+  shortName: string;
+  umbrella: boolean;
+  decidesFunding: boolean;
+  location: string | null;
+  hours: string | null;
+  email: string | null;
+  phone: string | null;
+  reviewDays: number;
+};
+
 export class Ctx {
   /** The moment everything is anchored to. SEED_NOW (ISO) pins it, e.g. to rehearse a later date. */
   readonly NOW = process.env.SEED_NOW ? new Date(process.env.SEED_NOW) : new Date();
@@ -155,6 +181,10 @@ export class Ctx {
   readonly id = createIdFactory(16102026);
 
   terms: Term[] = [];
+  /** By key: "wsusa" (the umbrella), "campus-rec", "fsl". Built first (steps/offices), so every later step can use them. */
+  offices = new Map<string, SeedOffice>();
+  /** Office staff (OfficeMember rows), written after the people. */
+  officeStaff: { officeId: string; userId: string; addedAt: Date; addedById: string | null }[] = [];
   colleges = new Map<CollegeKey, { id: string; name: string; shortName: string }>();
   departments = new Map<string, { id: string; collegeKey: CollegeKey | null }>();
   majors = new Map<string, { id: string; collegeKey: CollegeKey | null; departmentId: string | null }>();

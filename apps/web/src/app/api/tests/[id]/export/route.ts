@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const { id } = await params;
     const actor = await getCurrentUser();
-    const test = await db.test.findUnique({ where: { id }, select: { id: true, title: true, clubId: true, audience: true, recurrence: true, passingPercent: true, isForm: true } });
+    const test = await db.test.findUnique({ where: { id }, select: { id: true, title: true, clubId: true, officeId: true, audience: true, recurrence: true, passingPercent: true, isForm: true } });
     if (!test) throw notFound("Test");
     await assertCanManageTest(actor, test);
     const param = new URL(req.url).searchParams.get("cycle");

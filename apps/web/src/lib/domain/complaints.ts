@@ -120,7 +120,7 @@ export async function submitComplaint(actor: Actor | null, input: unknown): Prom
     kind: "APPROVAL",
     title: "A new report is waiting",
     description: "Open it in Reports. Report details never appear in tasks, notifications or email.",
-    assignee: { type: "ADMINS" },
+    assignee: { type: "ADMINS", umbrella: true }, // reports are WSUSA's alone
     href: `/admin/complaints?open=${complaint.id}`,
     source: { type: "complaint", id: complaint.id },
   });

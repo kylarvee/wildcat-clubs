@@ -5,7 +5,7 @@ import { renewalsForAdmin } from "@/lib/domain/renewals";
 import { joinNames, missingLabel } from "@/lib/renewals/rules";
 import { fmtDate } from "@/lib/time";
 
-/** GET /admin/clubs/renewals.csv?show=not-renewed|overdue|renewed — the Renewals tab as CSV (admins). */
+/** GET /admin/clubs/renewals.csv?show=not-renewed|overdue|renewed — the Renewals tab as CSV (admins; an office's staff get their office's clubs). */
 export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ ok: false, error: "Please sign in first." }, { status: 401 });
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="wsusa-renewals-${window?.termYear ?? "none"}-${filter}-${fmtDate(new Date(), "yyyy-MM-dd")}.csv"`,
+      "Content-Disposition": `attachment; filename="club-renewals-${window?.termYear ?? "none"}-${filter}-${fmtDate(new Date(), "yyyy-MM-dd")}.csv"`,
       "Cache-Control": "no-store",
     },
   });

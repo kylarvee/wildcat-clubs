@@ -60,6 +60,11 @@ export const SELF_CLOSING: TaskKind[] = ["APPROVAL", "REQUIREMENT", "TEST", "INV
 /** The badge on tasks WSUSA requires (it replaces the kind badge). */
 export const REQUIRED_LABEL = "Required by WSUSA";
 
+/** The badge on a required task, naming the office that requires it ("Required by Campus Rec"); WSUSA when it's the umbrella's. */
+export function requiredLabel(by: string | null | undefined): string {
+  return by && by !== "WSUSA" ? `Required by ${by}` : REQUIRED_LABEL;
+}
+
 export function isKind(v: string | undefined | null): v is TaskKind {
   return KIND_ORDER.includes(v as TaskKind);
 }

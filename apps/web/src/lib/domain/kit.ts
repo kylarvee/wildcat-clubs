@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import type { Actor } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
-import { can, getClubAccess, type Capability, type ClubAccess, type PlatformAction } from "@/lib/authz";
+import { adminScope, can, canAdminClub, getClubAccess, pausedNote, type Capability, type ClubAccess, type PlatformAction } from "@/lib/authz";
 
 /**
  * Shared plumbing for the domain layer (src/lib/domain/*).
@@ -43,6 +43,22 @@ export function assertCan(actor: Actor | null, action: PlatformAction): asserts 
   if (!can(actor, action)) throw forbidden();
 }
 
+/**
+ * An admin action on one club (lib/authz canAdminClub): platform admins on
+ * any club, an office's staff only on that office's clubs. Another office's
+ * club is "not found", so ids reveal nothing.
+ */
+export function assertCanAdminClub(actor: Actor | null, action: PlatformAction, club: { officeId: string | null }): asserts actor is Actor {
+  assertCan(actor, action);
+  if (!canAdminClub(actor, club)) throw notFound("Club");
+}
+
+/** Platform-wide admin work that stays with WSUSA (the umbrella office), whatever office a club belongs to. */
+export function assertUmbrellaAdmin(actor: Actor | null, action: PlatformAction, what = "This"): asserts actor is Actor {
+  assertCan(actor, action);
+  if (!adminScope(actor).all) throw forbidden(`${what} is handled by WSUSA.`);
+}
+
 /** Loads club access and requires a capability. Returns the access for further checks. */
 export async function assertClubCap(actor: Actor | null, clubId: string, cap: Capability): Promise<ClubAccess> {
   assertSignedIn(actor);
@@ -50,6 +66,9 @@ export async function assertClubCap(actor: Actor | null, clubId: string, cap: Ca
   if (!access) throw notFound("Club");
   if (!access.capabilities.has(cap)) {
     if (access.suspended) throw forbidden("Your leadership permissions are paused until you finish your overdue WSUSA requirement.");
+    // Just this permission is paused (an overdue single-permission requirement).
+    const note = pausedNote(access, cap);
+    if (note) throw forbidden(note);
     throw forbidden();
   }
   return access;

@@ -13,6 +13,7 @@ import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, 
 import { notify } from "@/lib/domain/notify";
 import { assignRole, endRoleAssignment } from "@/lib/domain/roles";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
+import { officeForClub } from "@/lib/offices";
 import { clubPipeline } from "@/lib/roles/queries";
 import {
   attendanceRows,
@@ -876,7 +877,9 @@ async function seatWinner(actor: Actor, access: ClubAccess, e: SyncedElection, w
     exceptUserId: actor.id,
     kind: "election.applied",
     title: `${winnerUser?.name ?? "Someone"} is now ${e.position.name} of ${e.club.name}`,
-    body: opts.logData?.tieBroken ? `The vote was tied; ${TIE_SETTLED_BY[String(opts.logData.tieBrokenBy)] ?? "the organizer"} chose between the tied candidates.` : undefined,
+    body: opts.logData?.tieBroken
+      ? `The vote was tied; ${opts.logData.tieBrokenBy === "wsusa" ? (await officeForClub(e.clubId)).name : (TIE_SETTLED_BY[String(opts.logData.tieBrokenBy)] ?? "the organizer")} chose between the tied candidates.`
+      : undefined,
     href: memberHref(e),
   });
   return { winnerUserId: winner.userId, movedUpFrom: movingFrom?.seatName ?? null, tieBroken: Boolean(opts.logData?.tieBroken) };
@@ -937,7 +940,11 @@ export async function applyElectionResult(actor: Actor | null, electionId: strin
     if (res.kind === "runoff") throw invalid(`It's a tie, and ${e.club.name}'s bylaws settle ties with a runoff between the tied candidates. Start the runoff instead.`);
     const named = res.by === "advisor" || res.by === "president";
     if (access.viaPlatform === null && (res.by === "wsusa" || (named && !res.userIds.includes(actor.id)))) {
-      throw forbidden(res.by === "wsusa" ? "It's a tie, and nobody in the club can settle it under its bylaws, so a WSUSA administrator does." : `It's a tie, and under ${e.club.name}'s bylaws the ${res.by === "advisor" ? "advisor" : "President"} casts the deciding vote.`);
+      throw forbidden(
+        res.by === "wsusa"
+          ? `It's a tie, and nobody in the club can settle it under its bylaws, so ${(await officeForClub(e.clubId)).name} does.`
+          : `It's a tie, and under ${e.club.name}'s bylaws the ${res.by === "advisor" ? "advisor" : "President"} casts the deciding vote.`,
+      );
     }
     if (!v.winnerCandidateId) throw conflict("It's a tie. Choose the winner from the tied candidates.");
     if (!outcome.candidateIds.includes(v.winnerCandidateId)) throw invalid("Choose one of the tied candidates.");
@@ -953,7 +960,7 @@ export async function applyElectionResult(actor: Actor | null, electionId: strin
   });
 }
 
-/** Who settled a tie, as the winner's notice says it. */
+/** Who settled a tie, as the winner's notice says it. "wsusa" is the club's office (lib/offices), named at the call. */
 const TIE_SETTLED_BY: Record<string, string> = { advisor: "the advisor", president: "the President", wsusa: "WSUSA", organizer: "the organizer" };
 
 const RunoffInput = z.object({ votingClosesAt: z.coerce.date({ error: "Choose when the runoff closes." }) });
@@ -1056,7 +1063,7 @@ export async function proposeCandidate(actor: Actor | null, electionId: string, 
     createdById: actor.id,
   };
   for (const userId of others) await createTask({ ...task, assignee: { type: "USER", userId } });
-  // Nobody in the club can confirm it (a President proposed for their own seat with no advisor): WSUSA can.
+  // Nobody in the club can confirm it (a President proposed for their own seat with no advisor): the club's office can (createTask routes it).
   if (!confirmers.length && access.viaPlatform === null) await createTask({ ...task, assignee: { type: "ADMINS" } });
 
   await logActivity({ actorId: actor.id, action: "election.proposed", entityType: "election", entityId: e.id, clubId: e.clubId, data: { userId: c.userId } });

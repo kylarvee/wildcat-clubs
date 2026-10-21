@@ -76,8 +76,9 @@ export function buildReviews(ctx: Ctx) {
   // Ogden Valley Disc Golf Club (fictional demo club): four 1★ reviews within the last 36 hours.
   const polisci = ctx.club("discgolf");
   const pcounts = counts.get(polisci.id)!;
+  // Eligible before the first of the four reviews (36 hours ago), whatever time of day the seed runs.
   const bombers = rng.sample(
-    [...pcounts.entries()].filter(([u, c]) => c.count >= 3 && !reviewed.has(`${polisci.id}:${u}`) && !ctx.person(u).persona && ctx.person(u).kind === "STUDENT").map(([u]) => u),
+    [...pcounts.entries()].filter(([u, c]) => c.count >= 3 && c.third! < addHours(NOW, -36) && !reviewed.has(`${polisci.id}:${u}`) && !ctx.person(u).persona && ctx.person(u).kind === "STUDENT").map(([u]) => u),
     4,
   );
   const times = [rng.float(30, 35), rng.float(20, 28), rng.float(9, 16), rng.float(2, 6)].map((h) => addHours(NOW, -h));

@@ -688,3 +688,196 @@ export function assignCovers(ctx: Ctx) {
 export function allEvents(ctx: Ctx): Ev[] {
   return [...ctx.universityEvents, ...ctx.clubs.flatMap((c) => c.events)];
 }
+
+// ─── Risk-based review (lib/events/review) ──────────────────────────────────
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/**
+ * Events that waited for their club's office (lib/events/review), built after
+ * every step that draws from the seed's generator, from their own, so nothing
+ * else shifts (and all in the future, so none has attendance):
+ *  - Priya's robot demo at a junior high (people under 18 and travel), waiting
+ *    in WSUSA's queue (Alex's Event reviews). Priya sees it waiting.
+ *  - Hiking and Outdoors Club's canyoneering weekend in Moab (travel,
+ *    overnight, two drivers), waiting in Campus Recreation's queue (Rowan's).
+ *    It's members only and Maya is a member, yet she doesn't see it.
+ *  - SWE's bake sale (collecting money), sent back with Alex's note; Vanessa
+ *    sees the note, and her next save sends it back.
+ *  - Girls in STEM Robot Day (people under 18), approved and posted as usual.
+ *  - A few past fundraisers and away competitions, reviewed before they happened.
+ */
+export function buildReviewStories(ctx: Ctx) {
+  const { NOW } = ctx;
+  const r = createRng(20261027);
+  const code = () => {
+    for (;;) {
+      const c = r.string(CODE_ALPHABET, 6);
+      if (!ctx.usedCodes.has(c)) return c;
+    }
+  };
+  const alex = ctx.p("alex");
+  const rowan = ctx.p("rowan");
+  const campusRec = ctx.offices.get("campus-rec")!;
+  const reviewerFor = (club: ClubM) => (club.officeId === campusRec.id ? rowan.id : alex.id);
+  const reviewTask = (ev: Ev, club: ClubM, sentAt: Date, decided?: { by: string; at: Date }) =>
+    ctx.rows.tasks.push({
+      id: ctx.id(), kind: "APPROVAL", title: `Review “${ev.title}” (${club.name})`, description: "Approve it to post it, or ask for changes with a note. Until then only the club's leaders and your office can see it.",
+      assigneeType: "ADMINS", clubId: club.id, href: `/admin/events#${ev.id}`, dueAt: ev.startsAt, status: decided ? "DONE" : "OPEN", sourceType: "eventReview", sourceId: ev.id,
+      createdById: ev.createdById, createdAt: sentAt, completedAt: decided?.at ?? null, completedById: decided?.by ?? null,
+    });
+  const sent = (ev: Ev, club: ClubM, at: Date) => {
+    ctx.activity({ at: ev.createdAt, actorId: ev.createdById, action: "event.created", entityType: "event", entityId: ev.id, clubId: club.id, data: { title: ev.title }, isPublic: false });
+    ctx.activity({ at, actorId: ev.createdById, action: "event.review_requested", entityType: "event", entityId: ev.id, clubId: club.id, data: { title: ev.title, flags: ev.riskFlags ?? [], resubmitted: false }, isPublic: false });
+  };
+  const dateAt = (days: number, dow: number, H: number, M = 0) => onWeekday(addDays(NOW, days), dow, H, M);
+  const seatHolder = (club: ClubM, roles: string[], not: string[] = []) => club.assignments.find((a) => !a.endedAt && roles.includes(a.role) && !not.includes(a.userId))?.userId ?? null;
+  const driver = (userId: string) => ({ userId, name: ctx.person(userId).name });
+
+  // 1. Priya's robot demo at Roy Junior High: waiting for WSUSA.
+  const robotics = ctx.club("robotics");
+  const priya = ctx.p("priya").id;
+  const demoAt = dateAt(9, 6, 10);
+  const demo = newEvent(ctx, {
+    clubId: robotics.id,
+    title: "Robot Demo Day at Roy Junior High",
+    descriptionHtml:
+      "<p>We're bringing three combat robots (safely caged) and the beginner kits to Roy Junior High's STEM fair. Students drive the kits and ask us anything about building their own.</p><ul><li>Volunteers: sign up in the club chat; we need six.</li><li>Wear your club shirt.</li></ul>",
+    kind: "SERVICE",
+    visibility: "PUBLIC",
+    startsAt: demoAt,
+    durationMinutes: 180,
+    locationType: "ADDRESS",
+    address: "Roy Junior High School, 2187 W 5300 S, Roy, UT 84067",
+    lat: 41.1647,
+    lng: -112.0519,
+    createdById: priya,
+    createdAt: addDays(NOW, -2.2),
+    termId: ctx.termFor(NOW).id,
+    riskFlags: ["MINORS", "TRAVEL"],
+    reviewStatus: "PENDING",
+  });
+  const second = seatHolder(robotics, ["VP", "OFFICER"], [priya]);
+  demo.travel = {
+    destination: "Roy Junior High School, Roy",
+    departsAt: addMin(demoAt, -45).toISOString(),
+    returnsAt: addMin(demoAt, 225).toISOString(),
+    overnight: false,
+    drivers: [driver(priya), ...(second ? [driver(second)] : [])],
+    notes: "Two club cars. The robots and their LiPo batteries ride in the fire-safe cases; Dr. Alvarez is the adult contact on site.",
+  };
+  addOccurrences(ctx, demo, [{ startsAt: demoAt, endsAt: addMin(demoAt, 180) }], { code: code() });
+  robotics.events.push(demo);
+  ctx.refs.reviewDemoEventId = demo.id;
+  sent(demo, robotics, demo.createdAt);
+  reviewTask(demo, robotics, demo.createdAt);
+  ctx.rows.notifications.push({
+    id: ctx.id(), userId: alex.id, kind: "event.review_requested", title: `${robotics.name} sent “${demo.title}” for review`, body: "It involves people under 18 and travel. It's posted once your office approves it.",
+    href: `/admin/events#${demo.id}`, createdAt: addMin(demo.createdAt, 1), readAt: null,
+  });
+
+  // 2. Hiking and Outdoors Club's Moab weekend: waiting for Campus Recreation.
+  const hiking = ctx.club("climbing");
+  const tripAt = dateAt(15, 5, 14);
+  const lead = ctx.leaderAt(hiking, addDays(NOW, -2));
+  const trip = newEvent(ctx, {
+    clubId: hiking.id,
+    title: "Moab Canyoneering Weekend",
+    descriptionHtml:
+      "<p>Two days of beginner-friendly canyons near Moab with our certified trip leaders, camping at Sand Flats. Gear, permits and group meals are covered; bring a sleeping bag and two liters of water.</p><ul><li>Members only, 14 spots.</li><li>We leave from the Wildcat Center lot.</li></ul>",
+    kind: "OTHER",
+    visibility: "MEMBERS",
+    startsAt: tripAt,
+    durationMinutes: 52 * 60,
+    locationType: "ADDRESS",
+    address: "Sand Flats Recreation Area, Moab, UT 84532",
+    lat: 38.5733,
+    lng: -109.5262,
+    createdById: lead,
+    createdAt: addDays(NOW, -1.4),
+    termId: ctx.termFor(NOW).id,
+    riskFlags: ["TRAVEL"],
+    reviewStatus: "PENDING",
+  });
+  const codriver = seatHolder(hiking, ["VP", "OFFICER"], [lead]);
+  trip.travel = {
+    destination: "Sand Flats Recreation Area, Moab",
+    departsAt: tripAt.toISOString(),
+    returnsAt: addMin(tripAt, 52 * 60).toISOString(),
+    overnight: true,
+    drivers: [driver(lead), ...(codriver ? [driver(codriver)] : [])],
+    notes: "Two Campus Rec fleet vans. Camping at Sand Flats; the canyon permits are booked for Saturday.",
+  };
+  addOccurrences(ctx, trip, [{ startsAt: tripAt, endsAt: addMin(tripAt, 52 * 60) }], { code: code() });
+  hiking.events.push(trip);
+  ctx.refs.reviewTripEventId = trip.id;
+  sent(trip, hiking, trip.createdAt);
+  reviewTask(trip, hiking, trip.createdAt);
+  ctx.rows.notifications.push({
+    id: ctx.id(), userId: rowan.id, kind: "event.review_requested", title: `${hiking.name} sent “${trip.title}” for review`, body: "It involves travel. It's posted once your office approves it.",
+    href: `/admin/events#${trip.id}`, createdAt: addMin(trip.createdAt, 1), readAt: null,
+  });
+
+  // 3. SWE's bake sale: sent back with a note.
+  const swe = ctx.club("swe");
+  const vanessa = ctx.p("vanessa").id;
+  const su = ctx.buildings.get("SU")!;
+  const saleAt = dateAt(8, 2, 10);
+  const asked = addDays(NOW, -0.8);
+  const sale = newEvent(ctx, {
+    clubId: swe.id,
+    title: "Bake Sale for SWE Scholarships",
+    descriptionHtml: "<p>Cookies, brownies and gluten-free treats in the Shepherd Union. Everything goes to SWE's scholarship for first-year engineering students.</p>",
+    kind: "FUNDRAISER",
+    visibility: "PUBLIC",
+    startsAt: saleAt,
+    durationMinutes: 240,
+    locationType: "CAMPUS",
+    buildingId: su.id,
+    buildingCode: "SU",
+    room: "Room 404A",
+    lat: su.lat,
+    lng: su.lng,
+    createdById: vanessa,
+    createdAt: addDays(NOW, -3.1),
+    termId: ctx.termFor(NOW).id,
+    riskFlags: ["MONEY"],
+    reviewStatus: "CHANGES_REQUESTED",
+    reviewNote: "Thanks for sending this! Before we approve it: who handles the cash box, and where will the money be deposited? Add both to the description, then save to send it back.",
+    reviewedById: alex.id,
+    reviewedAt: asked,
+  });
+  addOccurrences(ctx, sale, [{ startsAt: saleAt, endsAt: addMin(saleAt, 240) }], { code: code() });
+  swe.events.push(sale);
+  ctx.refs.reviewSaleEventId = sale.id;
+  sent(sale, swe, sale.createdAt);
+  reviewTask(sale, swe, sale.createdAt, { by: alex.id, at: asked });
+  ctx.activity({ at: asked, actorId: alex.id, action: "event.review_changes_requested", entityType: "event", entityId: sale.id, clubId: swe.id, data: { title: sale.title, note: sale.reviewNote }, isPublic: false });
+  ctx.rows.notifications.push({
+    id: ctx.id(), userId: vanessa, kind: "event.review_changes_requested", title: `Changes asked for “${sale.title}”`, body: `${sale.reviewNote} Save your changes in the Events Builder to send it back for review.`,
+    href: `/clubs/${swe.slug}/manage/events/${sale.id}`, createdAt: addMin(asked, 1), readAt: null,
+  });
+
+  // 4. Girls in STEM Robot Day: approved, posted as usual (before SWE was asked to co-host).
+  const stem = robotics.events.find((e) => e.title === "Girls in STEM Robot Day");
+  if (stem) {
+    const at = addDays(stem.createdAt, 0.25);
+    Object.assign(stem, { riskFlags: ["MINORS"], reviewStatus: "APPROVED", reviewedById: alex.id, reviewedAt: at });
+    sent(stem, robotics, addMin(stem.createdAt, 2));
+    reviewTask(stem, robotics, addMin(stem.createdAt, 2), { by: alex.id, at });
+    ctx.activity({ at, actorId: alex.id, action: "event.review_approved", entityType: "event", entityId: stem.id, clubId: robotics.id, data: { title: stem.title, flags: ["MINORS"], note: null }, isPublic: false });
+    ctx.rows.notifications.push({
+      id: ctx.id(), userId: priya, kind: "event.review_approved", title: `“${stem.title}” is approved`, body: "It's posted now: on your club's calendar, the Events page and members' calendars.",
+      href: `/clubs/${robotics.slug}/manage/events/${stem.id}`, createdAt: addMin(at, 1), readAt: addMin(at, 90),
+    });
+  }
+
+  // 5. History: past fundraisers (collecting money) and away competitions (travel), reviewed before they happened.
+  const past = r.shuffle(ctx.clubs.filter((c) => c.status === "APPROVED").flatMap((c) => c.events.filter((e) => !e.isSeries && e.status === "SCHEDULED" && e.startsAt && e.startsAt < addDays(NOW, -3)).map((e) => ({ c, e }))));
+  const decide = (c: ClubM, e: Ev, flags: Ev["riskFlags"]) => Object.assign(e, { riskFlags: flags, reviewStatus: "APPROVED", reviewedById: reviewerFor(c), reviewedAt: minDate(addDays(e.createdAt, 1), e.startsAt!) });
+  for (const { c, e } of past.filter((x) => x.e.kind === "FUNDRAISER").slice(0, 5)) decide(c, e, ["MONEY"]);
+  for (const { c, e } of past.filter((x) => x.e.kind === "COMPETITION" && x.e.locationType === "ADDRESS" && x.e.address).slice(0, 3)) {
+    decide(c, e, ["TRAVEL"]);
+    e.travel = { destination: e.address!, departsAt: addMin(e.startsAt!, -60).toISOString(), returnsAt: addMin(e.startsAt!, e.durationMinutes + 60).toISOString(), overnight: false, drivers: [driver(e.createdById)], notes: null };
+  }
+}

@@ -115,6 +115,8 @@ export type GapStory = {
   leftName: string | null;
   /** The club still has an advisor (who can fill the President seat). */
   hasAdvisor: boolean;
+  /** The office that oversees the club and gets the task (lib/offices), as the leaders' notice names it. Default WSUSA. */
+  office?: string;
 };
 
 const orgChart = (slug: string) => `/clubs/${slug}/manage/org-chart`;
@@ -161,7 +163,7 @@ export function gapNotice(s: GapStory): { title: string; body: string; href: str
   if (s.gap === "president") {
     return {
       title: `${name} has no President`,
-      body: `${presidentLeft(s)}, so nobody holds the seat. ${s.hasAdvisor ? "An advisor can fill it from the org chart with Fill this seat, and WSUSA can help." : "WSUSA knows and can help you fill it from the org chart."}`,
+      body: `${presidentLeft(s)}, so nobody holds the seat. ${s.hasAdvisor ? `An advisor can fill it from the org chart with Fill this seat, and ${s.office ?? "WSUSA"} can help.` : `${s.office ?? "WSUSA"} knows and can help you fill it from the org chart.`}`,
       href: orgChart(slug),
     };
   }

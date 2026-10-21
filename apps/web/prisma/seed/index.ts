@@ -15,10 +15,11 @@ import { Ctx } from "./ctx";
 import { insertAll } from "./insert";
 import { resetSeedStorage } from "./lib/assets";
 import { buildReference } from "./steps/reference";
+import { buildOffices, buildOfficeStories } from "./steps/offices";
 import { buildPeople, markConcurrentEnrollment } from "./steps/people";
 import { buildClubs, buildMemberships } from "./steps/clubs";
 import { buildRoles } from "./steps/roles";
-import { assignCovers, buildEvents } from "./steps/events";
+import { assignCovers, buildEvents, buildReviewStories } from "./steps/events";
 import { buildAttendance } from "./steps/attendance";
 import { buildGovernance, choosePastGrace } from "./steps/governance";
 import { buildAnnouncements, buildElections, buildMessaging, buildReviews, buildSubscriptions } from "./steps/community";
@@ -48,6 +49,8 @@ async function main() {
     resetSeedStorage();
 
     const ref = buildReference(ctx);
+    // Offices first: clubs, roles, governance and the inbox all route by them.
+    buildOffices(ctx);
     const users = buildPeople(ctx);
     buildClubs(ctx);
     buildMemberships(ctx);
@@ -66,6 +69,9 @@ async function main() {
     buildFiles(ctx);
     assignCovers(ctx);
     buildInbox(ctx, users);
+    // Events that waited for their office's review: after every step that draws from the generator, so nothing else shifts.
+    buildReviewStories(ctx);
+    buildOfficeStories(ctx);
     log(`Built in ${((Date.now() - started) / 1000).toFixed(1)}s — writing…`);
 
     await insertAll(db, ctx, ref, users, log);

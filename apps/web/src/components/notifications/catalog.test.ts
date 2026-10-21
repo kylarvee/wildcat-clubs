@@ -9,13 +9,13 @@ import { notificationIcon } from "@/components/notifications/kinds";
 /**
  * The kind catalog has to match what the code sends. These tests read the
  * source: the `kind` of every notify(), notifyAdmins(), notifyClubCapability(),
- * notifyInBatches() and notifyEach() call in src must be in NOTIFICATION_KINDS,
+ * notifyInBatches(), notifyEach() and notifyOffice() call in src must be in NOTIFICATION_KINDS,
  * and every catalog kind must be sent somewhere. (prisma/seed/verify.ts then
  * checks the seeded bells against the catalog.)
  */
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const CALLEES = ["notify", "notifyAdmins", "notifyClubCapability", "notifyInBatches", "notifyEach"];
+const CALLEES = ["notify", "notifyAdmins", "notifyClubCapability", "notifyInBatches", "notifyEach", "notifyOffice"];
 
 /**
  * Call sites whose kind the file alone can't spell out: a template, a spread
@@ -135,7 +135,7 @@ type Call = { where: string; kinds: string[]; dynamic: string | null };
 function calls(file: string): Call[] {
   const rel = path.relative(WEB, file).split(path.sep).join("/");
   // The definitions themselves pass the caller's kind along.
-  if (rel === "src/lib/domain/notify.ts") return [];
+  if (rel === "src/lib/domain/notify.ts" || rel === "src/lib/offices/index.ts") return [];
   const src = readFileSync(file, "utf8");
   const out: Call[] = [];
   const re = new RegExp(`(?<![\\w.$])(${CALLEES.join("|")})\\(`, "g");
@@ -143,9 +143,10 @@ function calls(file: string): Call[] {
     if (/function\s+$/.test(src.slice(Math.max(0, m.index - 20), m.index))) continue;
     const open = m.index + m[1].length;
     const args = splitTop(src.slice(open + 1, closing(src, open) - 1), ",").map((a) => a.trim());
-    const obj = args.find((a) => a.startsWith("{"));
-    if (!obj) continue;
-    const props = splitTop(obj.slice(1, -1), ",").map((p) => p.trim());
+    // The notice is the object argument with a kind (or a spread): notifyOffice's first argument is its target.
+    const objects = args.filter((a) => a.startsWith("{")).map((a) => splitTop(a.slice(1, -1), ",").map((p) => p.trim()));
+    const props = objects.find((ps) => ps.some((p) => p === "kind" || /^kind\s*:/.test(p))) ?? objects.find((ps) => ps.some((p) => p.startsWith("...")));
+    if (!props) continue;
     const kindProp = props.find((p) => p === "kind" || /^kind\s*:/.test(p));
     const expr = kindProp ? (kindProp === "kind" ? "kind" : kindProp.replace(/^kind\s*:/, "").trim()) : props.find((p) => p.startsWith("..."));
     if (!expr) continue;

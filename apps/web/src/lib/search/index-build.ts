@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
 import { buildClubDoc, type ClubDocSource } from "./doc";
 import { forgetVocabulary } from "./match";
+import { UNDER_REVIEW } from "@/lib/events/review";
 
 /**
  * THE INDEXER. Rebuilds ClubSearchDoc rows from each approved club's own
@@ -78,13 +79,14 @@ export async function loadDocSources(client: Client, clubIds?: string[]): Promis
   const listed = { OR: [{ clubId: null }, { club: { status: { in: ["APPROVED", "RETIRED"] as const } } }] } satisfies Prisma.EventWhereInput;
   const [seats, hosted, cohosted, announcements, documents, reviews, files] = await Promise.all([
     client.position.findMany({ where: { clubId: { in: ids }, archivedAt: null }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { clubId: true, name: true } }),
-    client.event.findMany({ where: { clubId: { in: ids }, status: "SCHEDULED", visibility: { in: ["PUBLIC", "UNIVERSITY"] } }, select: eventSelect }),
+    // Posted events only: one waiting for its office's review isn't searchable (lib/events/review).
+    client.event.findMany({ where: { clubId: { in: ids }, status: "SCHEDULED", reviewStatus: { notIn: [...UNDER_REVIEW] }, visibility: { in: ["PUBLIC", "UNIVERSITY"] } }, select: eventSelect }),
     client.eventCohost.findMany({
       where: {
         clubId: { in: ids },
         status: "APPROVED",
         // A university event marked members-only is open to every signed-in account.
-        event: { status: "SCHEDULED", AND: [listed, { OR: [{ visibility: { in: ["PUBLIC", "UNIVERSITY"] } }, { visibility: "MEMBERS", clubId: null }] }] },
+        event: { status: "SCHEDULED", reviewStatus: { notIn: [...UNDER_REVIEW] }, AND: [listed, { OR: [{ visibility: { in: ["PUBLIC", "UNIVERSITY"] } }, { visibility: "MEMBERS", clubId: null }] }] },
       },
       select: { clubId: true, event: { select: eventSelect } },
     }),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { awaitingGrade, fulfillmentOf, periodStartIn, requirementState, seatDueAt, seatStatus, type AttemptLike, type RequirementEvidence, type RuleRequirement } from "./requirement-rules";
+import { awaitingGrade, fulfillmentOf, heldCapabilities, pauseFor, periodStartIn, requirementReaches, requirementState, seatDueAt, seatStatus, type AttemptLike, type RequirementEvidence, type RuleRequirement } from "./requirement-rules";
 
 const due = new Date("2026-10-21T18:00:00Z");
 const before = new Date("2026-10-20T18:00:00Z");
@@ -135,5 +135,64 @@ describe("seatDueAt and seatStatus", () => {
     expect([early.state, early.gradingPending]).toEqual(["overdue", true]);
     expect([late.state, late.awaitingGrade]).toEqual(["review", true]);
     expect(seatStatus(r, start, { met: true, attempts: [] }, { startedAt: new Date(0), clubApprovedAt: null }, mid).state).toBe("met");
+  });
+});
+
+describe("who a requirement reaches", () => {
+  const leaders = ["OFFICER", "VP", "PRESIDENT"] as const;
+  const umbrella = { appliesTo: [...leaders] };
+  const campusRec = { appliesTo: [...leaders], officeId: "rec" };
+  const safety = { appliesTo: [...leaders], gatesCapability: "events" };
+
+  it("reaches its roles in every club when it's the umbrella's", () => {
+    expect(requirementReaches(umbrella, { role: "OFFICER", clubOfficeId: null, holds: new Set() })).toBe(true);
+    expect(requirementReaches(umbrella, { role: "OFFICER", clubOfficeId: "rec", holds: new Set() })).toBe(true);
+    expect(requirementReaches(umbrella, { role: "MEMBER", clubOfficeId: null })).toBe(false);
+    // Rows from before offices have no office or permission at all.
+    expect(requirementReaches({ appliesTo: ["MEMBER"] }, { role: "MEMBER" })).toBe(true);
+  });
+
+  it("reaches only its own office's clubs when an office owns it", () => {
+    expect(requirementReaches(campusRec, { role: "PRESIDENT", clubOfficeId: "rec", holds: "all" })).toBe(true);
+    expect(requirementReaches(campusRec, { role: "PRESIDENT", clubOfficeId: null, holds: "all" })).toBe(false);
+    expect(requirementReaches(campusRec, { role: "PRESIDENT", clubOfficeId: "fsl", holds: "all" })).toBe(false);
+    expect(requirementReaches({ appliesTo: ["MEMBER"], officeId: "rec" }, { role: "MEMBER", clubOfficeId: "rec" })).toBe(true);
+    expect(requirementReaches({ appliesTo: ["MEMBER"], officeId: "rec" }, { role: "MEMBER", clubOfficeId: null })).toBe(false);
+  });
+
+  it("reaches only leaders who hold its one permission: presidents and VPs hold them all", () => {
+    expect(requirementReaches(safety, { role: "PRESIDENT", holds: heldCapabilities([{ role: "PRESIDENT", permissions: [] }]) })).toBe(true);
+    expect(requirementReaches(safety, { role: "VP", holds: heldCapabilities([{ role: "VP", permissions: [] }]) })).toBe(true);
+    expect(requirementReaches(safety, { role: "OFFICER", holds: heldCapabilities([{ role: "OFFICER", permissions: ["events", "budget"] }]) })).toBe(true);
+    expect(requirementReaches(safety, { role: "OFFICER", holds: heldCapabilities([{ role: "OFFICER", permissions: ["budget"] }]) })).toBe(false);
+    // Unknown holdings never reach (nothing is assumed).
+    expect(requirementReaches(safety, { role: "OFFICER" })).toBe(false);
+    // Members hold no permissions.
+    expect(requirementReaches({ ...safety, appliesTo: ["MEMBER", ...leaders] }, { role: "MEMBER", holds: "all" })).toBe(false);
+  });
+
+  it("adds up a person's seats in the club: a second seat with the permission counts", () => {
+    const held = heldCapabilities([
+      { role: "OFFICER", permissions: ["budget"] },
+      { role: "OFFICER", permissions: ["events"] },
+    ]);
+    expect(held === "all" ? "all" : [...held].sort()).toEqual(["budget", "events"]);
+    expect(heldCapabilities([{ role: "ADVISOR", permissions: [] }])).toBe("all");
+  });
+});
+
+describe("what an overdue requirement pauses", () => {
+  it("pauses nothing when nothing is overdue", () => {
+    expect(pauseFor([])).toEqual({ all: false, capabilities: [] });
+  });
+
+  it("pauses only the gated permission", () => {
+    expect(pauseFor([{ gatesCapability: "events" }])).toEqual({ all: false, capabilities: ["events"] });
+    expect(pauseFor([{ gatesCapability: "events" }, { gatesCapability: "budget" }, { gatesCapability: "events" }])).toEqual({ all: false, capabilities: ["budget", "events"] });
+  });
+
+  it("pauses everything when any overdue requirement gates no single permission", () => {
+    expect(pauseFor([{ gatesCapability: "events" }, { gatesCapability: null }])).toEqual({ all: true, capabilities: [] });
+    expect(pauseFor([{}])).toEqual({ all: true, capabilities: [] });
   });
 });

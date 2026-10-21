@@ -6,7 +6,9 @@
  * match: every person's status in every role, the full sweep's writes and
  * notices, the event path for each person, overdue notices and admin
  * compliance. The new code must also be idempotent, and the header's stored
- * pauses must match the live rule once tasks are in sync.
+ * pauses must match the live rule once tasks are in sync, also in worlds
+ * with offices and single-permission requirements (which the old code never
+ * knew about, so only the new code runs those).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ClubRole } from "@prisma/client";
@@ -40,7 +42,7 @@ import { getClubAccess } from "@/lib/authz";
 
 const SEEDS = Array.from({ length: 60 }, (_, i) => i + 1);
 const ROLES: ClubRole[] = ["MEMBER", "AMBASSADOR", "OFFICER", "VP", "PRESIDENT", "ADVISOR"];
-const worlds = SEEDS.map(buildWorld);
+const worlds = SEEDS.map((seed) => buildWorld(seed));
 
 beforeAll(() => vi.useFakeTimers({ toFake: ["Date"] }));
 afterAll(() => vi.useRealTimers());
@@ -209,5 +211,35 @@ describe("the header's count", () => {
     }
     // Plenty of paused leaders among the worlds, so the comparison means something.
     expect(paused).toBeGreaterThan(50);
+  }, 120_000);
+
+  it("still matches with offices' requirements and single-permission pauses (only that permission paused)", async () => {
+    let partial = 0;
+    let full = 0;
+    for (const seed of SEEDS.slice(0, 30)) {
+      const w = buildWorld(seed, { offices: true });
+      const synced = await inCopy(w, () => syncAllRequirementHolders({ now: w.now }));
+      await inCopy(
+        w,
+        async () => {
+          for (const u of synced.db.tables.user.filter((x) => x.status === "ACTIVE")) {
+            const actor = { id: u.id, platformRole: "USER", status: "ACTIVE", officeIds: [], fundingOfficeIds: [] } as unknown as Parameters<typeof taskScopeFor>[0];
+            expect(JSON.stringify(await taskScopeFor(actor, { pauses: "tasks" })), `world ${w.seed} (offices): ${u.id}`).toBe(JSON.stringify(await taskScopeFor(actor)));
+            for (const clubId of new Set(synced.db.tables.roleAssignment.filter((a) => a.userId === u.id && !a.endedAt).map((a) => a.clubId as string))) {
+              const access = await getClubAccess(actor, clubId);
+              if (access?.suspended) full++;
+              else if (access?.pausedCapabilities.length) partial++;
+            }
+          }
+        },
+        synced.db.tables,
+      );
+      // Idempotent there too.
+      const again = await inCopy(w, () => syncAllRequirementHolders({ now: w.now }), synced.db.tables);
+      expect({ opened: again.result.opened, closed: again.result.closed, updated: again.result.updated }, `world ${w.seed} (offices)`).toEqual({ opened: 0, closed: 0, updated: 0 });
+    }
+    // Plenty of both kinds of pause, so the comparison means something.
+    expect(partial).toBeGreaterThan(20);
+    expect(full).toBeGreaterThan(20);
   }, 120_000);
 });

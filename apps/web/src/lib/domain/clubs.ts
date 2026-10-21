@@ -3,13 +3,15 @@ import { Prisma, type Club, type ClubDocumentStatus, type ClubStatus, type FileV
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
-import { getClubAccess } from "@/lib/authz";
+import { adminScope, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
-import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
+import { assertCan, assertCanAdminClub, assertClubCap, assertSignedIn, assertUmbrellaAdmin, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createDefaultPositions, grantRole } from "@/lib/domain/roles";
 import { reopenRequirementTasks } from "@/lib/domain/requirements";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
-import { notify, notifyAdmins } from "@/lib/domain/notify";
+import { notify } from "@/lib/domain/notify";
+import { applyClubOffice, routedOfficeId } from "@/lib/domain/offices";
+import { notifyOffice, officeForClub } from "@/lib/offices";
 import { guessMime, MAX_UPLOAD_BYTES, putBytes } from "@/lib/files/storage";
 import { sanitizeRichHtml } from "@/lib/rich/sanitize";
 import { profileGaps } from "@/lib/clubs/profile-rules";
@@ -184,9 +186,11 @@ export type CreateClubInput = z.input<typeof CreateClubInput>;
 const LOGO_SEED = ["#492365", "#1d4ed8", "#0f766e", "#b45309", "#be123c", "#4d7c0f", "#6d28d9", "#0e7490"];
 
 /**
- * The create wizard. Saves the club as a DRAFT with the default org chart.
- * A student founder becomes President; a faculty/staff founder becomes the
- * advisor (they can't hold student roles) with an accepted invite on record.
+ * The create wizard. Saves the club as a DRAFT with the default org chart,
+ * overseen by the office its scope sends it to (club sports: Campus
+ * Recreation; lib/offices/rules officeKeyForClub). A student founder becomes
+ * President; a faculty/staff founder becomes the advisor (they can't hold
+ * student roles) with an accepted invite on record.
  */
 export async function createClub(actor: Actor | null, input: unknown): Promise<{ id: string; slug: string }> {
   assertCan(actor, "club.create");
@@ -198,6 +202,8 @@ export async function createClub(actor: Actor | null, input: unknown): Promise<{
 
   const now = new Date();
   const founderIsStudent = actor.kind === "STUDENT";
+  // New clubs have no category yet, so the scope decides (the profile editor re-derives it until approval).
+  const officeId = await routedOfficeId({ scope: v.scope, category: null });
   let club: Club | null = null;
   for (let attempt = 0; !club; attempt++) {
     const slug = attempt === 0 ? await uniqueSlug(v.name) : `${slugify(v.name)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -218,6 +224,7 @@ export async function createClub(actor: Actor | null, input: unknown): Promise<{
             contactEmail: v.contactEmail,
             logoColor: LOGO_SEED[Math.floor(Math.random() * LOGO_SEED.length)],
             createdById: actor.id,
+            officeId,
           },
         });
         await createDefaultPositions(c.id, v.type, tx);
@@ -299,11 +306,11 @@ export async function updateClubProfile(actor: Actor | null, input: unknown) {
   const club = await db.club.findUnique({ where: { id: v.clubId } });
   if (!club) throw notFound("Club");
 
-  // Type is chosen when founding; it can change until WSUSA approves (admins any time).
+  // Type is chosen when founding; it can change until the club is approved (its office's admins any time).
   const founding = club.status === "DRAFT" || club.status === "CHANGES_REQUESTED";
   let type = club.type;
   if (v.type && v.type !== club.type && club.type !== "COLLEGE_AMBASSADORS") {
-    if (!founding && !access.viaPlatform) throw forbidden("A club's type can only change before WSUSA approves it. Contact WSUSA to change it.");
+    if (!founding && !access.viaPlatform) throw forbidden(`A club's type can only change before it's approved. Contact ${(await officeForClub(club.id)).name} to change it.`);
     type = v.type;
   }
   const dept = type === "COLLEGE_AMBASSADORS" ? { departmentId: club.departmentId, requestedDepartmentName: club.requestedDepartmentName } : departmentFields(type, v.departmentId, v.requestedDepartmentName);
@@ -341,6 +348,20 @@ export async function updateClubProfile(actor: Actor | null, input: unknown) {
   const updated = await db.club.update({ where: { id: club.id }, data });
   reindexClubSoon(club.id);
 
+  // Until it's approved, a club's office follows its scope and category (lib/offices/rules);
+  // its open admin tasks, like a submission waiting for review, move with it.
+  const beforeApproval = club.status === "DRAFT" || club.status === "SUBMITTED" || club.status === "CHANGES_REQUESTED";
+  if (beforeApproval && (club.scope !== updated.scope || club.category !== updated.category)) {
+    const next = await routedOfficeId(updated);
+    if (next !== updated.officeId) {
+      const office = next ? await db.office.findUnique({ where: { id: next }, select: { name: true } }) : null;
+      await db.$transaction(async (tx) => {
+        if (await applyClubOffice(tx, club.id, next))
+          await logActivity({ actorId: actor!.id, action: "club.office_changed", entityType: "club", entityId: club.id, clubId: club.id, data: { office: office?.name ?? null, officeId: next, auto: true } }, tx);
+      });
+    }
+  }
+
   // A department request follows what the founder typed: cancel stale ones, file a new one if WSUSA is already involved.
   if (club.requestedDepartmentName !== updated.requestedDepartmentName) {
     await resolveTasks("departmentRequest", club.id, actor!.id, db, "CANCELLED");
@@ -357,7 +378,8 @@ async function openDepartmentRequest(club: Pick<Club, "id" | "name" | "requested
     kind: "APPROVAL",
     title: `Add “${club.requestedDepartmentName}” to the department list for ${club.name}`,
     description: "A founder chose “Other” for their department. Add it to the list and link the club.",
-    assignee: { type: "ADMINS" },
+    // The department list is WSUSA's (the directory), whichever office oversees the club.
+    assignee: { type: "ADMINS", umbrella: true },
     clubId: club.id,
     href: `/admin/clubs/${club.id}`,
     source: { type: "departmentRequest", id: club.id },
@@ -403,7 +425,8 @@ async function openGoogleAccountCheck(club: Pick<Club, "id" | "name" | "contactE
     kind: "APPROVAL",
     title: `Verify ${club.name}'s Google account`,
     description: `Confirm ${club.contactEmail} is the club's own Workspace account. Drive, Calendar and Chat sync run as it once you verify it.`,
-    assignee: { type: "ADMINS" },
+    // Google accounts are a platform matter: WSUSA verifies every club's.
+    assignee: { type: "ADMINS", umbrella: true },
     clubId: club.id,
     href: `/admin/clubs/${club.id}#google-account`,
     source: { type: "googleAccount", id: club.id },
@@ -419,7 +442,7 @@ const VerifyInput = z.object({ clubId: id, email: z.string().trim().toLowerCase(
  * admin checked, so an address changed in the meantime is never verified.
  */
 export async function setClubGoogleAccountVerified(actor: Actor | null, input: unknown) {
-  assertCan(actor, "admin.clubs");
+  assertUmbrellaAdmin(actor, "admin.clubs", "Verifying a club's Google account");
   const v = parseForm(VerifyInput, input);
   const club = await db.club.findUnique({ where: { id: v.clubId }, select: { id: true, name: true, slug: true } });
   if (!club) throw notFound("Club");
@@ -552,12 +575,17 @@ export async function foundingChecklist(clubId: string): Promise<FoundingCheckli
   return out;
 }
 
-/** Sends a founding club to WSUSA. Allowed from DRAFT or CHANGES_REQUESTED once the checklist is done. */
+/**
+ * Sends a founding club to its office for review (WSUSA, or the office its
+ * scope and category send it to). Allowed from DRAFT or CHANGES_REQUESTED
+ * once the checklist is done.
+ */
 export async function submitForReview(actor: Actor | null, clubId: string) {
   await assertClubCap(actor, String(clubId), "profile");
   const club = await db.club.findUnique({ where: { id: String(clubId) } });
   if (!club) throw notFound("Club");
-  if (club.status !== "DRAFT" && club.status !== "CHANGES_REQUESTED") throw conflict(club.status === "SUBMITTED" ? "This club is already with WSUSA for review." : "This club can't be submitted for review.");
+  const office = await officeForClub(club.id);
+  if (club.status !== "DRAFT" && club.status !== "CHANGES_REQUESTED") throw conflict(club.status === "SUBMITTED" ? `This club is already with ${office.name} for review.` : "This club can't be submitted for review.");
   // Drafts don't hold names, so another club may have taken this one since.
   await assertNameFree(club.name, club.id);
   const check = await foundingChecklist(club.id);
@@ -568,12 +596,13 @@ export async function submitForReview(actor: Actor | null, clubId: string) {
   await db.$transaction(async (tx) => {
     // Claim the transition, so a double submit can't file two reviews.
     const claimed = await tx.club.updateMany({ where: { id: club.id, status: club.status }, data: { status: "SUBMITTED", submittedAt: now } });
-    if (!claimed.count) throw conflict("This club is already with WSUSA for review.");
+    if (!claimed.count) throw conflict(`This club is already with ${office.name} for review.`);
     await tx.clubDecision.create({ data: { clubId: club.id, action: "SUBMITTED", byId: actor!.id, note: resubmission ? "Resubmitted with changes" : null } });
+    // Routed to the club's office (lib/domain/tasks createTask).
     await createTask(
       {
         kind: "APPROVAL",
-        title: `${resubmission ? "Re-review" : "Review"} ${club.name} for WSUSA recognition`,
+        title: `${resubmission ? "Re-review" : "Review"} ${club.name} for recognition`,
         description: `${club.type.charAt(0) + club.type.slice(1).toLowerCase()} club submitted by ${actor!.name}.`,
         assignee: { type: "ADMINS" },
         clubId: club.id,
@@ -583,22 +612,25 @@ export async function submitForReview(actor: Actor | null, clubId: string) {
       },
       tx,
     );
-    await logActivity({ actorId: actor!.id, action: resubmission ? "club.resubmitted" : "club.submitted", entityType: "club", entityId: club.id, clubId: club.id }, tx);
+    await logActivity({ actorId: actor!.id, action: resubmission ? "club.resubmitted" : "club.submitted", entityType: "club", entityId: club.id, clubId: club.id, data: { office: office.name } }, tx);
   });
   if (club.requestedDepartmentName && !club.departmentId) await openDepartmentRequest(club, actor!.id);
   if (club.contactEmail && !club.googleAccountVerifiedAt) await openGoogleAccountCheck(club, actor!.id);
-  await notifyAdmins({
-    kind: "club.submitted",
-    title: `${club.name} ${resubmission ? "was resubmitted" : "was submitted"} for review`,
-    body: `${actor!.name} sent ${club.name} to WSUSA for recognition.${club.requestedDepartmentName && !club.departmentId ? ` They also asked to add the department “${club.requestedDepartmentName}”.` : ""}`,
-    href: `/admin/clubs/${club.id}`,
-    exceptUserId: actor!.id,
-  });
+  await notifyOffice(
+    { clubId: club.id },
+    {
+      kind: "club.submitted",
+      title: `${club.name} ${resubmission ? "was resubmitted" : "was submitted"} for review`,
+      body: `${actor!.name} sent ${club.name} to ${office.name} for recognition.${club.requestedDepartmentName && !club.departmentId ? ` They also asked to add the department “${club.requestedDepartmentName}”.` : ""}`,
+      href: `/admin/clubs/${club.id}`,
+      exceptUserId: actor!.id,
+    },
+  );
   await notify({
     userIds: (await clubLeaderIds(club.id)).filter((u) => u !== actor!.id),
     kind: "club.submitted",
-    title: `${club.name} is with WSUSA for review`,
-    body: `${actor!.name} submitted the club. You'll hear back when WSUSA decides.`,
+    title: `${club.name} is with ${office.name} for review`,
+    body: `${actor!.name} submitted the club. You'll hear back when ${office.name} decides.`,
     href: `/clubs/${club.slug}/manage`,
   });
   return { slug: club.slug };
@@ -621,15 +653,21 @@ const DECISION = {
 } as const;
 
 export async function decideClub(actor: Actor | null, input: unknown) {
-  assertCan(actor, "admin.clubs");
   const v = parseForm(DecisionInput, input);
   const club = await db.club.findUnique({ where: { id: v.clubId } });
+  assertCanAdminClub(actor, "admin.clubs", club ?? { officeId: null });
   if (!club) throw notFound("Club");
   if (club.status !== "SUBMITTED") throw conflict("This club isn't waiting for review — someone may have decided it already.");
   const d = DECISION[v.decision];
+  const office = await officeForClub(club.id);
 
   if (v.decision === "APPROVE") {
-    if (club.requestedDepartmentName && !club.departmentId) throw invalid(`Add “${club.requestedDepartmentName}” to the department list (or link an existing department) before approving.`);
+    if (club.requestedDepartmentName && !club.departmentId)
+      throw invalid(
+        adminScope(actor).all
+          ? `Add “${club.requestedDepartmentName}” to the department list (or link an existing department) before approving.`
+          : `WSUSA adds departments to the list. “${club.requestedDepartmentName}” is in WSUSA's queue; you can approve the club once it's added.`,
+      );
     const docs = await db.clubDocument.findMany({ where: { clubId: club.id, kind: { in: ["CONSTITUTION", "BYLAWS"] }, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } }, select: { kind: true, status: true } });
     const active = new Set(docs.filter((d) => d.status === "ACTIVE").map((d) => d.kind));
     if (!active.has("CONSTITUTION") || !active.has("BYLAWS")) {
@@ -670,8 +708,8 @@ export async function decideClub(actor: Actor | null, input: unknown) {
     v.decision === "APPROVE"
       ? `${club.name} is approved — welcome to Wildcat Clubs!`
       : v.decision === "CHANGES"
-        ? `WSUSA asked for changes to ${club.name}`
-        : `WSUSA didn't approve ${club.name}`;
+        ? `${office.name} asked for changes to ${club.name}`
+        : `${office.name} didn't approve ${club.name}`;
   await notify({
     userIds: await clubLeaderIds(club.id),
     kind: `club.${d.status.toLowerCase()}`,
@@ -684,7 +722,8 @@ export async function decideClub(actor: Actor | null, input: unknown) {
 
 /** Adds the department a founder typed under "Other" (or links an existing one with that name) and links the club. */
 export async function addDepartmentForClub(actor: Actor | null, clubId: string, input: { name: string; collegeId?: string | null }) {
-  assertCan(actor, "admin.clubs");
+  // The department list is the directory's: WSUSA's, whichever office oversees the club.
+  assertUmbrellaAdmin(actor, "admin.clubs", "Adding a department");
   const v = parseForm(
     z.object({
       clubId: id,
@@ -733,7 +772,7 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   );
   const access = await getClubAccess(actor, v.clubId);
   if (!access) throw notFound("Club");
-  if (!access.canRetire) throw forbidden("Only the President, an advisor or WSUSA can retire this club.");
+  if (!access.canRetire) throw forbidden(`Only the President, an advisor or ${(await officeForClub(v.clubId)).name} can retire this club.`);
   const club = await db.club.findUnique({ where: { id: v.clubId } });
   if (!club || club.status === "RETIRED") throw conflict("This club is already retired.");
 
@@ -781,11 +820,11 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   return { slug: club.slug };
 }
 
-/** Admins bring a retired club back: approved clubs return APPROVED, never-approved ones return to DRAFT. */
+/** Admins (WSUSA, or the club's office) bring a retired club back: approved clubs return APPROVED, never-approved ones return to DRAFT. */
 export async function reinstateClub(actor: Actor | null, input: unknown) {
-  assertCan(actor, "admin.clubs");
   const v = parseForm(z.object({ clubId: id, note: optionalText(2000, "Keep the note under 2,000 characters.") }), input);
   const club = await db.club.findUnique({ where: { id: v.clubId } });
+  assertCanAdminClub(actor, "admin.clubs", club ?? { officeId: null });
   if (!club) throw notFound("Club");
   if (club.status !== "RETIRED" || !club.retiredAt) throw conflict("Only retired clubs can be reinstated.");
   const retiredAt = club.retiredAt;
@@ -821,7 +860,7 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
     userIds: memberships.map((m) => m.userId).filter((u) => !roles.some((r) => r.clubId === club.id && r.userId === u)),
     kind: "club.reinstated",
     title: `${club.name} is back`,
-    body: v.note ?? "WSUSA reinstated the club, and your membership is active again.",
+    body: v.note ?? `${(await officeForClub(club.id)).name} reinstated the club, and your membership is active again.`,
     href: `/clubs/${club.slug}`,
   });
   return { status };
@@ -837,7 +876,7 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
  * Ambassadors into the college's clubs.
  */
 export async function startAmbassadorProgram(actor: Actor | null, collegeId: string): Promise<{ id: string; slug: string }> {
-  assertCan(actor, "admin.clubs");
+  assertUmbrellaAdmin(actor, "admin.clubs", "Starting an ambassador program");
   const college = await db.college.findUnique({ where: { id: String(collegeId) } });
   if (!college) throw notFound("College");
   const existing = await db.club.findFirst({ where: { type: "COLLEGE_AMBASSADORS", collegeId: college.id, status: { not: "RETIRED" } }, select: { slug: true } });

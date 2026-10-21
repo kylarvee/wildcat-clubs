@@ -13,7 +13,7 @@ import { AddTaskForm } from "@/components/tasks/AddTaskForm";
 import { AssignTaskDialog } from "@/components/tasks/AssignTaskDialog";
 import { TaskList } from "@/components/tasks/TaskList";
 import { toTaskItem, type TaskItem } from "@/components/tasks/items";
-import { isKind, KIND_ORDER, KIND_PLURAL, REQUIRED_LABEL } from "@/components/tasks/labels";
+import { isKind, KIND_ORDER, KIND_PLURAL, requiredLabel } from "@/components/tasks/labels";
 
 export const metadata: Metadata = { title: "Tasks" };
 
@@ -80,6 +80,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
   // Open view: required tasks get their own card above the rest.
   const requiredItems = view === "open" ? filtered.filter((t) => t.required) : [];
   const otherItems = view === "open" ? filtered.filter((t) => !t.required) : filtered;
+  // Who requires them: WSUSA, and any office that requires things of its own clubs.
+  const requiredBy = [...new Set(requiredItems.map((t) => t.requiredBy ?? "WSUSA"))];
+  const requirers = requiredBy.length <= 2 ? requiredBy.join(" and ") : `${requiredBy.slice(0, -1).join(", ")} and ${requiredBy[requiredBy.length - 1]}`;
   const showAssigned = assignClubs.length > 0 || assignedOpen.length > 0;
   const capabilityOptions = Object.entries(CAPABILITIES).map(([value, c]) => ({ value, label: c.label, description: c.description }));
 
@@ -185,10 +188,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
               {requiredItems.length ? (
                 <Card className="border-red-200 p-4 sm:p-5">
                   <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-                    <ShieldAlert className="h-4.5 w-4.5 text-danger" aria-hidden /> {REQUIRED_LABEL}
+                    <ShieldAlert className="h-4.5 w-4.5 text-danger" aria-hidden /> {requiredBy.length === 1 ? requiredLabel(requiredBy[0]) : "Required"}
                   </h2>
                   <p className="mb-4 mt-0.5 text-sm text-ink-3">
-                    WSUSA requires these, and each one closes on its own once it&apos;s done. If one that comes with a club role goes overdue, your permissions in that club pause until you finish it. Your title stays.
+                    {requirers} {requiredBy.length === 1 ? "requires" : "require"} these, and each one closes on its own once it&apos;s done. If one that comes with a club role goes overdue, your permissions in that club pause until you finish it. Your title stays.
                   </p>
                   <TaskList items={requiredItems} />
                 </Card>

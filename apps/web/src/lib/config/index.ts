@@ -39,6 +39,16 @@ export const CONFIG_DEFAULTS = {
    */
   "renewal.dueDays": 30,
 
+  /**
+   * Risk-based event review (lib/events/review). On: a club event whose
+   * "Does this event involve…" answers include anything waits for its club's
+   * office to review it before it's posted. Off: the answers are still saved,
+   * but nothing waits.
+   */
+  "events.riskReview": true,
+  /** "More than this many people expected" on that checklist. */
+  "events.largeCrowd": 100,
+
   /** Claude features. Off until the university has API access. */
   "ai.assistantEnabled": false,
   "ai.gradingEnabled": false,
@@ -51,25 +61,11 @@ export const CONFIG_DEFAULTS = {
   "integrations.push": false,
 
   /**
-   * Shown to founders after they submit a club for review, and quoted by the
-   * assistant. Student Involvement & Leadership (SIL) runs Clubs & Organizations
-   * (https://www.weber.edu/studentinvolvement/). Room, hours, phone and email are
-   * its Ogden office's, from https://www.weber.edu/studentinvolvement/contact.html
-   * (checked October 2026). Leave a field blank when weber.edu doesn't publish it.
-   * reviewDays isn't published there: it's the platform's own estimate.
-   * System settings asks a sysadmin to confirm these with WSUSA.
-   */
-  "wsusa.office": {
-    name: "Student Involvement & Leadership",
-    location: "Shepherd Union, Room 326",
-    hours: "Monday–Friday, 8 a.m.–6 p.m.; Wednesday, 7 a.m.–7 p.m. (extended hours by appointment)",
-    email: "wsusa@weber.edu",
-    phone: "801-626-6349",
-    reviewDays: 10,
-  },
-  /**
-   * Roles, never named people. Clubs & Organizations staff work in SIL
-   * (https://www.weber.edu/co/forms.html); the email is SIL's public one, from
+   * WSUSA's reviewers, shown to founders of the clubs WSUSA oversees after
+   * they submit. Each office's own contacts and review time live on its
+   * Office row (lib/offices, Admin → Offices). Roles, never named people.
+   * Clubs & Organizations staff work in SIL (https://www.weber.edu/co/forms.html);
+   * the email is SIL's public one, from
    * https://www.weber.edu/studentinvolvement/contact.html. The C&O pages
    * (https://www.weber.edu/co/) publish no general clubs address.
    */

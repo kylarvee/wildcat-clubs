@@ -115,7 +115,9 @@ export function TestBuilder({
   );
   const problems = useMemo(() => testProblems(payload, kind), [payload, kind]);
   const generalProblems = problems.filter((p) => !p.questionId);
-  const audiences = kind === "club" ? CLUB_AUDIENCES : UNIVERSITY_AUDIENCES;
+  // An office's own tests reach its requirements and chosen people; only WSUSA sends one to every student.
+  const officeTest = scope.kind === "university" && Boolean(scope.officeIds);
+  const audiences = kind === "club" ? CLUB_AUDIENCES : officeTest ? UNIVERSITY_AUDIENCES.filter((a) => a !== "ALL_STUDENTS" || settings.audience === "ALL_STUDENTS") : UNIVERSITY_AUDIENCES;
   const requirementLocked = requirementNames.length > 0;
   const live = status === "PUBLISHED";
   const isForm = settings.isForm;
@@ -372,7 +374,9 @@ export function TestBuilder({
           description={
             kind === "club"
               ? `Club ${noun}s are for your members, or anyone with the link.`
-              : `University ${noun}s can be WSUSA requirements, campus-wide, or for people you pick.`
+              : officeTest
+                ? `Your office's ${noun}s can be requirements for its clubs, or for people you pick.`
+                : `University ${noun}s can be WSUSA requirements, campus-wide, or for people you pick.`
           }
         />
         <CardBody className="space-y-4">

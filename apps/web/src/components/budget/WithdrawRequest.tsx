@@ -41,7 +41,7 @@ export function WithdrawRequest({ requestId, title }: { requestId: string; title
             {error ? <Callout tone="danger">{error}</Callout> : null}
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-                Keep it in WSUSA review
+                Keep it in review
               </Button>
               <Button type="submit" variant="danger" disabled={pending}>
                 {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} Withdraw request

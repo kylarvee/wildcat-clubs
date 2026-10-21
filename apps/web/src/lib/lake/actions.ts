@@ -100,14 +100,22 @@ export const ACTIONS = {
   /** Public when the document is (the call site decides). */
   "club.document_added": { label: "Added a profile document", phrase: (d) => q(d.title, (t) => `added “${t}” to the club profile`, "added a document to the club profile"), public: false },
   "club.document_removed": { label: "Removed a profile document", phrase: (d) => q(d.title, (t) => `took “${t}” off the club profile`, "took a document off the club profile"), public: false },
-  "club.submitted": { label: "Submitted a club to WSUSA", phrase: "submitted the club to WSUSA", public: false },
-  "club.resubmitted": { label: "Resubmitted a club to WSUSA", phrase: "resubmitted the club to WSUSA", public: false },
+  "club.submitted": { label: "Submitted a club for review", phrase: (d) => q(d.office, (o) => `submitted the club to ${o}`, "submitted the club for review"), public: false },
+  "club.resubmitted": { label: "Resubmitted a club for review", phrase: (d) => q(d.office, (o) => `resubmitted the club to ${o}`, "resubmitted the club for review"), public: false },
   "club.approved": { label: "Approved a club", phrase: "approved the club", public: true },
   "club.changes_requested": { label: "Asked a club for changes", phrase: "asked the club for changes", public: false },
   "club.rejected": { label: "Didn't approve a club", phrase: "decided not to approve the club", public: false },
   "club.retired": { label: "Retired a club", phrase: "retired the club", public: true },
   "club.reinstated": { label: "Reinstated a club", phrase: "reinstated the club", public: true },
-  "club.renewed": { label: "Re-registered a club", phrase: (d) => q(d.year, (y) => `re-registered the club with WSUSA for ${y}`, "re-registered the club with WSUSA"), public: true },
+  "club.renewed": {
+    label: "Re-registered a club",
+    phrase: (d) => {
+      const office = text(d.office) ?? "WSUSA";
+      return q(d.year, (y) => `re-registered the club with ${office} for ${y}`, `re-registered the club with ${office}`);
+    },
+    public: true,
+  },
+  "club.office_changed": { label: "Moved a club to another office", phrase: (d) => q(d.office, (o) => `moved the club to ${o}`, "moved the club to another office"), public: false },
   "club.ambassador_program_started": { label: "Started a college ambassador program", phrase: "started the college's ambassador program", public: true },
 
   // ─── Constitutions ─────────────────────────────────────────────────────────
@@ -149,6 +157,11 @@ export const ACTIONS = {
   "building.updated": { label: "Edited a building", phrase: (d) => q(d.name, (n) => `edited the building ${n}`, "edited a building"), public: false },
   "building.deleted": { label: "Deleted a building", phrase: (d) => q(d.name, (n) => `deleted the building ${n}`, "deleted a building"), public: false },
 
+  // ─── Offices (admin) ───────────────────────────────────────────────────────
+  "office.updated": { label: "Edited an office", phrase: (d) => q(d.name, (n) => `edited ${n}'s details`, "edited an office's details"), public: false },
+  "office.staff_added": { label: "Added office staff", phrase: (d) => q(d.name, (n) => q(d.office, (o) => `added ${n} to ${o}'s staff`, `added ${n} to an office's staff`), "added someone to an office's staff"), public: false },
+  "office.staff_removed": { label: "Removed office staff", phrase: (d) => q(d.name, (n) => q(d.office, (o) => `took ${n} off ${o}'s staff`, `took ${n} off an office's staff`), "took someone off an office's staff"), public: false },
+
   // ─── Elections (filling seats) ─────────────────────────────────────────────
   "election.created": { label: "Started an election", phrase: (d) => q(d.title, (t) => `started “${t}”`, "started an election"), public: true },
   "election.voting_opened": { label: "Opened voting", phrase: "opened voting in an election", public: false },
@@ -185,6 +198,9 @@ export const ACTIONS = {
   "event.cost_added": { label: "Added an event cost", phrase: "added an event cost", public: false },
   "event.cost_updated": { label: "Edited an event cost", phrase: "edited an event cost", public: false },
   "event.cost_removed": { label: "Removed an event cost", phrase: "removed an event cost", public: false },
+  "event.review_requested": { label: "Sent an event for review", phrase: (d) => q(d.title, (t) => `sent “${t}” to the club's office for review`, "sent an event to the club's office for review"), public: false },
+  "event.review_approved": { label: "Approved an event", phrase: (d) => q(d.title, (t) => `approved “${t}”`, "approved an event"), public: false },
+  "event.review_changes_requested": { label: "Asked for changes to an event", phrase: (d) => q(d.title, (t) => `asked for changes to “${t}”`, "asked for changes to an event"), public: false },
 
   // ─── Files ─────────────────────────────────────────────────────────────────
   "file.default_folders": { label: "Set up starting folders", phrase: "set up the club's starting folders", public: false },

@@ -4,8 +4,9 @@ import { notFound } from "next/navigation";
 import type { ClubStatus, Prisma } from "@prisma/client";
 import { Search } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { can } from "@/lib/authz";
+import { adminClubWhere, adminScope, can } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { listOffices, type OfficeInfo } from "@/lib/offices";
 import { DAY_MS, fmtLongDate } from "@/lib/time";
 import { fileUrl } from "@/lib/domain/files";
 import { statedSettings } from "@/lib/domain/constitution";
@@ -27,12 +28,13 @@ import { CLUB_STATUS_LABEL as STATUS_LABEL, CLUB_STATUS_TONE as STATUS_TONE, CLU
 
 export const metadata: Metadata = { title: "Club approvals" };
 
+/** `umbrella`: WSUSA's alone. Department requests (the directory) and the college ambassador programs are platform-wide. */
 const TABS = [
   { key: "submissions", label: "Submissions" },
-  { key: "departments", label: "Department requests" },
+  { key: "departments", label: "Department requests", umbrella: true },
   { key: "documents", label: "Custom documents" },
   { key: "renewals", label: "Renewals" },
-  { key: "ambassadors", label: "Ambassador programs" },
+  { key: "ambassadors", label: "Ambassador programs", umbrella: true },
   { key: "all", label: "All clubs" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -40,25 +42,42 @@ type TabKey = (typeof TABS)[number]["key"];
 const STATUSES: ClubStatus[] = ["DRAFT", "SUBMITTED", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "RETIRED"];
 const LIVE: Prisma.ClubWhereInput = { status: { notIn: ["RETIRED", "REJECTED"] } };
 
-export default async function AdminClubsPage({ searchParams }: { searchParams: Promise<{ tab?: string; status?: string; q?: string; show?: string }> }) {
+/**
+ * Club approvals: submissions, custom documents, renewals and every club, for
+ * the viewer's clubs (lib/authz adminClubWhere: WSUSA's admins see every
+ * office's, an office's staff their own), plus WSUSA's platform-wide tabs.
+ */
+export default async function AdminClubsPage({ searchParams }: { searchParams: Promise<{ tab?: string; status?: string; q?: string; show?: string; office?: string }> }) {
   const user = await requireUser("/admin/clubs");
   if (!can(user, "admin.clubs")) notFound();
   const sp = await searchParams;
-  const tab: TabKey = TABS.some((t) => t.key === sp.tab) ? (sp.tab as TabKey) : "submissions";
+  const umbrella = adminScope(user).all;
+  const tabs = TABS.filter((t) => umbrella || !("umbrella" in t));
+  const tab: TabKey = tabs.some((t) => t.key === sp.tab) ? (sp.tab as TabKey) : "submissions";
+  const scope = adminClubWhere(user);
+  // WSUSA's admins see which office oversees each club.
+  const offices = umbrella ? await listOffices() : [];
 
   const deptWhere: Prisma.ClubWhereInput = { ...LIVE, requestedDepartmentName: { not: null }, departmentId: null };
   const [subCount, deptCount, docCount] = await Promise.all([
-    db.club.count({ where: { status: "SUBMITTED" } }),
-    db.club.count({ where: deptWhere }),
-    db.clubDocument.count({ where: { status: "PENDING_APPROVAL", club: LIVE } }),
+    db.club.count({ where: { AND: [scope, { status: "SUBMITTED" }] } }),
+    umbrella ? db.club.count({ where: deptWhere }) : Promise.resolve(0),
+    db.clubDocument.count({ where: { status: "PENDING_APPROVAL", club: { AND: [LIVE, scope] } } }),
   ]);
   const counts: Partial<Record<TabKey, number>> = { submissions: subCount, departments: deptCount, documents: docCount };
 
   return (
     <div>
-      <PageHeader title="Club approvals" description="New clubs waiting for WSUSA recognition, department requests, custom constitutions, yearly renewals, and every club's status." />
+      <PageHeader
+        title="Club approvals"
+        description={
+          umbrella
+            ? "New clubs waiting for recognition, department requests, custom constitutions, yearly renewals, and every club's status, for every office."
+            : "New clubs waiting for recognition, custom constitutions, yearly renewals, and the status of every club your office oversees."
+        }
+      />
       <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-line" aria-label="Approval queues">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link
             key={t.key}
             href={t.key === "submissions" ? "/admin/clubs" : `/admin/clubs?tab=${t.key}`}
@@ -71,34 +90,40 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
         ))}
       </nav>
       {tab === "submissions" ? (
-        <Submissions />
+        <Submissions scope={scope} offices={offices} />
       ) : tab === "departments" ? (
         <DepartmentRequests where={deptWhere} />
       ) : tab === "documents" ? (
-        <CustomDocuments />
+        <CustomDocuments scope={scope} />
       ) : tab === "renewals" ? (
         <AdminRenewals actor={user} show={sp.show} />
       ) : tab === "ambassadors" ? (
         <AmbassadorPrograms />
       ) : (
-        <AllClubs status={sp.status} q={sp.q} />
+        <AllClubs status={sp.status} q={sp.q} scope={scope} offices={offices} office={sp.office} />
       )}
     </div>
   );
 }
 
-async function Submissions() {
+/** "Campus Rec" beside a club WSUSA's admins see in a list, when another office oversees it. */
+function OfficeTag({ officeId, offices }: { officeId: string | null; offices: OfficeInfo[] }) {
+  const office = officeId ? offices.find((o) => o.id === officeId) : null;
+  return office ? <Badge tone="neutral" title={`Overseen by ${office.name}`}>{office.shortName}</Badge> : null;
+}
+
+async function Submissions({ scope, offices }: { scope: Prisma.ClubWhereInput; offices: OfficeInfo[] }) {
   const clubs = await db.club.findMany({
-    where: { status: "SUBMITTED" },
+    where: { AND: [scope, { status: "SUBMITTED" }] },
     orderBy: { submittedAt: "asc" },
     select: {
-      id: true, name: true, type: true, logoUrl: true, logoColor: true, submittedAt: true, requestedDepartmentName: true, departmentId: true,
+      id: true, name: true, type: true, logoUrl: true, logoColor: true, submittedAt: true, requestedDepartmentName: true, departmentId: true, officeId: true,
       roleAssignments: { where: { endedAt: null, role: { in: ["PRESIDENT", "ADVISOR"] } }, select: { role: true, user: { select: { name: true } } } },
       documents: { where: { status: "PENDING_APPROVAL" }, select: { id: true } },
       decisions: { where: { action: "CHANGES_REQUESTED" }, select: { id: true } },
     },
   });
-  if (!clubs.length) return <EmptyState title="No clubs in WSUSA review" description="New submissions show up here, oldest first." />;
+  if (!clubs.length) return <EmptyState title="No clubs in review" description="New submissions show up here, oldest first." />;
   return (
     <Table>
       <THead>
@@ -124,6 +149,7 @@ async function Submissions() {
                     <p className="font-medium">{c.name}</p>
                     <div className="mt-0.5 flex flex-wrap gap-1">
                       <Badge>{TYPE_LABEL[c.type]}</Badge>
+                      <OfficeTag officeId={c.officeId} offices={offices} />
                       {c.decisions.length ? <Badge tone="warning">Resubmission</Badge> : null}
                       {c.requestedDepartmentName && !c.departmentId ? <Badge tone="info">New department</Badge> : null}
                       {c.documents.length ? <Badge tone="info">Custom documents</Badge> : null}
@@ -181,9 +207,9 @@ async function DepartmentRequests({ where }: { where: Prisma.ClubWhereInput }) {
   );
 }
 
-async function CustomDocuments() {
+async function CustomDocuments({ scope }: { scope: Prisma.ClubWhereInput }) {
   const docs = await db.clubDocument.findMany({
-    where: { status: "PENDING_APPROVAL", club: LIVE },
+    where: { status: "PENDING_APPROVAL", club: { AND: [LIVE, scope] } },
     orderBy: { createdAt: "asc" },
     include: { club: { select: { id: true, name: true, status: true, logoUrl: true, logoColor: true, joinPolicy: true, successionMethod: true } }, createdBy: { select: { name: true } } },
   });
@@ -245,21 +271,49 @@ async function CustomDocuments() {
   );
 }
 
-async function AllClubs({ status, q }: { status?: string; q?: string }) {
+/** `office` (WSUSA's admins): one office's clubs, by key, as Admin → Offices links them. */
+async function AllClubs({ status, q, scope, offices, office }: { status?: string; q?: string; scope: Prisma.ClubWhereInput; offices: OfficeInfo[]; office?: string }) {
   const filter = STATUSES.includes(status as ClubStatus) ? (status as ClubStatus) : null;
   const query = q?.trim().slice(0, 100) ?? "";
+  const picked = offices.find((o) => o.key === office) ?? null;
   const clubs = await db.club.findMany({
-    where: { ...(filter ? { status: filter } : {}), ...(query ? { name: { contains: query, mode: "insensitive" } } : {}) },
+    where: {
+      AND: [
+        scope,
+        filter ? { status: filter } : {},
+        query ? { name: { contains: query, mode: "insensitive" } } : {},
+        // The umbrella is stored as null (lib/offices/rules).
+        picked ? { officeId: picked.umbrella ? null : picked.id } : {},
+      ],
+    },
     orderBy: { name: "asc" },
     take: 300,
     select: {
-      id: true, name: true, slug: true, type: true, status: true, logoUrl: true, logoColor: true, createdAt: true, approvedAt: true, retiredAt: true,
+      id: true, name: true, slug: true, type: true, status: true, logoUrl: true, logoColor: true, createdAt: true, approvedAt: true, retiredAt: true, officeId: true,
       _count: { select: { memberships: { where: { status: "ACTIVE" } } } },
     },
   });
-  const href = (s: string | null) => `/admin/clubs?tab=all${s ? `&status=${s}` : ""}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+  const href = (s: string | null, o: string | null = picked?.key ?? null) => `/admin/clubs?tab=all${s ? `&status=${s}` : ""}${o ? `&office=${encodeURIComponent(o)}` : ""}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
   return (
     <div className="space-y-4">
+      {offices.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Filter by office">
+          <span className="mr-1 text-xs font-medium uppercase tracking-wide text-ink-3">Office</span>
+          {[null, ...offices].map((o) => (
+            <Link
+              key={o?.key ?? "every"}
+              href={href(filter, o?.key ?? null)}
+              aria-current={(picked?.key ?? null) === (o?.key ?? null) ? "true" : undefined}
+              className={cn(
+                "rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset",
+                (picked?.key ?? null) === (o?.key ?? null) ? "bg-brand text-white ring-brand" : "bg-surface text-ink-2 ring-line-2 hover:bg-muted",
+              )}
+            >
+              {o ? o.shortName : "Every office"}
+            </Link>
+          ))}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5" aria-label="Filter by status">
           {[null, ...STATUSES].map((s) => (
@@ -276,6 +330,7 @@ async function AllClubs({ status, q }: { status?: string; q?: string }) {
         <form action="/admin/clubs" className="relative w-full sm:w-64" role="search">
           <input type="hidden" name="tab" value="all" />
           {filter ? <input type="hidden" name="status" value={filter} /> : null}
+          {picked ? <input type="hidden" name="office" value={picked.key} /> : null}
           <label htmlFor="club-search" className="sr-only">
             Search clubs
           </label>
@@ -306,7 +361,10 @@ async function AllClubs({ status, q }: { status?: string; q?: string }) {
                       <Link href={`/admin/clubs/${c.id}`} className="font-medium hover:underline">
                         {c.name}
                       </Link>
-                      <p className="text-xs text-ink-3">{TYPE_LABEL[c.type]}</p>
+                      <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
+                        {TYPE_LABEL[c.type]}
+                        <OfficeTag officeId={c.officeId} offices={offices} />
+                      </p>
                     </div>
                   </div>
                 </TD>

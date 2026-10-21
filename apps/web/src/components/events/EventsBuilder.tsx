@@ -70,7 +70,8 @@ export function EventsBuilder(props: EventsBuilderProps) {
   const anchor = useRef<{ getBoundingClientRect: () => DOMRect }>({ getBoundingClientRect: () => new DOMRect() });
   const [quick, setQuick] = useState<QuickState | null>(null);
 
-  const query = isClub ? `scope=club&clubId=${encodeURIComponent(club.id)}` : "scope=trainings";
+  // review=1: the club's events waiting for their office's review show here too (to its leaders), marked.
+  const query = isClub ? `scope=club&clubId=${encodeURIComponent(club.id)}&review=1` : "scope=trainings";
   const events = useMemo(() => calendarSource(query, setError), [query]);
   const pendingCohosts = incoming.filter((c) => c.status === "PENDING").length;
   const refetch = () => api?.refetchEvents();
@@ -187,7 +188,11 @@ export function EventsBuilder(props: EventsBuilderProps) {
                 snapDuration="00:15:00"
                 scrollTime="08:00:00"
                 eventTimeFormat={{ hour: "numeric", minute: "2-digit", meridiem: "short" }}
-                eventClassNames={(arg) => ((arg.event.extendedProps as CalendarEventProps).cancelled ? ["line-through", "opacity-60"] : [])}
+                eventClassNames={(arg) => {
+                  const p = arg.event.extendedProps as CalendarEventProps;
+                  // Waiting for review: dashed and faded, so it never reads as posted.
+                  return [...(p.cancelled ? ["line-through", "opacity-60"] : []), ...(p.review ? ["opacity-70", "!border-dashed", "!border-2"] : [])];
+                }}
                 noEventsContent={() => <p className="py-6 text-center text-sm text-ink-3">Nothing scheduled here yet. Use “New event” or drag across the calendar.</p>}
                 loading={setLoading}
                 datesSet={(arg) => {
@@ -278,6 +283,11 @@ function OccurrenceActions({ selected, basePath, onDone }: { selected: Selected;
     <div className="space-y-4 pr-6">
       <OccurrenceDetails p={p} title={title} />
       {!p.hostedHere ? <p className="text-xs text-ink-3">Your club co-hosts this event. Only {p.clubName} can change it.</p> : null}
+      {p.review ? (
+        <p className="text-xs text-ink-2">
+          {p.review === "PENDING" ? "Waiting for your club's office to review it." : "Your club's office asked for changes. Open the event to see their note."} Until it's approved, only your club&apos;s leaders and the office can see it, and nobody gets notices or reminders.
+        </p>
+      ) : null}
 
       {manage && mode === "cancel" ? (
         <form
@@ -343,7 +353,7 @@ function OccurrenceActions({ selected, basePath, onDone }: { selected: Selected;
               Change room
             </Button>
           ) : null}
-          {manage && !p.cancelled ? (
+          {manage && !p.cancelled && !p.review ? (
             <ButtonLink size="sm" variant="ghost" href={`/checkin/live/${p.occurrenceId}`}>
               <QrCode className="h-4 w-4" /> Open check-in
             </ButtonLink>
@@ -475,6 +485,12 @@ function QuickCreateDialog({
                 ))}
               </Select>
             </div>
+            {/* Quick events post right away; anything that needs the office's review is checked in the full editor. */}
+            {club ? (
+              <p className="text-xs text-ink-3">
+                An outdoor space, people under 18, travel, a big crowd, money or alcohol? Use <span className="font-medium text-ink-2">More options</span> and answer “Does this event involve…” so your club&apos;s office can review it first.
+              </p>
+            ) : null}
             {error ? (
               <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-sm text-danger">
                 {error}

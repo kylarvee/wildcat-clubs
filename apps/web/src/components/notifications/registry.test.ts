@@ -46,7 +46,7 @@ describe("the registry", () => {
 
   it("marks account and security notices as always sent", () => {
     const always = NOTIFICATION_KINDS.filter((k) => (NOTIFICATION_REGISTRY[k] as KindRule).always);
-    expect(always).toEqual(["profile.alumni", "staffing.gap", "system.admin_granted", "system.admin_revoked", "system.sysadmin_granted", "system.sysadmin_revoked"]);
+    expect(always).toEqual(["office.staff_added", "office.staff_removed", "profile.alumni", "staffing.gap", "system.admin_granted", "system.admin_revoked", "system.sysadmin_granted", "system.sysadmin_revoked"]);
     expect(categoryAlways("account")).toBe(true);
     expect(categoryAlways("leadership")).toBe(false);
   });

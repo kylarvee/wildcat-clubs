@@ -19,6 +19,7 @@ const MODELS: Record<string, Model> = {
   user: { relations: { details: one("personalDetails", "id", "userId"), roleAssignments: many("roleAssignment", "userId"), memberships: many("membership", "userId") } },
   personalDetails: { key: "userId" },
   club: {},
+  office: {},
   position: {},
   membership: { relations: { club: one("club", "clubId"), user: one("user", "userId") }, uniques: { userId_clubId: ["userId", "clubId"] } },
   roleAssignment: { relations: { club: one("club", "clubId"), user: one("user", "userId"), position: one("position", "positionId") } },
@@ -32,7 +33,7 @@ const MODELS: Record<string, Model> = {
   testAssignment: { relations: { test: one("test", "testId") }, uniques: { testId_userId_cycleKey: ["testId", "userId", "cycleKey"] }, defaults: () => ({ status: "ASSIGNED", createdAt: now(), resolvedAt: null }) },
   task: {
     relations: { club: one("club", "clubId") },
-    defaults: () => ({ status: "OPEN", required: false, description: null, href: null, dueAt: null, clubId: null, capability: null, sourceType: null, sourceId: null, createdById: null, completedAt: null, completedById: null, createdAt: now() }),
+    defaults: () => ({ status: "OPEN", required: false, description: null, href: null, dueAt: null, clubId: null, capability: null, sourceType: null, sourceId: null, createdById: null, completedAt: null, completedById: null, createdAt: now(), officeId: null }),
   },
   notification: { defaults: () => ({ body: null, href: null, readAt: null, createdAt: now() }) },
   reminderLog: { key: "key", defaults: () => ({ sentAt: now() }) },
@@ -52,7 +53,8 @@ const cmp = (a: unknown, b: unknown) => {
 };
 
 export class FakeDb {
-  private seq = 0;
+  /** Shared by every copy, so a run on a copy of another run's tables never reuses a generated id. */
+  private static seq = 0;
   constructor(public tables: Tables) {
     for (const m of Object.keys(MODELS)) this.tables[m] ??= [];
   }
@@ -202,7 +204,7 @@ export class FakeDb {
     for (const [k, v] of Object.entries(data)) if (v !== null && typeof v === "object" && !(v instanceof Date) && !Array.isArray(v)) throw new Error(`fake db: nested write ${model}.${k} isn't modeled`);
     const key = this.keyOf(model);
     const row: Row = { ...(MODELS[model].defaults?.() ?? {}), ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined).map(([k, v]) => [k, clone(v)])) };
-    if (row[key] === undefined) row[key] = `${model}-new-${++this.seq}`;
+    if (row[key] === undefined) row[key] = `${model}-new-${++FakeDb.seq}`;
     const clash =
       this.tables[model].some((r) => eq(r[key], row[key])) ||
       Object.values(MODELS[model].uniques ?? {}).some((fields) => this.tables[model].some((r) => fields.every((f) => eq(r[f], row[f]))));

@@ -1,14 +1,18 @@
 import "server-only";
-import { Prisma, type BudgetItem, type Event, type EventPerk, type FundingStatus, type Term } from "@prisma/client";
+import { Prisma, type BudgetItem, type Event, type EventPerk, type EventReview, type EventRisk, type FundingStatus, type Term } from "@prisma/client";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { canViewEvent as canViewEventRule, type EventGate } from "@/lib/authz/events";
 import { can, getClubAccess } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
-import { assertCan, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
+import { assertCan, assertCanAdminClub, assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound, oneLine, parse } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
-import { notifyClubCapability } from "@/lib/domain/notify";
+import { notify, notifyClubCapability } from "@/lib/domain/notify";
+import { clubCapabilityHolders } from "@/lib/authz/people";
+import { getConfigValue } from "@/lib/config";
+import { notifyOffice, officeForClub } from "@/lib/offices";
+import { normalizeFlags, readTravel, reviewAfterSave, RISK_FLAGS, riskPhrase, travelPlan, underReview, UNDER_REVIEW, type TravelPlan } from "@/lib/events/review";
 import {
   beforeDelete,
   datesToCancel,
@@ -68,6 +72,17 @@ import { reindexClubSoon, reindexEventClubsSoon } from "@/lib/search/fresh";
  * event's length; Service projects count by default, any kind may. An
  * in-person event may keep an online link too, which makes it hybrid; check-in
  * rules don't change (lib/attendance/rules).
+ *
+ * Risk review (rules in lib/events/review): the builder's "Does this event
+ * involve…" answers (riskFlags) and, with Travel, the trip (travel). A save
+ * decides the review (reviewAfterSave): a club event with anything checked
+ * waits for its club's office (PENDING) with one APPROVAL task in the
+ * office's queue (sourceType "eventReview", routed by createTask). While it
+ * waits (or is sent back, CHANGES_REQUESTED) it's hidden from everyone but its
+ * leaders and the office (lib/authz/events), co-host invitations wait, no
+ * notices go out and Google gets no copy. approveEventReview publishes it
+ * (Google sync, co-host invitations, search); requestEventChanges sends it
+ * back with a note, and the club's next save sends it for review again.
  */
 
 // ─── Input schemas ───────────────────────────────────────────────────────────
@@ -78,6 +93,7 @@ const RECURRENCE = z.enum(["NONE", "DAILY", "WEEKLY", "MONTHLY", "SEMESTERLY", "
 const LOCATION = z.enum(["CAMPUS", "ADDRESS", "VIRTUAL", "TBD"]);
 const FUNDING = z.enum(["UNIVERSITY", "WSUSA", "COLLEGE", "DEPARTMENT"]);
 const PERK = z.enum(["FREE_FOOD", "FREE_STUFF"]);
+const RISK = z.enum(RISK_FLAGS as [EventRisk, ...EventRisk[]]);
 
 const optText = (max: number) =>
   z
@@ -143,6 +159,10 @@ const DetailsShape = {
   perks: z.array(PERK).max(10).optional(),
   /** Minutes each attendee earns per date they check in (quarter hours); null = doesn't count. Omit to leave it (new Service projects count). */
   serviceMinutes: z.coerce.number({ error: "Enter the service hours as a number." }).int().nullish(),
+  /** "Does this event involve…" (lib/events/review). Omit to leave the answers as they are. */
+  riskFlags: z.array(RISK).max(RISK_FLAGS.length).optional(),
+  /** With Travel checked: the trip (lib/events/review TravelInput, checked against the dates in the write path). Omit to leave it. */
+  travel: z.unknown().optional(),
 };
 
 const EventSchema = z.object({ ...DetailsShape, ...ScheduleShape, ...LocationShape });
@@ -157,7 +177,8 @@ const MoveSchema = z.object({
 export type EventInput = z.input<typeof EventSchema>;
 export type CreateEventInput = z.input<typeof CreateSchema>;
 
-export type EventWriteResult = { id: string; google: Pick<GoogleSyncResult, "status" | "message"> };
+/** `review`: where the event's review stands after the save, and the office it waits for (null: published). */
+export type EventWriteResult = { id: string; google: Pick<GoogleSyncResult, "status" | "message">; review: { status: EventReview; waitingFor: string | null } };
 
 // ─── Permissions ─────────────────────────────────────────────────────────────
 
@@ -428,8 +449,18 @@ type CohostChange = { cohostId: string; clubId: string; clubName: string; clubSl
  * Makes the event's co-host invitations match the wanted clubs. New invitations
  * are PENDING (with an approval task for the club's "events" holders) unless
  * the club auto-approves co-hosts. Removed clubs' invitations are withdrawn.
+ * `ask: false` (the event waits for review): every new invitation is saved as
+ * PENDING and nobody hears yet, even a club that approves co-hosts
+ * automatically; approving the event sends them (releaseHeldCohosts).
  */
-async function syncCohosts(tx: Tx, event: { id: string; title: string; clubId: string }, host: HostClub, actor: Actor, wanted: { all: boolean; clubIds: string[] }): Promise<CohostChange[]> {
+async function syncCohosts(
+  tx: Tx,
+  event: { id: string; title: string; clubId: string },
+  host: HostClub,
+  actor: Actor,
+  wanted: { all: boolean; clubIds: string[] },
+  opts: { ask: boolean } = { ask: true },
+): Promise<CohostChange[]> {
   const existing = await tx.eventCohost.findMany({ where: { eventId: event.id } });
   const have = new Set(existing.map((c) => c.clubId));
   const targetIds = wanted.all ? null : [...new Set(wanted.clubIds)].filter((id) => id !== event.clubId);
@@ -452,11 +483,11 @@ async function syncCohosts(tx: Tx, event: { id: string; title: string; clubId: s
   const changes: CohostChange[] = [];
   const now = new Date();
   for (const club of clubs) {
-    const auto = club.autoApproveCohosts;
+    const auto = club.autoApproveCohosts && opts.ask;
     const row = await tx.eventCohost.create({
       data: { eventId: event.id, clubId: club.id, status: auto ? "APPROVED" : "PENDING", requestedById: actor.id, ...(auto ? { decidedAt: now } : {}) },
     });
-    if (!auto) await cohostTask(tx, row.id, club, host, event.title, actor.id);
+    if (!auto && opts.ask) await cohostTask(tx, row.id, club, host, event.title, actor.id);
     changes.push({ cohostId: row.id, clubId: club.id, clubName: club.name, clubSlug: club.slug, status: auto ? "APPROVED" : "PENDING" });
   }
   return changes;
@@ -485,6 +516,26 @@ async function reopenCohostTasks(tx: Tx, event: { id: string; title: string }, h
   const open = await tx.task.findMany({ where: { sourceType: "cohost", sourceId: { in: pending.map((p) => p.id) }, status: "OPEN" }, select: { sourceId: true } });
   const hasTask = new Set(open.map((t) => t.sourceId));
   for (const p of pending) if (!hasTask.has(p.id)) await cohostTask(tx, p.id, p.club, host, event.title, actorId);
+}
+
+/**
+ * Approving an event sends the co-host invitations it held back while it
+ * waited: a club that approves co-hosts automatically is added now, and every
+ * other club is asked (its approval task). Returns what to announce.
+ */
+async function releaseHeldCohosts(tx: Tx, event: { id: string; title: string }, host: HostClub, actorId: string): Promise<CohostChange[]> {
+  const pending = await tx.eventCohost.findMany({
+    where: { eventId: event.id, status: "PENDING" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, club: { select: { id: true, name: true, slug: true, autoApproveCohosts: true } } },
+  });
+  const auto = pending.filter((p) => p.club.autoApproveCohosts);
+  if (auto.length) {
+    await tx.eventCohost.updateMany({ where: { id: { in: auto.map((p) => p.id) } }, data: { status: "APPROVED", decidedAt: new Date() } });
+    for (const p of auto) await resolveTasks("cohost", p.id, actorId, tx, "CANCELLED");
+  }
+  await reopenCohostTasks(tx, event, host, actorId);
+  return pending.map((p) => ({ cohostId: p.id, clubId: p.club.id, clubName: p.club.name, clubSlug: p.club.slug, status: p.club.autoApproveCohosts ? "APPROVED" : "PENDING" }));
 }
 
 async function announceCohostChanges(changes: CohostChange[], host: HostClub, eventTitle: string, actor: Actor, bulk: boolean) {
@@ -667,6 +718,10 @@ type EventFields = {
   perks?: EventPerk[];
   /** Undefined = keep (trimmed to fit a shorter event); a new Service project counts by default. See lib/events/rules. */
   serviceMinutes?: number | null;
+  /** Undefined = leave the "Does this event involve…" answers as they are (a new event has none). */
+  riskFlags?: EventRisk[];
+  /** Undefined = keep the trip; checked with travelPlan when Travel is among the answers. */
+  travel?: unknown;
 };
 
 /** The meetings an event's saved rule produces (null when it has no start yet). */
@@ -697,10 +752,85 @@ async function normalizeCover(url: string | null | undefined, club: HostClub | n
   return `/api/files/${id}`;
 }
 
+/**
+ * Drivers picked from the club must be its members or leaders now (typed
+ * names are taken as given); a picked driver's name follows their account.
+ */
+async function checkDrivers(plan: TravelPlan, clubId: string): Promise<TravelPlan> {
+  const ids = [...new Set(plan.drivers.map((d) => d.userId).filter((id): id is string => Boolean(id)))];
+  if (!ids.length) return plan;
+  const [members, roles, users] = await Promise.all([
+    db.membership.findMany({ where: { clubId, status: "ACTIVE", userId: { in: ids } }, select: { userId: true } }),
+    db.roleAssignment.findMany({ where: { clubId, endedAt: null, userId: { in: ids } }, select: { userId: true } }),
+    db.user.findMany({ where: { id: { in: ids }, status: { not: "DEACTIVATED" } }, select: { id: true, name: true } }),
+  ]);
+  const inClub = new Set([...members, ...roles].map((r) => r.userId));
+  const names = new Map(users.map((u) => [u.id, u.name]));
+  if (ids.some((id) => !inClub.has(id) || !names.has(id))) throw invalid("Drivers you pick have to be in the club. Type the name of anyone else who's driving.");
+  return { ...plan, drivers: plan.drivers.map((d) => (d.userId ? { userId: d.userId, name: names.get(d.userId)! } : d)) };
+}
+
+/**
+ * The office's review task for an event waiting on it: exactly one open,
+ * routed to the club's office by createTask, due when the event starts, and
+ * kept up to date in place on later saves.
+ */
+async function ensureReviewTask(tx: Tx, event: { id: string; title: string; startsAt: Date | null }, club: HostClub, actorId: string) {
+  const title = `Review “${event.title}” (${club.name})`;
+  const open = await tx.task.findMany({ where: { sourceType: "eventReview", sourceId: event.id, status: "OPEN" }, orderBy: { createdAt: "asc" }, select: { id: true, title: true, dueAt: true } });
+  const [keep, ...extra] = open;
+  if (extra.length) await tx.task.updateMany({ where: { id: { in: extra.map((t) => t.id) } }, data: { status: "CANCELLED", completedAt: new Date() } });
+  if (keep) {
+    if (keep.title !== title || keep.dueAt?.getTime() !== event.startsAt?.getTime()) await tx.task.update({ where: { id: keep.id }, data: { title, dueAt: event.startsAt } });
+    return;
+  }
+  await createTask(
+    {
+      kind: "APPROVAL",
+      title,
+      description: "Approve it to post it, or ask for changes with a note. Until then only the club's leaders and your office can see it.",
+      assignee: { type: "ADMINS" },
+      clubId: club.id,
+      href: `/admin/events#${event.id}`,
+      dueAt: event.startsAt,
+      source: { type: "eventReview", id: event.id },
+      createdById: actorId,
+    },
+    tx,
+  );
+}
+
+/** Pending co-host invitations stop asking while their event waits for review (approval asks again). */
+async function pauseCohostTasks(tx: Tx, eventId: string, actorId: string) {
+  const pending = await tx.eventCohost.findMany({ where: { eventId, status: "PENDING" }, select: { id: true } });
+  for (const p of pending) await resolveTasks("cohost", p.id, actorId, tx, "CANCELLED");
+}
+
 /** The one place events are written. Create (existing = null), update, or move. */
 async function writeEvent(actor: Actor, club: HostClub | null, existing: Event | null, f: EventFields, action: string): Promise<EventWriteResult> {
   const terms = await getTerms();
   const desired = expandSchedule(f.schedule, terms);
+  // "Does this event involve…" (club events only; university events are never reviewed).
+  const flags = club ? (f.riskFlags !== undefined ? normalizeFlags(f.riskFlags) : (existing?.riskFlags ?? [])) : [];
+  let travel: TravelPlan | null = null;
+  if (club && flags.includes("TRAVEL")) {
+    if (f.travel !== undefined && f.travel !== null) {
+      const t = travelPlan(f.travel, { startsAt: desired[0].startsAt, endsAt: desired[0].endsAt, repeats: f.schedule.recurrence !== "NONE" });
+      if (!t.ok) throw invalid(t.error);
+      travel = await checkDrivers(t.plan, club.id);
+    } else travel = readTravel(existing?.travel);
+    if (!travel) throw invalid("Add the trip: where you're going, when you leave and come back, whether it's overnight, and who's driving.");
+  }
+  const review = reviewAfterSave({
+    club: Boolean(club),
+    reviewOn: club ? await getConfigValue("events.riskReview") : false,
+    before: existing ? { status: existing.reviewStatus, flags: existing.riskFlags, travel: readTravel(existing.travel) } : null,
+    flags,
+    travel,
+  });
+  // Waiting for review after this save: hidden from everyone but its leaders and the office.
+  const hidden = UNDER_REVIEW.includes(review.status);
+  const wasHidden = existing ? underReview(existing) : false;
   if (!club && f.costs?.length) throw invalid("University events don't carry club costs.");
   const coverUrl = await normalizeCover(f.coverUrl, club, existing);
   const perks = f.perks ? normalizePerks(f.perks) : (existing?.perks ?? []);
@@ -739,6 +869,9 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
           perks,
           serviceMinutes: service.minutes,
           status,
+          riskFlags: flags,
+          travel: travel ?? Prisma.DbNull,
+          reviewStatus: review.status,
           ...f.schedule,
           ...f.location,
           ...(f.cohosts && club ? { cohostAllClubs: f.cohosts.all } : {}),
@@ -749,6 +882,11 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
 
         await materialize(tx, event.id, desired, { status: status === "CANCELLED" ? "CANCELLED" : "SCHEDULED", prune: timesChanged });
 
+        // The office's review task: one open while it waits (a cancelled event's waits until it's restored).
+        if (club && review.task === "ensure" && status === "SCHEDULED") await ensureReviewTask(tx, event, club, actor.id);
+        else if (review.task === "close") await resolveTasks("eventReview", event.id, actor.id, tx, "CANCELLED");
+        if (club && hidden && !wasHidden && existing) await pauseCohostTasks(tx, event.id, actor.id);
+
         if (f.attachmentFileIds) {
           const want = [...new Set(f.attachmentFileIds)];
           await tx.eventAttachment.deleteMany({ where: { eventId: event.id, fileId: { notIn: want } } });
@@ -756,7 +894,7 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
         }
 
         let cohostChanges: CohostChange[] = [];
-        if (club && f.cohosts) cohostChanges = await syncCohosts(tx, { id: event.id, title: event.title, clubId: club.id }, club, actor, f.cohosts);
+        if (club && f.cohosts) cohostChanges = await syncCohosts(tx, { id: event.id, title: event.title, clubId: club.id }, club, actor, f.cohosts, { ask: !hidden });
 
         if (club && f.costs !== undefined) await syncCosts(tx, event.id, club, actor, f.costs, costTermId);
         else if (club && timesChanged) {
@@ -774,11 +912,17 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
             entityId: event.id,
             clubId: club?.id ?? null,
             data: { title: event.title, recurrence: event.recurrence, startsAt: event.startsAt?.toISOString() ?? null },
-            // A public event appearing on the calendar is safe to show on the club's feed.
-            isPublic: !existing && visibility === "PUBLIC",
+            // A public event appearing on the calendar is safe to show on the club's feed (not one waiting for review).
+            isPublic: !existing && visibility === "PUBLIC" && !hidden,
           },
           tx,
         );
+        if (club && review.submitted) {
+          await logActivity(
+            { actorId: actor.id, action: "event.review_requested", entityType: "event", entityId: event.id, clubId: club.id, data: { title: event.title, flags, resubmitted: Boolean(existing) } },
+            tx,
+          );
+        }
         return { event, cohostChanges };
       },
       { timeout: 30_000, maxWait: 10_000 },
@@ -786,11 +930,25 @@ async function writeEvent(actor: Actor, club: HostClub | null, existing: Event |
   );
 
   reindexEventClubsSoon(event.id, cohostsBefore);
-  if (club && cohostChanges.length) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
-  if (club && existing && timesChanged) await tellCohostsAboutChange(event, club, actor, "moved");
+  // While it waits for review nobody hears anything: co-hosts, followers and Google wait for the approval.
+  if (club && cohostChanges.length && !hidden) await announceCohostChanges(cohostChanges, club, event.title, actor, Boolean(f.cohosts?.all));
+  if (club && existing && timesChanged && !hidden && !wasHidden) await tellCohostsAboutChange(event, club, actor, "moved");
   const google = await mirror(event.id, actor, f.createMeetLink);
-  await noticeEdit(event.id, expected, { actorId: actor.id, now: noticeNow, cohostsTold: Boolean(club && existing && timesChanged) });
-  return { id: event.id, google: { status: google.status, message: google.message } };
+  await noticeEdit(event.id, hidden || wasHidden ? null : expected, { actorId: actor.id, now: noticeNow, cohostsTold: Boolean(club && existing && timesChanged) });
+  const office = club && hidden ? await officeForClub(club.id) : null;
+  if (club && review.submitted) {
+    await notifyOffice(
+      { clubId: club.id },
+      {
+        kind: "event.review_requested",
+        title: `${club.name} sent “${event.title}” for review`,
+        body: `It involves ${riskPhrase(flags)}. It's posted once your office approves it.`,
+        href: `/admin/events#${event.id}`,
+        exceptUserId: actor.id,
+      },
+    );
+  }
+  return { id: event.id, google: { status: google.status, message: google.message }, review: { status: review.status, waitingFor: office?.name ?? null } };
 }
 
 /** Mirrors to Google Calendar and stores a newly created Meet link. */
@@ -833,6 +991,8 @@ function fieldsFromInput(d: z.output<typeof EventSchema>, schedule: NormalizedSc
     coverUrl: d.coverUrl,
     perks: d.perks,
     serviceMinutes: d.serviceMinutes,
+    riskFlags: d.riskFlags,
+    travel: d.travel,
   };
 }
 
@@ -904,13 +1064,16 @@ export async function cancelEvent(actor: Actor | null, eventId: string, reason?:
     await tx.event.update({ where: { id: eventId }, data: { status: "CANCELLED" } });
     await tx.eventOccurrence.updateMany({ where: { eventId, status: "SCHEDULED", startsAt: { gte: now }, attendances: { none: {} } }, data: { status: "CANCELLED", note } });
     for (const p of pending) await resolveTasks("cohost", p.id, a.id, tx, "CANCELLED");
+    // Nothing for the office to review while it's off (restoring it asks again).
+    await resolveTasks("eventReview", eventId, a.id, tx, "CANCELLED");
     await logActivity(
       { actorId: a.id, action: "event.cancelled", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title, reason: note, keptCancelledIds: kept.map((o) => o.id) } },
       tx,
     );
   });
   reindexEventClubsSoon(eventId);
-  if (club) await tellCohostsAboutChange(event, club, a, "cancelled");
+  // An event still waiting for review was never posted: nobody to tell.
+  if (club && !underReview(event)) await tellCohostsAboutChange(event, club, a, "cancelled");
   await mirror(eventId, a);
   await noticeEventCancelled(eventId, dropping, note, { actorId: a.id, now, cohostsTold: Boolean(club) });
   return { id: event.id };
@@ -937,7 +1100,9 @@ export async function restoreEvent(actor: Actor | null, eventId: string) {
   await db.$transaction(async (tx) => {
     await tx.event.update({ where: { id: eventId }, data: { status: "SCHEDULED" } });
     await tx.eventOccurrence.updateMany({ where: { eventId, status: "CANCELLED", startsAt: { gte: new Date() }, id: { notIn: kept } }, data: { status: "SCHEDULED", note: null } });
-    if (club) await reopenCohostTasks(tx, event, club, a.id);
+    // Still waiting for review: the office gets its task back, and co-hosts wait for the approval.
+    if (club && event.reviewStatus === "PENDING") await ensureReviewTask(tx, event, club, a.id);
+    if (club && !underReview(event)) await reopenCohostTasks(tx, event, club, a.id);
     await logActivity({ actorId: a.id, action: "event.restored", entityType: "event", entityId: eventId, clubId: event.clubId }, tx);
   });
   reindexEventClubsSoon(eventId);
@@ -1017,6 +1182,7 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
   const deleted = await beforeDelete(eventId, noticeNow);
   await db.$transaction(async (tx) => {
     for (const c of cohosts) await resolveTasks("cohost", c.id, a.id, tx, "CANCELLED");
+    await resolveTasks("eventReview", eventId, a.id, tx, "CANCELLED");
     await tx.event.delete({ where: { id: eventId } });
     await logActivity({ actorId: a.id, action: "event.deleted", entityType: "event", entityId: eventId, clubId: event.clubId, data: { title: event.title } }, tx);
   });
@@ -1035,10 +1201,11 @@ export async function deleteEvent(actor: Actor | null, eventId: string) {
 export async function decideCohost(actor: Actor | null, cohostId: string, approve: boolean) {
   const c = await db.eventCohost.findUnique({
     where: { id: cohostId },
-    include: { club: { select: { id: true, name: true } }, event: { select: { id: true, title: true, clubId: true, club: { select: { slug: true } } } } },
+    include: { club: { select: { id: true, name: true } }, event: { select: { id: true, title: true, clubId: true, reviewStatus: true, club: { select: { slug: true } } } } },
   });
   if (!c) throw notFound("Co-host request");
   await assertClubCap(actor, c.clubId, "events");
+  if (underReview(c.event)) throw conflict("This event is waiting for its office's review. You can answer once it's approved and posted.");
   const leaving = c.status === "APPROVED" && !approve;
   if (c.status !== "PENDING" && !leaving) throw conflict("This request was already decided.");
   const updated = await db.eventCohost.update({ where: { id: c.id }, data: { status: approve ? "APPROVED" : "DECLINED", decidedById: actor!.id, decidedAt: new Date() } });
@@ -1063,6 +1230,84 @@ export async function decideCohost(actor: Actor | null, cohostId: string, approv
     });
   }
   return updated;
+}
+
+// ─── Review decisions (the club's office) ────────────────────────────────────
+
+const ReviewNote = z.string().trim().max(1000, "Keep the note under 1,000 characters.");
+const ApproveInput = z.object({ note: ReviewNote.nullish().transform((v) => v || null) });
+const ChangesInput = z.object({ note: ReviewNote.min(5, "Tell the club what to change (at least a few words).") });
+const CANCELLED_REVIEW = "This event is cancelled, so there's nothing to review. If the club restores it, it comes back to you.";
+
+/** An event waiting on its club's office, for that office's staff (lib/authz canAdminClub) or WSUSA's admins. Another office's comes back "not found". */
+async function loadForReview(actor: Actor | null, eventId: string) {
+  const event = await db.event.findUnique({ where: { id: eventId }, include: { club: { select: { ...HOST_SELECT, officeId: true } } } });
+  if (!event?.club) throw notFound("Event");
+  assertCanAdminClub(actor, "admin.events", { officeId: event.club.officeId });
+  return { actor, event, club: event.club };
+}
+
+/** Who hears how a review went: the event's creator and the club's "events" holders (never the reviewer), and where the notice links. */
+async function reviewAudience(event: Pick<Event, "id" | "createdById">, club: HostClub, reviewer: Actor) {
+  const holders = await clubCapabilityHolders(club.id, "events");
+  return { userIds: [event.createdById, ...holders], href: `/clubs/${club.slug}/manage/events/${event.id}`, exceptUserId: reviewer.id };
+}
+
+/**
+ * The office approves an event it was asked to review (`note`: an optional
+ * condition, shown to the club). Everything that happens when an event is
+ * posted happens now: it shows on calendars and feeds, Google Calendar gets
+ * its copy, its co-host invitations go out, and search picks it up.
+ */
+export async function approveEventReview(actor: Actor | null, eventId: string, input: unknown = {}) {
+  const { note } = parse(ApproveInput, input ?? {});
+  const { actor: a, event, club } = await loadForReview(actor, eventId);
+  if (!underReview(event)) throw conflict(event.reviewStatus === "APPROVED" ? "This event was already approved." : "This event isn't waiting for review.");
+  if (event.status !== "SCHEDULED") throw conflict(CANCELLED_REVIEW);
+  const now = new Date();
+  const cohosts = await db.$transaction(async (tx) => {
+    await tx.event.update({ where: { id: event.id }, data: { reviewStatus: "APPROVED", reviewNote: note, reviewedById: a.id, reviewedAt: now } });
+    await resolveTasks("eventReview", event.id, a.id, tx);
+    // The co-host invitations it held back go out now.
+    const released = await releaseHeldCohosts(tx, event, club, a.id);
+    await logActivity({ actorId: a.id, action: "event.review_approved", entityType: "event", entityId: event.id, clubId: club.id, data: { title: event.title, flags: event.riskFlags, note } }, tx);
+    return released;
+  });
+  reindexEventClubsSoon(event.id);
+  // An online event that asked for a Google Meet link gets it now (it couldn't while it waited).
+  await mirror(event.id, a, event.locationType === "VIRTUAL" && !event.virtualUrl);
+  if (cohosts.length) await announceCohostChanges(cohosts, club, event.title, a, event.cohostAllClubs);
+  await notify({
+    ...(await reviewAudience(event, club, a)),
+    kind: "event.review_approved",
+    title: `“${event.title}” is approved`,
+    body: note ? `It's posted now. A note from the reviewer: ${note}` : "It's posted now: on your club's calendar, the Events page and members' calendars.",
+  });
+  return { id: event.id };
+}
+
+/**
+ * The office sends an event back with a note. It stays hidden (only the
+ * club's leaders and the office see it); the club's next save sends it for
+ * review again (lib/events/review reviewAfterSave).
+ */
+export async function requestEventChanges(actor: Actor | null, eventId: string, input: unknown) {
+  const { note } = parse(ChangesInput, input ?? {});
+  const { actor: a, event, club } = await loadForReview(actor, eventId);
+  if (event.reviewStatus !== "PENDING") throw conflict(event.reviewStatus === "CHANGES_REQUESTED" ? "Changes were already asked for. The club's next save sends it back to you." : "This event isn't waiting for review.");
+  if (event.status !== "SCHEDULED") throw conflict(CANCELLED_REVIEW);
+  await db.$transaction(async (tx) => {
+    await tx.event.update({ where: { id: event.id }, data: { reviewStatus: "CHANGES_REQUESTED", reviewNote: note, reviewedById: a.id, reviewedAt: new Date() } });
+    await resolveTasks("eventReview", event.id, a.id, tx);
+    await logActivity({ actorId: a.id, action: "event.review_changes_requested", entityType: "event", entityId: event.id, clubId: club.id, data: { title: event.title, note } }, tx);
+  });
+  await notify({
+    ...(await reviewAudience(event, club, a)),
+    kind: "event.review_changes_requested",
+    title: `Changes asked for “${event.title}”`,
+    body: `${note} Save your changes in the Events Builder to send it back for review.`,
+  });
+  return { id: event.id };
 }
 
 // ─── Event costs (one line at a time) ────────────────────────────────────────

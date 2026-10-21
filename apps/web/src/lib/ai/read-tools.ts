@@ -2,7 +2,8 @@ import "server-only";
 import { z } from "zod";
 import type { PolicyPlacement } from "@prisma/client";
 import { db } from "@/lib/db";
-import { ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
+import { adminClubWhere, ALL_CAPABILITIES, CAPABILITIES, getClubAccess, isAdmin, isOfficeStaff, ROLE_LABEL, ROLE_RANK } from "@/lib/authz";
+import { heldCapabilities } from "@/lib/authz/requirement-rules";
 import { requirementStatus } from "@/lib/authz/requirements";
 import { listClubs, clubUpcomingEvents, type ClubListItem } from "@/lib/clubs/queries";
 import { clubListHref, SORT_DEFAULT_DIR, type ClubListParams } from "@/components/clubs/list-params";
@@ -250,7 +251,17 @@ const getClub = readTool({
           link: `/events/${e.eventId}?o=${e.occurrenceId}`,
         })),
         you: {
-          relationship: access?.isMember ? (access.role === "MEMBER" ? "member" : ROLE_LABEL[access.role!]) : access?.isPendingMember ? "Request pending" : access?.viaPlatform ? "admin (not a member)" : "not a member",
+          relationship: access?.isMember
+            ? access.role === "MEMBER"
+              ? "member"
+              : ROLE_LABEL[access.role!]
+            : access?.isPendingMember
+              ? "Request pending"
+              : access?.viaPlatform === "OFFICE"
+                ? "staff of the office that oversees it (not a member)"
+                : access?.viaPlatform
+                  ? "admin (not a member)"
+                  : "not a member",
           following_calendar: Boolean(sub),
           ...(review ? { reviews: review.eligible ? "can review this club" : `attended ${review.attended} of the ${review.required} events needed to review` } : {}),
         },
@@ -606,9 +617,11 @@ const explainPermissions = readTool({
     let requirements: { name: string; kind: string; done: boolean; due: string; overdue: boolean }[] | undefined;
     if (access.role && ROLE_RANK[access.role] >= 1 && access.role !== "ADVISOR" && access.clubStatus === "APPROVED") {
       const top = await db.roleAssignment.findFirst({ where: { clubId: club.id, userId: actor.id, endedAt: null, role: access.role }, orderBy: { startedAt: "asc" } });
-      const approved = await db.club.findUnique({ where: { id: club.id }, select: { approvedAt: true } });
+      const approved = await db.club.findUnique({ where: { id: club.id }, select: { approvedAt: true, officeId: true } });
       if (top) {
-        const status = await requirementStatus(actor.id, access.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: approved?.approvedAt ?? null });
+        // The club's office and what their seats here hold decide which requirements reach them (lib/authz/requirement-rules).
+        const seats = await db.roleAssignment.findMany({ where: { clubId: club.id, userId: actor.id, endedAt: null }, select: { role: true, permissions: true } });
+        const status = await requirementStatus(actor.id, access.role, { assignmentStartedAt: top.startedAt, clubApprovedAt: approved?.approvedAt ?? null, clubOfficeId: approved?.officeId ?? null, holds: heldCapabilities(seats) });
         requirements = status.items.map((i) => ({ name: i.requirement.name, kind: REQUIREMENT_KIND[i.requirement.kind] ?? "requirement", done: i.met, due: fmtDate(i.dueAt, "MMM d, yyyy"), overdue: i.overdue }));
       }
     }
@@ -616,8 +629,22 @@ const explainPermissions = readTool({
       data: {
         club: club.name,
         club_recognition: CLUB_STATUS_TEXT[club.status],
-        your_role: access.viaPlatform ? (access.viaPlatform === "SYSADMIN" ? "system administrator (full access)" : "WSUSA administrator (full access)") : access.role ? ROLE_LABEL[access.role] : access.isPendingMember ? "Request pending (not a member yet)" : "not a member",
-        permissions_paused: access.suspended ? "Yes — a WSUSA requirement is overdue, so their permissions are paused until it's done. The title stays." : undefined,
+        your_role: access.viaPlatform
+          ? access.viaPlatform === "SYSADMIN"
+            ? "system administrator (full access)"
+            : access.viaPlatform === "OFFICE"
+              ? "staff of the office that oversees the club (full access)"
+              : "WSUSA administrator (full access)"
+          : access.role
+            ? ROLE_LABEL[access.role]
+            : access.isPendingMember
+              ? "Request pending (not a member yet)"
+              : "not a member",
+        permissions_paused: access.suspended
+          ? "Yes — a WSUSA requirement is overdue, so their permissions are paused until it's done. The title stays."
+          : access.pausedCapabilities.length
+            ? access.pausedCapabilities.map((p) => `Only ${CAPABILITIES[p.capability].label} is paused, until they finish ${p.requirements.join(" and ")}; everything else works.`).join(" ")
+            : undefined,
         can_use: has.map((c) => ({ permission: CAPABILITIES[c].label, what: CAPABILITIES[c].description })),
         cannot_use: lacks.map((c) => CAPABILITIES[c].label),
         can_assign_roles: access.assignableRoles.map((r) => ROLE_LABEL[r]),
@@ -675,6 +702,13 @@ const eventDetails = readTool({
         title: event.title,
         type: KIND_LABEL[event.kind],
         status: event.status === "CANCELLED" ? "cancelled" : "scheduled",
+        // Only its leaders and its office can see an event waiting for review (lib/events/review); it isn't posted anywhere yet.
+        review:
+          event.reviewStatus === "PENDING"
+            ? "Waiting for its club's office to review it: not posted yet, so only the club's leaders and the office see it, and nobody can check in."
+            : event.reviewStatus === "CHANGES_REQUESTED"
+              ? `The club's office asked for changes${event.reviewNote ? `: ${event.reviewNote}` : ""}. Saving the event in the Events Builder sends it back for review.`
+              : undefined,
         host: event.club?.name ?? "Weber State (university event)",
         cohosts: event.cohosts.map((c) => c.club.name),
         schedule: event.startsAt
@@ -760,13 +794,15 @@ const clubHealth = readTool({
   name: "club_health",
   running: "Checking club activity",
   description:
-    "Which clubs are at risk — the same list as WSUSA's admin Overview, from the metrics layer: approved clubs that are Inactive now; clubs in their pilot period that don't meet the activity bar yet (events with check-ins this term, registered members), most urgent when the pilot ends this term; and clubs at the line (active only on last term's record once this term is half over, or exactly at the member minimum). Each comes with plain-language reasons. Admins see every club; everyone else sees the clubs they lead or advise.",
+    "Which clubs are at risk — the same list as WSUSA's admin Overview, from the metrics layer: approved clubs that are Inactive now; clubs in their pilot period that don't meet the activity bar yet (events with check-ins this term, registered members), most urgent when the pilot ends this term; and clubs at the line (active only on last term's record once this term is half over, or exactly at the member minimum). Each comes with plain-language reasons. Admins see every club; an office's staff see that office's clubs (and any they lead); everyone else sees the clubs they lead or advise.",
   schema: z.object({}),
   async run({ actor, now }) {
     let clubIds: string[] | undefined;
     if (!isAdmin(actor)) {
       const roles = await db.roleAssignment.findMany({ where: { userId: actor.id, endedAt: null, role: { not: "MEMBER" } }, select: { clubId: true } });
-      clubIds = [...new Set(roles.map((r) => r.clubId))];
+      // Office staff oversee their office's clubs (lib/authz adminClubWhere), like the admin Overview shows them.
+      const overseen = isOfficeStaff(actor) ? await db.club.findMany({ where: adminClubWhere(actor), select: { id: true } }) : [];
+      clubIds = [...new Set([...roles.map((r) => r.clubId), ...overseen.map((c) => c.id)])];
       if (!clubIds.length) throw new ToolError("Club health is for club leaders, advisors and WSUSA admins. This person doesn't lead any clubs; get_club shows any one club's status.");
     }
     // AT RISK has one definition (lib/metrics clubsAtRisk); the Overview reads the same list.

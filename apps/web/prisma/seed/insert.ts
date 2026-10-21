@@ -3,6 +3,7 @@ import { activitySubject } from "@/lib/lake/subject";
 import { seatsFor } from "@/lib/roles/defaults";
 import type { ClubM, Ctx } from "./ctx";
 import { allEvents } from "./steps/events";
+import { officeRows, seededTaskOfficeId } from "./steps/offices";
 import type { RefRows } from "./steps/reference";
 import type { UserRows } from "./steps/people";
 
@@ -57,7 +58,9 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
   await insertMany("Major", ref.majors, (d) => db.major.createMany({ data: d }), log);
   await insertMany("Building", ref.buildings, (d) => db.building.createMany({ data: d }), log);
   await insertMany("Term", ref.terms, (d) => db.term.createMany({ data: d }), log);
+  await insertMany("Office", officeRows(ctx), (d) => db.office.createMany({ data: d }), log);
   await insertMany("User", [...users.values()], (d) => db.user.createMany({ data: d }), log);
+  await insertMany("OfficeMember", ctx.officeStaff, (d) => db.officeMember.createMany({ data: d }), log);
   await insertMany("PersonalDetails", r.personalDetails, (d) => db.personalDetails.createMany({ data: d }), log);
   await insertMany("UserMajor", r.userMajors, (d) => db.userMajor.createMany({ data: d }), log);
   await insertMany("Experience", r.experiences, (d) => db.experience.createMany({ data: d }), log);
@@ -70,6 +73,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     type: c.type,
     status: c.status,
     scope: c.scope,
+    officeId: c.officeId,
     collegeId: c.collegeId,
     departmentId: c.departmentId,
     requestedDepartmentName: c.def.requestedDepartmentName ?? null,
@@ -144,6 +148,9 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     lng: e.locationType === "CAMPUS" || e.locationType === "ADDRESS" ? e.lng : null, virtualUrl: e.virtualUrl, coverUrl: e.coverUrl, perks: e.perks,
     createdById: e.createdById, createdAt: e.createdAt, updatedAt: e.createdAt,
     serviceMinutes: e.serviceMinutes,
+    // The office's review (steps/events reviewStories); left out, an event was never reviewed.
+    riskFlags: e.riskFlags ?? [], reviewStatus: e.reviewStatus ?? "NONE", reviewNote: e.reviewNote ?? null, reviewedById: e.reviewedById ?? null, reviewedAt: e.reviewedAt ?? null,
+    ...(e.travel ? { travel: e.travel as unknown as Prisma.InputJsonValue } : {}),
   }));
   await insertMany("Event", events, (d) => db.event.createMany({ data: d }), log);
   const occs: Prisma.EventOccurrenceCreateManyInput[] = evs.flatMap((e) =>
@@ -192,7 +199,9 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
   await insertMany("Complaint", r.complaints, (d) => db.complaint.createMany({ data: d }), log);
   await insertMany("ComplaintNote", r.complaintNotes, (d) => db.complaintNote.createMany({ data: d }), log);
   await insertMany("ComplaintAccessLog", r.complaintAccess, (d) => db.complaintAccessLog.createMany({ data: d }), log);
-  await insertMany("Task", r.tasks, (d) => db.task.createMany({ data: d }), log);
+  // ADMINS tasks go to their club's office by the platform's rule (steps/offices seededTaskOfficeId).
+  const tasks = r.tasks.map((t) => ({ ...t, officeId: seededTaskOfficeId(ctx, t) }));
+  await insertMany("Task", tasks, (d) => db.task.createMany({ data: d }), log);
   await insertMany("Notification", r.notifications, (d) => db.notification.createMany({ data: d }), log);
   await insertMany("OutboxMessage", r.outbox, (d) => db.outboxMessage.createMany({ data: d }), log);
   // Every step's rows get the person they're about, by the same rule as lib/lake logActivity.

@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { Archive, BadgeCheck, CalendarX2, Hammer, History, Mail } from "lucide-react";
 import { loadVisibleClub } from "@/lib/clubs/context";
 import { clubMeetingPattern, clubMetricsFor, clubUpcomingEvents, shouldPromptForApp, viewerClubStates, visibleAnnouncementCount } from "@/lib/clubs/queries";
-import { getConfig } from "@/lib/config";
 import { INSTITUTION } from "@/lib/institution";
+import { officeById } from "@/lib/offices";
 import { fmtLongDate } from "@/lib/time";
 import { renewedThisYear } from "@/lib/domain/renewals";
 import { richToText } from "@/lib/rich/sanitize";
@@ -58,20 +58,21 @@ export default async function ClubPage({ params, searchParams }: Props) {
   const isPublic = approved || retired;
   const member = Boolean(access?.isMember);
 
-  const [states, promptForApp, metrics, events, announcementCount, cfg, meets, renewal] = await Promise.all([
+  const [states, promptForApp, metrics, events, announcementCount, office, meets, renewal] = await Promise.all([
     user ? viewerClubStates(user.id) : Promise.resolve(null),
     user && approved ? shouldPromptForApp(user.id) : Promise.resolve(false),
     clubMetricsFor(club.id),
     isPublic ? clubUpcomingEvents(club.id, user) : Promise.resolve([]),
     visibleAnnouncementCount(club.id, access),
-    getConfig(),
+    // The office that oversees the club (lib/offices): WSUSA, Campus Recreation, Fraternity & Sorority Life.
+    officeById(club.officeId),
     approved ? clubMeetingPattern(club.id, user) : Promise.resolve([] as string[]),
     approved ? renewedThisYear(club.id) : Promise.resolve(null),
   ]);
   const links = readSocialLinks(club.socialLinks);
   const subscribed = Boolean(states?.get(club.id)?.subscribed);
   const autoRegister = approved && Boolean(user) && sp.register === "1";
-  const office = cfg["wsusa.office"];
+  const officeLine = [office.email, office.phone].filter((x): x is string => Boolean(x));
 
   const details = [
     { label: "Club type", value: <span title={CLUB_TYPE_HINT[club.type]}>{CLUB_TYPE_LABEL[club.type]}</span> },
@@ -132,13 +133,36 @@ export default async function ClubPage({ params, searchParams }: Props) {
         ]
       : []),
     {
-      label: approved || retired ? "Approved by WSUSA" : "Started",
+      label: "Overseen by",
+      value: (
+        <>
+          <span className="font-medium text-ink">{office.name}</span>
+          {officeLine.length ? (
+            <span className="mt-0.5 block text-ink-3">
+              {office.email ? (
+                <a href={`mailto:${office.email}`} className="break-all text-brand-600 hover:underline">
+                  {office.email}
+                </a>
+              ) : null}
+              {office.email && office.phone ? " · " : null}
+              {office.phone ? (
+                <a href={`tel:${office.phone.replace(/[^\d+]/g, "")}`} className="whitespace-nowrap text-brand-600 hover:underline">
+                  {office.phone}
+                </a>
+              ) : null}
+            </span>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      label: approved || retired ? "Approved" : "Started",
       value: (
         <>
           {fmtLongDate(club.approvedAt ?? club.createdAt)}
           {/* The yearly renewal (lib/domain/renewals), only once the club has renewed for this academic year. */}
           {renewal ? (
-            <span className="mt-0.5 flex items-center gap-1 text-ink-3" title={`Renewed with WSUSA on ${fmtLongDate(renewal.at)}`}>
+            <span className="mt-0.5 flex items-center gap-1 text-ink-3" title={`Renewed with ${office.name} on ${fmtLongDate(renewal.at)}`}>
               <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" /> Re-registered {renewal.year}
             </span>
           ) : null}
@@ -167,7 +191,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
         ) : null}
         {!isPublic ? (
           <Callout tone="warning" icon={<Hammer />} title="This club is still being founded" className="mb-8">
-            Only its founders, advisor and {INSTITUTION.studentGovernment} admins can see this page. It goes public once {INSTITUTION.studentGovernment} approves the club.{" "}
+            Only its founders, advisor and {office.name} can see this page. It goes public once {office.name} approves the club.{" "}
             <Link href={`/clubs/${club.slug}/manage`} className="font-medium underline underline-offset-2">
               Continue setting it up
             </Link>

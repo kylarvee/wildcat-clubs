@@ -41,7 +41,7 @@ export function RenewalCard({ view }: { view: RenewalView }) {
           </h2>
           <Badge tone={status.tone}>{status.label}</Badge>
         </div>
-        <p className="mt-1 text-sm text-ink-3">WSUSA re-registers every club once a year. Once the required checks are green, confirm the club will be active and you&apos;re done.</p>
+        <p className="mt-1 text-sm text-ink-3">{view.office} re-registers its clubs once a year. Once the required checks are green, confirm the club will be active and you&apos;re done.</p>
       </div>
       <CardBody className="space-y-4">
         <CheckList title="Needed to renew" checks={view.checks.filter((c) => c.required)} />
@@ -51,7 +51,7 @@ export function RenewalCard({ view }: { view: RenewalView }) {
         <p id="renewal-reason" className="text-sm text-ink-3">
           {reason}
         </p>
-        <RenewButton clubId={view.club.id} clubName={view.club.name} year={window.year} disabled={!view.canRenew} describedBy="renewal-reason" />
+        <RenewButton clubId={view.club.id} clubName={view.club.name} office={view.office} year={window.year} disabled={!view.canRenew} describedBy="renewal-reason" />
       </CardFooter>
     </Card>
   );

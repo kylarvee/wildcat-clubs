@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { CalendarPlus, ListChecks, Wallet } from "lucide-react";
 import { db } from "@/lib/db";
-import { getConfig } from "@/lib/config";
+import { fundingOfficeForClub } from "@/lib/offices";
 import { getTerms } from "@/lib/terms";
 import { fmtMoney } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
@@ -52,7 +52,8 @@ export default async function NewRequestPage({ params, searchParams }: { params:
   termId ??= current?.id ?? terms.at(-1)!.id;
   const termOptions = terms.some((t) => t.id === termId) ? terms : [...terms, ...(await getTerms()).filter((t) => t.id === termId)].sort((a, b) => a.startsOn.getTime() - b.startsOn.getTime());
 
-  const [budget, cfg] = await Promise.all([loadClubTermBudget(club.id, termId), getConfig()]);
+  // The office that decides this club's funding: its own office when that office decides funding, else WSUSA.
+  const [budget, office] = await Promise.all([loadClubTermBudget(club.id, termId), fundingOfficeForClub(club.id)]);
   const lines = builderLines(budget);
   // ?from: the lines that request funded for less than they asked and that are still free to ask for.
   const open = new Map(lines.filter((l) => l.requestable).map((l) => [l.id, l]));
@@ -92,7 +93,8 @@ export default async function NewRequestPage({ params, searchParams }: { params:
           defaultSource={defaultFundingSource(club)}
           preselectEventId={focusEvent?.id ?? null}
           preselect={preselect}
-          reviewDays={cfg["wsusa.office"].reviewDays}
+          reviewDays={office.reviewDays}
+          office={office.name}
           minJustification={MIN_JUSTIFICATION}
         />
       ) : (

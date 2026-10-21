@@ -156,7 +156,7 @@ export default async function ClubSettingsPage({ params }: { params: Promise<{ s
           <CardHeader title="Reinstate" description={`Retired ${club.retiredAt ? fmtLongDate(club.retiredAt) : ""}.`} />
           <CardBody>
             <Link href={`/admin/clubs/${club.id}`} className="text-sm font-medium text-brand-600 hover:underline">
-              Open this club in WSUSA review to reinstate it
+              Open this club in Club approvals to reinstate it
             </Link>
           </CardBody>
         </Card>

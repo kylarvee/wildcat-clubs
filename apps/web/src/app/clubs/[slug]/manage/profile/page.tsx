@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { loadClubWorkspace } from "@/lib/clubs/context";
 import { workspaceTitle } from "@/components/founding/workspaceTitle";
 import { fileUrl } from "@/lib/domain/files";
+import { officeById } from "@/lib/offices";
 import { fmtLongDate } from "@/lib/time";
 import { PageHeader } from "@/components/ui/layout";
 import { NoPermission } from "@/components/workspace/NoPermission";
@@ -31,11 +32,13 @@ export default async function ClubProfilePage({ params }: { params: Promise<{ sl
   ]);
 
   const founding = club.status === "DRAFT" || club.status === "CHANGES_REQUESTED";
+  // The office that reviews it (lib/offices): its scope and category decide it while the club is founded.
+  const office = await officeById(club.officeId);
   const rows: ProfileDocRow[] = docs.map((d) => ({
     id: d.id,
     kind: d.kind,
     title: d.kind === "OTHER" ? d.title : `${d.kind === "CONSTITUTION" ? "Constitution" : "Bylaws"}${d.version > 0 ? ` (v${d.version})` : " (custom)"}`,
-    statusLabel: d.status === "PENDING_APPROVAL" ? "Waiting for WSUSA" : d.kind === "OTHER" ? (d.file?.visibility === "MEMBERS" ? "Members only" : "Public") : "In effect",
+    statusLabel: d.status === "PENDING_APPROVAL" ? `Waiting for ${office.shortName}` : d.kind === "OTHER" ? (d.file?.visibility === "MEMBERS" ? "Members only" : "Public") : "In effect",
     statusTone: d.status === "PENDING_APPROVAL" ? "info" : d.kind === "OTHER" ? "neutral" : "success",
     fileUrl: d.fileId ? fileUrl(d.fileId) : null,
     meta: `${d.source === "BUILDER" ? "Constitution builder" : `Uploaded by ${d.createdBy.name}`} · ${fmtLongDate(d.createdAt)}`,
@@ -45,7 +48,7 @@ export default async function ClubProfilePage({ params }: { params: Promise<{ sl
     <div className="space-y-6">
       <PageHeader
         title="Club profile"
-        description={founding ? "WSUSA reviews this profile, so make it clear and complete. It goes public when your club is approved." : "This is your club's public face on the clubs list, your club page and the network map."}
+        description={founding ? `${office.name} reviews this profile, so make it clear and complete. It goes public when your club is approved. Where it sits and its category decide which office oversees it.` : "This is your club's public face on the clubs list, your club page and the network map."}
       />
       <ProfileForm
         club={{

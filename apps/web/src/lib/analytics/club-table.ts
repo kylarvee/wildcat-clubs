@@ -58,7 +58,7 @@ export const STAGES: { key: ClubStage; label: string; hint: string }[] = [
   { key: "active", label: STANDING_LABEL.active, hint: STANDING_HINT.active },
   { key: "pilot", label: STANDING_LABEL.pilot, hint: STANDING_HINT.pilot },
   { key: "inactive", label: STANDING_LABEL.inactive, hint: STANDING_HINT.inactive },
-  { key: "founding", label: "In founding", hint: "Draft, in WSUSA review, or sent back for changes" },
+  { key: "founding", label: "In founding", hint: "Draft, in review, or sent back for changes" },
   { key: "retired", label: CLUB_STATUS_LABEL.RETIRED, hint: "Wound down; history kept" },
   { key: "rejected", label: CLUB_STATUS_LABEL.REJECTED, hint: "WSUSA decided not to approve it" },
 ];

@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth/session";
-import { can, ROLE_LABEL } from "@/lib/authz";
+import { adminClubWhere, can, CAPABILITIES, ROLE_LABEL, type Capability } from "@/lib/authz";
 import { listRequirementsForAdmin, requirementCompliance } from "@/lib/domain/requirements";
 import { toCsv } from "@/lib/attendance/matrix";
 import { AWAITING_GRADE_LABEL } from "@/lib/authz/requirement-rules";
@@ -14,7 +14,8 @@ export async function GET(req: Request) {
 
   const sp = Object.fromEntries(new URL(req.url).searchParams.entries());
   const f = parseFilter(sp);
-  const [reqs, rows] = await Promise.all([listRequirementsForAdmin(), requirementCompliance()]);
+  // An office's staff export their own office's requirements and clubs.
+  const [reqs, rows] = await Promise.all([listRequirementsForAdmin(user), requirementCompliance(new Date(), { clubWhere: adminClubWhere(user) })]);
   const columns = reqs.filter((r) => r.active && (!f.req || r.id === f.req));
   const shown = applyFilter(rows, f);
   const label = (c: { state: string; dueAt: Date } | undefined) =>
@@ -29,7 +30,16 @@ export async function GET(req: Request) {
             : `Due by ${fmtDate(c.dueAt, "yyyy-MM-dd")}`;
   const csv = toCsv([
     ["Name", "Email", "Club", "Role", "Seat", "Role since", ...columns.map((c) => c.name), "Permissions"],
-    ...shown.map((r) => [r.person.name, r.person.email, r.club.name, ROLE_LABEL[r.role], r.seat ?? "", fmtDate(r.startedAt, "yyyy-MM-dd"), ...columns.map((c) => label(r.cells[c.id])), r.paused ? "Paused" : "On"]),
+    ...shown.map((r) => [
+      r.person.name,
+      r.person.email,
+      r.club.name,
+      ROLE_LABEL[r.role],
+      r.seat ?? "",
+      fmtDate(r.startedAt, "yyyy-MM-dd"),
+      ...columns.map((c) => label(r.cells[c.id])),
+      r.paused ? "Paused" : r.pausedCapabilities?.length ? `${r.pausedCapabilities.map((c) => (c in CAPABILITIES ? CAPABILITIES[c as Capability].label : c)).join(", ")} paused` : "On",
+    ]),
   ]);
   return new Response(csv, {
     headers: {

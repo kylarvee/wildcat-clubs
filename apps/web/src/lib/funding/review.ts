@@ -2,20 +2,22 @@ import type { Prisma } from "@prisma/client";
 import { campusDate, fmtLongDate, fmtMoney, inCampusTime } from "@/lib/time";
 
 /**
- * When WSUSA's funding work is late, as one rule (pure and client-safe). The
- * "Funding follow-ups" job (lib/jobs/funding) reminds the admins, the WSUSA
- * queue (lib/analytics/admin wsusaQueue) counts these as urgent rows, and the
- * admin funding pages mark them. Two things can be late:
+ * When an office's funding work is late, as one rule (pure and client-safe).
+ * The "Funding follow-ups" job (lib/jobs/funding) reminds the deciding
+ * office's staff, the office queue (lib/analytics/admin officeQueue) counts
+ * these as urgent rows, and the admin funding pages mark them. Two things can
+ * be late:
  *
- *  - a request in WSUSA review for longer than the office's review time
- *    (`wsusa.office.reviewDays`). It's counted in business days, Monday to
- *    Friday in campus time, the unit clubs are told to expect (holidays still
- *    count as business days);
+ *  - a request waiting for a decision longer than the deciding office's
+ *    review time (Office.reviewDays: WSUSA's, or the club's office's when it
+ *    decides funding). It's counted in business days, Monday to Friday in
+ *    campus time, the unit clubs are told to expect (holidays still count as
+ *    business days);
  *  - an invoice still open past its task's due date (INVOICE_DUE_DAYS after
  *    the approval that created it).
  */
 
-/** Days WSUSA gives itself to get approved money through the university finance system. */
+/** Days the deciding office gives itself to get approved money through the university finance system. */
 export const INVOICE_DUE_DAYS = 10;
 
 const DAY = 86_400_000;
@@ -39,7 +41,7 @@ export function businessDaysSince(from: Date, now: Date): number {
   return n;
 }
 
-/** Has a request submitted at `submittedAt` waited longer than WSUSA's review time? */
+/** Has a request submitted at `submittedAt` waited longer than its office's review time? */
 export function pastReviewTime(submittedAt: Date, now: Date, reviewDays: number): boolean {
   return businessDaysSince(submittedAt, now) > reviewDays;
 }
@@ -62,9 +64,10 @@ export function reviewCutoff(now: Date, reviewDays: number): Date {
 }
 
 /**
- * WSUSA's open funding tasks, on time or late (Task where clauses for the
- * queue, the job and the funding page's counts). A request's APPROVAL task
- * opens the moment it's submitted; an invoice's task carries its due date.
+ * Open funding tasks, on time or late (Task where clauses for the queue, the
+ * job and the funding page's counts; callers pair each with its office's
+ * review time). A request's APPROVAL task opens the moment it's submitted; an
+ * invoice's task carries its due date.
  */
 export function fundingTasks(kind: "review" | "invoice", late: boolean, now: Date, reviewDays: number): Prisma.TaskWhereInput {
   if (kind === "review") {
@@ -85,7 +88,7 @@ export function reviewLateNotice(r: { clubName: string; title: string; cents: nu
   const days = businessDaysSince(r.submittedAt, now);
   return {
     title: `Past review time: ${r.clubName} — ${r.title}`,
-    body: `${fmtMoney(r.cents)}, in WSUSA review since ${fmtLongDate(r.submittedAt)} (${days} business days). Clubs are told to expect a decision within about ${r.reviewDays}.`,
+    body: `${fmtMoney(r.cents)}, waiting for a decision since ${fmtLongDate(r.submittedAt)} (${days} business days). Clubs are told to expect one within about ${r.reviewDays}.`,
   };
 }
 

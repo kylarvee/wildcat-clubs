@@ -9,22 +9,24 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
 import { Input } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
-import { toast } from "@/components/ui/misc";
+import { Switch, toast } from "@/components/ui/misc";
 import { withUnit } from "@/components/system/config-copy";
 import { saveConfigAction } from "@/app/system/actions";
 
 export type RuleField =
   | { kind: "int"; key: ConfigKey; label: string; help: string; unit: string; min: number; max: number; value: number; defaultValue: number }
   | { kind: "url"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string }
-  | { kind: "email"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string };
+  | { kind: "email"; key: ConfigKey; label: string; help: string; placeholder: string; value: string; defaultValue: string }
+  | { kind: "bool"; key: ConfigKey; label: string; help: string; value: boolean; defaultValue: boolean };
 
 /** Which plain-words summary to show above the fields (computed from what's typed, so edits preview live). */
-export type RuleSummary = "activity" | "reviews" | "checkin" | null;
+export type RuleSummary = "activity" | "reviews" | "checkin" | "events" | null;
 
 type Values = Record<string, string>;
 
 function fieldError(f: RuleField, raw: string): string | null {
   const v = raw.trim();
+  if (f.kind === "bool") return null;
   if (f.kind === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : "Enter an email address, like wsusa@weber.edu.";
   if (f.kind === "url") {
     if (v === "") return null;
@@ -80,7 +82,8 @@ export function RulesSection({
     setFormError(null);
     setPending(true);
     try {
-      const payload = Object.fromEntries(dirtyKeys.map((k) => [k, values[k].trim()]));
+      // Switches save true/false; everything else the trimmed text (the server validates it).
+      const payload = Object.fromEntries(dirtyKeys.map((k) => [k, fields.find((f) => f.key === k)?.kind === "bool" ? values[k] === "true" : values[k].trim()]));
       const r = await saveConfigAction(payload);
       if (!r.ok) {
         setFormError(r.error);
@@ -118,33 +121,47 @@ export function RulesSection({
                   </p>
                 </div>
                 <div className="min-w-0">
-                  <div className="relative">
-                    <Input
-                      id={fid}
-                      name={f.key}
-                      value={values[f.key]}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setValues((s) => ({ ...s, [f.key]: v }));
-                        if (err) setErrors((s) => ({ ...s, [f.key]: null }));
-                      }}
-                      inputMode={f.kind === "int" ? "numeric" : f.kind}
-                      type={f.kind === "int" ? "text" : f.kind}
-                      placeholder={f.kind === "int" ? undefined : f.placeholder}
-                      autoComplete="off"
-                      aria-invalid={err ? true : undefined}
-                      aria-describedby={`${fid}-help ${fid}-meta`}
-                      className={cn(f.kind === "int" && "pr-20 tabular-nums")}
-                    />
-                    {f.kind === "int" ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-3">{f.unit}</span> : null}
-                  </div>
+                  {f.kind === "bool" ? (
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        id={fid}
+                        checked={values[f.key] === "true"}
+                        onCheckedChange={(on) => setValues((s) => ({ ...s, [f.key]: String(on) }))}
+                        aria-describedby={`${fid}-help ${fid}-meta`}
+                      />
+                      <span className="text-sm font-medium text-ink" aria-hidden>
+                        {values[f.key] === "true" ? "On" : "Off"}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Input
+                        id={fid}
+                        name={f.key}
+                        value={values[f.key]}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setValues((s) => ({ ...s, [f.key]: v }));
+                          if (err) setErrors((s) => ({ ...s, [f.key]: null }));
+                        }}
+                        inputMode={f.kind === "int" ? "numeric" : f.kind}
+                        type={f.kind === "int" ? "text" : f.kind}
+                        placeholder={f.kind === "int" ? undefined : f.placeholder}
+                        autoComplete="off"
+                        aria-invalid={err ? true : undefined}
+                        aria-describedby={`${fid}-help ${fid}-meta`}
+                        className={cn(f.kind === "int" && "pr-20 tabular-nums")}
+                      />
+                      {f.kind === "int" ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-3">{f.unit}</span> : null}
+                    </div>
+                  )}
                   <div id={`${fid}-meta`} className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
                     {err ? (
                       <span className="text-danger">{err}</span>
                     ) : (
                       <span className="text-ink-3">
-                        Default: {f.kind === "int" ? withUnit(f.defaultValue, f.unit) : f.defaultValue === "" ? "blank" : f.defaultValue}
-                        {f.kind === "int" ? ` · allowed ${f.min}–${f.max}` : ""}
+                        Default: {f.kind === "int" ? withUnit(f.defaultValue, f.unit) : f.kind === "bool" ? (f.defaultValue ? "On" : "Off") : f.defaultValue === "" ? "blank" : f.defaultValue}
+                        {f.kind === "int" ? ` · allowed ${f.min.toLocaleString("en-US")}–${f.max.toLocaleString("en-US")}` : ""}
                       </span>
                     )}
                     {!isDefault ? (
@@ -234,6 +251,18 @@ function Summary({ kind, values }: { kind: Exclude<RuleSummary, null>; values: V
         <b>{stars === null ? "…" : `${stars}★`}</b> or lower within <b>{u("reviews.bombingWindowHours", "hours")}</b>. A review reported by <b>{u("reviews.flagThreshold", "students")}</b> becomes an admin task.
       </>
     );
+  } else if (kind === "events") {
+    text =
+      values["events.riskReview"] === "true" ? (
+        <>
+          A club event that involves an outdoor common space, people under 18, travel, more than <b>{u("events.largeCrowd", "people")}</b>, collecting money or alcohol waits for its club&apos;s office to review it
+          before it&apos;s posted. Everything else posts right away.
+        </>
+      ) : (
+        <>
+          Review is <b>off</b>: every event posts right away. The Events Builder still asks what each event involves (more than <b>{u("events.largeCrowd", "people")}</b> counts as a large crowd) and saves the answers.
+        </>
+      );
   } else {
     text = (
       <>

@@ -34,7 +34,7 @@ function greeting(now: Date) {
 /**
  * Your home base, in three columns that stack on a phone:
  *   left    your switchboard — your clubs (leaders' clubs first, as cards),
- *           or for WSUSA staff the shared admin queue;
+ *           or for WSUSA and office staff their office's shared queue;
  *   middle  what only the dashboard shows — announcements from WSUSA and your
  *           clubs (staff: what WSUSA requires, and WSUSA's own posts);
  *   right   previews of tools with their own pages — tasks (required first),
@@ -49,6 +49,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const alumni = user.status === "ALUMNI";
   const faculty = user.kind === "FACULTY_STAFF";
   const admin = isAdmin(user);
+  const staff = d.staff;
   // Students with no clubs get the welcome steps; faculty find their clubs through advising.
   const newHere = !alumni && !faculty && d.clubs.length === 0;
 
@@ -56,7 +57,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     <Container size="xl">
       <PageHeader
         title={`${greeting(d.now)}, ${first}`}
-        description={[fmtDate(d.now, "EEEE, MMMM d"), d.term?.name, admin ? `${INSTITUTION.studentGovernment} administrator` : null].filter(Boolean).join(" · ")}
+        description={[fmtDate(d.now, "EEEE, MMMM d"), d.term?.name, admin ? `${INSTITUTION.studentGovernment} administrator` : staff ? `${d.queueName} staff` : null].filter(Boolean).join(" · ")}
       />
 
       {/* Always mounted: after a one-tap check-in the occurrence leaves `live`, and the prompt keeps its "You're checked in" card. */}
@@ -74,8 +75,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
       <div className="flex flex-wrap items-start gap-6">
         <div className="min-w-0 flex-[1_1_260px] space-y-6">
-          {admin ? <AdminQueue rows={d.queue} /> : null}
-          {!admin || d.clubs.length ? <YourClubs clubs={d.clubs} now={d.now} canCreate={can(user, "club.create")} alumni={alumni} faculty={faculty} /> : null}
+          {staff ? <AdminQueue rows={d.queue} name={d.queueName} umbrella={admin} /> : null}
+          {!staff || d.clubs.length ? <YourClubs clubs={d.clubs} now={d.now} canCreate={can(user, "club.create")} alumni={alumni} faculty={faculty} /> : null}
         </div>
 
         <div className="min-w-0 flex-[999_1_520px] space-y-8">
@@ -89,8 +90,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             tasks={d.tasks}
             viewerId={user.id}
             now={d.now}
-            title={admin ? "Your tasks" : "Tasks"}
-            note={admin ? "Work shared by the admin team stays in the WSUSA queue." : undefined}
+            title={staff ? "Your tasks" : "Tasks"}
+            note={staff ? `Work shared by the ${d.queueName} team stays in the ${d.queueName} queue.` : undefined}
           />
           {d.officers.length ? <OfficerRequirements clubs={d.officers} /> : null}
           <WeekAgenda items={d.agenda} now={d.now} admin={admin} />

@@ -16,7 +16,7 @@ import { renewClubAction } from "@/components/renewals/actions";
  * active this academic year), an optional note for WSUSA, and done. Off, with
  * the reason beside it on the card, until the required checks pass.
  */
-export function RenewButton({ clubId, clubName, year, disabled, describedBy }: { clubId: string; clubName: string; year: string; disabled: boolean; describedBy?: string }) {
+export function RenewButton({ clubId, clubName, office = "WSUSA", year, disabled, describedBy }: { clubId: string; clubName: string; office?: string; year: string; disabled: boolean; describedBy?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -57,10 +57,10 @@ export function RenewButton({ clubId, clubName, year, disabled, describedBy }: {
           <BadgeCheck className="h-4 w-4" aria-hidden /> {label}
         </Button>
       </DialogTrigger>
-      <DialogContent title={`Renew ${clubName} for ${year}`} description="This re-registers the club with WSUSA for the academic year. Everyone's renewal task closes, and the club page shows it right away.">
+      <DialogContent title={`Renew ${clubName} for ${year}`} description={`This re-registers the club with ${office} for the academic year. Everyone's renewal task closes, and the club page shows it right away.`}>
         <div className="space-y-4">
           <Checkbox label={activeConfirmation(clubName)} checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-          <Field label="Note for WSUSA" hint="Optional. Kept with the renewal, for anything WSUSA should know, like a new meeting time or a leadership change coming up.">
+          <Field label={`Note for ${office}`} hint={`Optional. Kept with the renewal, for anything ${office} should know, like a new meeting time or a leadership change coming up.`}>
             {(id) => <Textarea id={id} value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={RENEWAL_NOTE_MAX} />}
           </Field>
           {error ? <Callout tone="danger">{error}</Callout> : null}

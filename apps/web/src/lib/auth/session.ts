@@ -3,7 +3,7 @@ import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createHash, randomBytes } from "node:crypto";
-import type { ClientKind, PlatformRole, UserKind, UserStatus } from "@prisma/client";
+import type { ClientKind, PlatformRole, Prisma, UserKind, UserStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 
 /**
@@ -26,6 +26,14 @@ export type Actor = {
   status: UserStatus;
   avatarColor: string;
   avatarUrl: string | null;
+  /**
+   * The offices (lib/offices) whose staff this person is, besides the
+   * umbrella: its staff are the platform admins, so it's never listed.
+   * Office staff run the admin console for their own office's clubs.
+   */
+  officeIds: string[];
+  /** The ones among officeIds that decide their clubs' funding (lib/authz can "admin.funding"). */
+  fundingOfficeIds: string[];
 };
 
 const actorSelect = {
@@ -38,7 +46,15 @@ const actorSelect = {
   status: true,
   avatarColor: true,
   avatarUrl: true,
-} as const;
+  officeMemberships: { where: { office: { umbrella: false } }, select: { officeId: true, office: { select: { decidesFunding: true } } } },
+} satisfies Prisma.UserSelect;
+
+/** A user row read with actorSelect, as the Actor every permission check takes. */
+function toActor(row: Prisma.UserGetPayload<{ select: typeof actorSelect }>): Actor {
+  const { officeMemberships, ...user } = row;
+  const offices = [...officeMemberships].sort((a, b) => a.officeId.localeCompare(b.officeId));
+  return { ...user, officeIds: offices.map((m) => m.officeId), fundingOfficeIds: offices.filter((m) => m.office.decidesFunding).map((m) => m.officeId) };
+}
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -90,7 +106,7 @@ async function actorFromToken(token: string | undefined | null): Promise<Actor |
     await db.session.update({ where: { id: session.id }, data: { lastUsedAt: new Date() } });
     await db.user.update({ where: { id: session.user.id }, data: { lastSeenAt: new Date() } });
   }
-  return session.user;
+  return toActor(session.user);
 }
 
 /** The signed-in user for this request (cookie or bearer token), or null. */
@@ -116,5 +132,6 @@ export async function requireUser(returnTo?: string): Promise<Actor> {
 
 /** Re-read an actor by id (used by jobs and the AI assistant acting for a user). */
 export async function loadActor(userId: string): Promise<Actor | null> {
-  return db.user.findUnique({ where: { id: userId }, select: actorSelect });
+  const row = await db.user.findUnique({ where: { id: userId }, select: actorSelect });
+  return row ? toActor(row) : null;
 }

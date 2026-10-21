@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { wsusaQueue } from "@/lib/analytics/admin";
+import { officeQueue, queueScopeOf, type OfficeQueue } from "@/lib/analytics/admin";
 import { emailSender, sendEmail, type DeliveryResult } from "@/lib/integrations/email";
 import { pushSender } from "@/lib/integrations/push";
 import { DIGEST_KINDS, digestOn, readPrefs } from "@/components/notifications/catalog";
@@ -9,12 +9,12 @@ import { DIGEST_KEY_PREFIX, DIGEST_LIST_MAX, DIGEST_LOOKBACK_MS, digestDue, dige
 /**
  * The "Send queued messages" scheduled job (lib/jobs/tick), every ~15 minutes:
  *
- *  - WSUSA's daily digest, with the first run at or after 7 AM campus time
- *    (lib/jobs/digest-rules): one email per admin who keeps email and the
- *    digest on, about what's waiting in the WSUSA queue and the digest-kind
- *    notices held back since the last one. Its ReminderLog key
- *    (digest:admins:<campus date>) is claimed before anything is sent, so a
- *    second run that day sends nothing.
+ *  - The daily digest, with the first run at or after 7 AM campus time
+ *    (lib/jobs/digest-rules): one email per admin or office staffer who
+ *    keeps email and the digest on, about what's waiting in their office's
+ *    queue (WSUSA's for the admins) and the digest-kind notices held back
+ *    since the last one. Its ReminderLog key (digest:admins:<campus date>) is
+ *    claimed before anything is sent, so a second run that day sends nothing.
  *  - The queue: big sends (lib/domain/notify, more than QUEUE_OVER people)
  *    record their emails and pushes as QUEUED outbox rows. Each run sends
  *    the oldest QUEUE_BATCH of them and marks each SENT, MOCKED (integration
@@ -40,12 +40,12 @@ export async function runNotificationJobs(now: Date = new Date()): Promise<strin
   const sent = queue.emails + queue.pushes;
   const parts = [
     digest.state === "sent"
-      ? `Sent WSUSA's daily digest to ${plural(digest.admins, "admin")}`
+      ? `Sent the daily digest to ${plural(digest.admins, "admin or office staffer", "admins and office staff")}`
       : digest.state === "done"
-        ? "WSUSA's daily digest already went out today"
+        ? "The daily digest already went out today"
         : digest.state === "empty"
-          ? "Nothing was waiting on WSUSA, so there was no digest today"
-          : "WSUSA's daily digest goes out after 7 AM",
+          ? "Nothing was waiting on WSUSA or any office, so there was no digest today"
+          : "The daily digest goes out after 7 AM",
     sent
       ? `sent ${plural(sent, "queued message")} (${[queue.emails ? plural(queue.emails, "email") : null, queue.pushes ? plural(queue.pushes, "push", "pushes") : null].filter(Boolean).join(", ")}${queue.mocked ? `; ${queue.mocked === sent ? "all" : queue.mocked.toLocaleString("en-US")} recorded in the outbox in mock mode` : ""}${queue.failed ? `; ${queue.failed.toLocaleString("en-US")} failed` : ""})`
       : "no messages were waiting to send",
@@ -107,19 +107,34 @@ export async function sendAdminDigest(now: Date = new Date()): Promise<DigestRun
 
   const since = previous && previous.sentAt > new Date(now.getTime() - 7 * 86_400_000) ? previous.sentAt : null;
   const from = since ?? new Date(now.getTime() - DIGEST_LOOKBACK_MS);
-  const [admins, queue] = await Promise.all([
-    db.user.findMany({ where: { platformRole: { in: ["ADMIN", "SYSADMIN"] }, status: "ACTIVE", emailNotifications: true }, select: { id: true, email: true, notificationPrefs: true } }),
-    wsusaQueue(),
-  ]);
+  // Platform admins read WSUSA's queue; an office's staff read their own office's.
+  const readers = await db.user.findMany({
+    where: { status: "ACTIVE", emailNotifications: true, OR: [{ platformRole: { in: ["ADMIN", "SYSADMIN"] } }, { officeMemberships: { some: { office: { umbrella: false } } } }] },
+    select: { id: true, email: true, notificationPrefs: true, platformRole: true, officeMemberships: { where: { office: { umbrella: false } }, select: { officeId: true } } },
+  });
+  // One queue per distinct scope: every admin shares WSUSA's.
+  const queues = new Map<string, Promise<OfficeQueue & { name: string }>>();
+  const queueOf = (r: (typeof readers)[number]) => {
+    const all = r.platformRole === "ADMIN" || r.platformRole === "SYSADMIN";
+    const officeIds = r.officeMemberships.map((m) => m.officeId).sort();
+    const key = all ? "*" : officeIds.join(",");
+    if (!queues.has(key))
+      queues.set(
+        key,
+        queueScopeOf({ all, officeIds }).then(async (c) => ({ ...(await officeQueue(c.scope, now)), name: c.name })),
+      );
+    return queues.get(key)!;
+  };
   const appUrl = process.env.APP_URL ?? "http://localhost:3000";
   let sent = 0;
-  for (const a of admins.filter((x) => digestOn(readPrefs(x.notificationPrefs)))) {
+  for (const a of readers.filter((x) => digestOn(readPrefs(x.notificationPrefs)))) {
     const where = { userId: a.id, kind: { in: DIGEST_KINDS }, createdAt: { gte: from, lte: now } };
-    const [held, count] = await Promise.all([
+    const [held, count, queue] = await Promise.all([
       db.notification.findMany({ where, orderBy: { createdAt: "asc" }, take: DIGEST_LIST_MAX, select: { title: true, createdAt: true } }),
       db.notification.count({ where }),
+      queueOf(a),
     ]);
-    const mail = digestEmail({ rows: queue.rows, notices: held, more: Math.max(0, count - held.length), since, now, appUrl });
+    const mail = digestEmail({ rows: queue.rows, notices: held, more: Math.max(0, count - held.length), since, now, appUrl, office: queue.name });
     if (!mail) continue;
     await sendEmail({ to: a.email, subject: mail.subject, body: mail.body, href: mail.href });
     sent++;
