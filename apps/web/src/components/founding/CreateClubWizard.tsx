@@ -6,11 +6,12 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, GraduationCap, Handshake, Loader2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Callout } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { SearchSelect, type SearchOption } from "@/components/founding/SearchSelect";
-import { FOUNDING_TYPES, SCOPES, type FoundingType } from "@/components/founding/copy";
+import { SimilarClubs } from "@/components/founding/SimilarClubs";
+import { FORMING_NOTE, FOUNDING_TYPES, SCOPES, type FoundingType } from "@/components/founding/copy";
 import { createClubAction } from "@/app/clubs/new/actions";
 
 const OTHER = "__other__";
@@ -55,6 +56,7 @@ export function CreateClubWizard({
   const [focus, setFocus] = useState<string | null>(null);
   const [focusOther, setFocusOther] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  const [forming, setForming] = useState(false);
 
   const typeInfo = FOUNDING_TYPES.find((t) => t.value === type) ?? null;
   const steps = useMemo(() => (typeInfo?.department === "none" ? ["Club type", "Profile essentials"] : ["Club type", "Department", "Profile essentials"]), [typeInfo]);
@@ -103,6 +105,7 @@ export function CreateClubWizard({
         focusMajorId: focus && focus !== OTHER ? focus : null,
         focusOther: focus === OTHER ? focusOther : null,
         contactEmail,
+        listedAsForming: forming,
       });
       if (!r.ok) return setError(r.error);
       router.push(`/clubs/${r.data.slug}/manage?created=1`);
@@ -234,6 +237,7 @@ export function CreateClubWizard({
             <Field label="Short description" required hint={`${short.length}/200 · One sentence students see on the clubs list.`}>
               {(id) => <Textarea id={id} value={short} onChange={(e) => setShort(e.target.value.slice(0, 200))} rows={2} placeholder="We build robots, compete regionally, and teach anyone who wants to learn." />}
             </Field>
+            <SimilarClubs name={name} description={short} canRevive={!founderIsStaff} />
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-ink">
                 Where does your club sit? <span className="text-danger">*</span>
@@ -283,6 +287,13 @@ export function CreateClubWizard({
             <Field label="Club Google account (optional)" hint="The shared account your club uses for Drive, Calendar and Chat. You can add it later in Settings.">
               {(id) => <Input id={id} type="email" inputMode="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="robotics.club@weber.edu" autoComplete="off" />}
             </Field>
+            <Checkbox
+              checked={forming}
+              onChange={(e) => setForming(e.target.checked)}
+              label="List this club as forming"
+              description={FORMING_NOTE}
+              className="rounded-lg border border-line-2 p-3"
+            />
             <Callout tone="brand" title={founderIsStaff ? "You'll be the club's advisor" : "You'll be the club's President"}>
               {founderIsStaff
                 ? "Faculty and staff can't hold student roles, so you'll start as advisor. Invite a student to be President from the org chart once students join."

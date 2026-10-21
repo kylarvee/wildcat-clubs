@@ -4,12 +4,13 @@ import { db } from "@/lib/db";
 import { emailKind } from "@/lib/institution";
 import { logActivity } from "@/lib/lake/activity";
 import { openAdvisorInviteTasks } from "@/lib/domain/advisors";
+import { linkCofounderInvites } from "@/lib/domain/cofounders";
 
 /**
  * The single path by which accounts come into existence. Google sign-in (web
  * and mobile) and test personas all land here, so every new account gets the
  * same treatment: kind from email domain, a unique handle, and any pending
- * advisor invites linked to it.
+ * advisor and co-founder invites linked to it.
  */
 export async function findOrCreateUserByEmail(input: { email: string; name: string; avatarUrl?: string | null }) {
   const email = input.email.trim().toLowerCase();
@@ -49,13 +50,14 @@ export function newCalendarToken() {
   return randomBytes(32).toString("base64url");
 }
 
-/** Links advisor invites sent before this person had an account, and puts them in their task inbox. */
+/** Links advisor and co-founder invites sent before this person had an account, and puts them in their task inbox. */
 async function linkPendingInvites(userId: string, email: string) {
   await db.advisorInvite.updateMany({
     where: { email: { equals: email, mode: "insensitive" }, status: "PENDING", inviteeId: null },
     data: { inviteeId: userId },
   });
   await openAdvisorInviteTasks(userId);
+  await linkCofounderInvites(userId, email);
 }
 
 async function uniqueHandle(base: string): Promise<string> {

@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Archive, BadgeCheck, CalendarX2, Hammer, History, Mail } from "lucide-react";
-import { loadVisibleClub } from "@/lib/clubs/context";
+import { getCurrentUser } from "@/lib/auth/session";
+import { getClubAccess } from "@/lib/authz";
+import { canAskToRevive, canSeeFormingClub } from "@/lib/authz/founding";
+import { clubIsPublic, getClubBySlug, loadVisibleClub } from "@/lib/clubs/context";
+import { foundersOf } from "@/lib/clubs/founding";
+import { db } from "@/lib/db";
+import { openRevivalRequest } from "@/lib/domain/clubs";
+import { isListedForming } from "@/lib/founding/rules";
 import { clubMeetingPattern, clubMetricsFor, clubUpcomingEvents, shouldPromptForApp, viewerClubStates, visibleAnnouncementCount } from "@/lib/clubs/queries";
 import { INSTITUTION } from "@/lib/institution";
 import { officeById } from "@/lib/offices";
@@ -24,11 +32,33 @@ import { ClubResources } from "@/components/clubs/ClubResources";
 import { ClubStats } from "@/components/clubs/ClubStats";
 import { EventList } from "@/components/clubs/EventList";
 import { CLUB_CATEGORY_LABEL, CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, JOIN_POLICY_LABEL, readSocialLinks, SOCIAL_LABEL } from "@/components/clubs/labels";
+import { FormingClubView } from "@/components/clubs/FormingClubView";
+import { AskToReviveDialog } from "@/components/founding/AskToReviveDialog";
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
+/**
+ * A club that's still being founded, seen from outside its founding team:
+ * the minimal forming page when it's listed as forming and the viewer is
+ * signed in (lib/authz/founding), else not found. Its founders and the office
+ * get the usual page (with ?preview=forming, a founder sees the forming one).
+ * Null when the usual page applies.
+ */
+async function formingPage(slug: string, preview: boolean) {
+  const club = await getClubBySlug(slug);
+  if (!club || clubIsPublic(club.status)) return null;
+  const user = await getCurrentUser();
+  const access = user ? await getClubAccess(user, club.id) : null;
+  // The founding team (and its office) get the usual page.
+  if ((access?.isLeader || access?.isMember) && !(preview && isListedForming(club))) return null;
+  if (!canSeeFormingClub(user, club)) notFound();
+  return { club, user: user!, preview: Boolean(access?.isLeader) };
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
+  const forming = await formingPage(slug, false);
+  if (forming) return { title: forming.club.name, description: forming.club.shortDescription || `${forming.club.name} is forming at ${INSTITUTION.name}.`, robots: { index: false } };
   const { club } = await loadVisibleClub(slug);
   const description = club.shortDescription || richToText(club.descriptionHtml, 160) || `${club.name}, a student club at ${INSTITUTION.name}.`;
   return { title: club.name, description, openGraph: { title: club.name, description } };
@@ -51,6 +81,15 @@ function PageSection({ id, title, action, children }: { id: string; title: React
 export default async function ClubPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
+  const forming = await formingPage(slug, sp.preview === "forming");
+  if (forming) {
+    const [founders, office, follow] = await Promise.all([
+      foundersOf([forming.club.id]),
+      officeById(forming.club.officeId),
+      db.calendarSubscription.findUnique({ where: { userId_clubId: { userId: forming.user.id, clubId: forming.club.id } }, select: { clubId: true } }),
+    ]);
+    return <FormingClubView club={forming.club} founders={founders.get(forming.club.id) ?? []} office={office.name} following={Boolean(follow)} preview={forming.preview} />;
+  }
   const { club, user, access } = await loadVisibleClub(slug);
 
   const approved = club.status === "APPROVED";
@@ -58,7 +97,7 @@ export default async function ClubPage({ params, searchParams }: Props) {
   const isPublic = approved || retired;
   const member = Boolean(access?.isMember);
 
-  const [states, promptForApp, metrics, events, announcementCount, office, meets, renewal] = await Promise.all([
+  const [states, promptForApp, metrics, events, announcementCount, office, meets, renewal, revival] = await Promise.all([
     user ? viewerClubStates(user.id) : Promise.resolve(null),
     user && approved ? shouldPromptForApp(user.id) : Promise.resolve(false),
     clubMetricsFor(club.id),
@@ -68,6 +107,8 @@ export default async function ClubPage({ params, searchParams }: Props) {
     officeById(club.officeId),
     approved ? clubMeetingPattern(club.id, user) : Promise.resolve([] as string[]),
     approved ? renewedThisYear(club.id) : Promise.resolve(null),
+    // A student's request to bring a retired club back (lib/domain/clubs requestClubRevival).
+    retired && canAskToRevive(user) ? openRevivalRequest(club.id) : Promise.resolve(null),
   ]);
   const links = readSocialLinks(club.socialLinks);
   const subscribed = Boolean(states?.get(club.id)?.subscribed);
@@ -178,24 +219,50 @@ export default async function ClubPage({ params, searchParams }: Props) {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {retired ? (
           <Callout tone="info" icon={<Archive />} title={`${club.name} is retired`} className="mb-8">
-            It wound down{club.retiredAt ? ` on ${fmtLongDate(club.retiredAt)}` : ""}. Its history, officers and documents stay here for the record. Want to bring it back? Contact{" "}
-            {office.email ? (
-              <a href={`mailto:${office.email}`} className="font-medium underline underline-offset-2">
-                {office.name}
-              </a>
+            It wound down{club.retiredAt ? ` on ${fmtLongDate(club.retiredAt)}` : ""}. Its history, officers and documents stay here for the record. Want to bring it back?{" "}
+            {canAskToRevive(user) ? (
+              revival ? (
+                revival.createdById === user!.id ? (
+                  <>You asked to bring it back, and {office.name} will let you know what they decide.</>
+                ) : (
+                  <>Someone already asked to bring it back, and {office.name} is deciding.</>
+                )
+              ) : (
+                <>
+                  Ask {office.name}: if they approve, it&apos;s reinstated and you become its President.
+                  <span className="mt-3 block">
+                    <AskToReviveDialog clubId={club.id} clubName={club.name} office={office.name} />
+                  </span>
+                </>
+              )
             ) : (
-              <span className="font-medium">{office.name}</span>
+              <>
+                Contact{" "}
+                {office.email ? (
+                  <a href={`mailto:${office.email}`} className="font-medium underline underline-offset-2">
+                    {office.name}
+                  </a>
+                ) : (
+                  <span className="font-medium">{office.name}</span>
+                )}
+                .
+              </>
             )}
-            .
           </Callout>
         ) : null}
         {!isPublic ? (
           <Callout tone="warning" icon={<Hammer />} title="This club is still being founded" className="mb-8">
-            Only its founders, advisor and {office.name} can see this page. It goes public once {office.name} approves the club.{" "}
-            <Link href={`/clubs/${club.slug}/manage`} className="font-medium underline underline-offset-2">
-              Continue setting it up
-            </Link>
-            .
+            Only its founding team, advisor and {office.name} can see this page{club.listedAsForming ? " (other students see a short forming page)" : ""}. It goes public once {office.name} approves the club.{" "}
+            {access?.isLeader ? (
+              <>
+                <Link href={`/clubs/${club.slug}/manage`} className="font-medium underline underline-offset-2">
+                  Continue setting it up
+                </Link>
+                .
+              </>
+            ) : (
+              "Once a founder gives you a seat on the org chart, you can help set it up from its workspace."
+            )}
           </Callout>
         ) : null}
 

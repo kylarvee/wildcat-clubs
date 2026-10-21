@@ -1,11 +1,8 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { currentRenewalWindow } from "@/lib/domain/renewals";
-import { notify } from "@/lib/domain/notify";
-import { createTask } from "@/lib/domain/tasks";
-import { loadRenewalStates } from "@/lib/renewals/facts";
-import { umbrellaOffice } from "@/lib/offices";
-import { RENEWAL_SOURCE, RENEWAL_TASK_DESCRIPTION, renewalDueNotice, renewalHref, renewalSourceId, renewalTaskTitle } from "@/lib/renewals/rules";
+import { currentRenewalWindow, RENEWAL_TASK_SELECT, syncClubRenewal } from "@/lib/domain/renewals";
+import { loadRenewalStates, type ClubRenewalState } from "@/lib/renewals/facts";
+import { isEmptyPlan, RENEWAL_SOURCE, renewalSourceClub, renewalTaskPlan, type RenewalTaskRow } from "@/lib/renewals/rules";
 import { fmtLongDate } from "@/lib/time";
 
 export type RenewalJobResult = {
@@ -22,89 +19,53 @@ export type RenewalJobResult = {
 };
 
 /**
- * The "Club renewals" job (lib/jobs/tick). From the day renewal opens, every
- * approved club that hasn't renewed has one required REQUIREMENT task per
- * current President and advisor ("Renew RC Wrecker Bots Club for 2026–27",
- * due on the due date). Idempotent and self-healing, like the requirements
- * job:
+ * The "Club renewals" job (lib/jobs/tick): the daily sweep behind the
+ * per-club sync (lib/domain/renewals syncClubRenewal), which every role
+ * change also runs for its club. From the day renewal opens, every approved
+ * club that hasn't renewed has one required REQUIREMENT task per current
+ * President and advisor ("Renew RC Wrecker Bots Club for 2026–27", due on
+ * the due date). Idempotent and self-healing, like the requirements job:
  *   club renewed                        → its open tasks close (DONE)
  *   someone left the President's or advisor's seat → their task is cancelled
  *   a new President or advisor          → they get a task, and a notification
  *   last year's tasks, retired clubs, clubs approved after the window opened → cancelled
- *   the due date changed (System settings) → open tasks move with it
- * It never pauses, retires or changes a club: WSUSA decides about late ones.
+ *   the due date changed (System settings), the club moved office or was renamed → open tasks follow
+ * It reads every club's facts in a few queries, works out each club's plan
+ * (lib/renewals/rules renewalTaskPlan) and syncs only the clubs that are out
+ * of line, each under its lock from fresh facts. It never pauses, retires or
+ * changes a club: WSUSA decides about late ones.
  */
 export async function syncRenewalTasks(now: Date = new Date()): Promise<RenewalJobResult> {
-  const { window, term } = await currentRenewalWindow(now);
-  const open = await db.task.findMany({ where: { sourceType: RENEWAL_SOURCE, status: "OPEN" }, select: { id: true, sourceId: true, assigneeId: true, dueAt: true } });
+  const at = await currentRenewalWindow(now);
+  const { window } = at;
   const result: RenewalJobResult = { year: window?.year ?? null, opensAt: window?.opensAt ?? null, expected: 0, renewed: 0, opened: 0, clubs: 0, closed: 0, cancelled: 0 };
-  const cancel = async (ids: string[]) => {
-    if (!ids.length) return;
-    result.cancelled += (await db.task.updateMany({ where: { id: { in: ids }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } })).count;
-  };
-  if (!window || now < window.opensAt) {
-    await cancel(open.map((t) => t.id));
-    return result;
-  }
-
-  const states = await loadRenewalStates(db, { window, term, now });
-  const byClub = new Map(states.map((s) => [s.club.id, s]));
-  const stale: string[] = [];
-  const redate: string[] = [];
-  const kept = new Set<string>();
-  for (const t of open) {
-    const at = (t.sourceId ?? "").indexOf(":");
-    const clubId = (t.sourceId ?? "").slice(0, at);
-    const s = at > 0 && t.sourceId!.slice(at + 1) === window.year ? byClub.get(clubId) : undefined;
-    if (!s || s.exemption) {
-      stale.push(t.id);
-      continue;
-    }
-    if (s.renewal) {
-      // Renewed somewhere that didn't close it (normally renewClub already has).
-      result.closed += (await db.task.updateMany({ where: { id: t.id, status: "OPEN" }, data: { status: "DONE", completedAt: s.renewal.submittedAt, completedById: s.renewal.submittedBy?.id ?? null } })).count;
-      continue;
-    }
-    const holders = new Set([...s.presidents, ...s.advisors].map((p) => p.id));
-    if (!t.assigneeId || !holders.has(t.assigneeId) || kept.has(`${clubId}:${t.assigneeId}`)) {
-      stale.push(t.id);
-      continue;
-    }
-    kept.add(`${clubId}:${t.assigneeId}`);
-    if (t.dueAt?.getTime() !== window.dueAt.getTime()) redate.push(t.id);
-  }
-  await cancel(stale);
-  if (redate.length) await db.task.updateMany({ where: { id: { in: redate } }, data: { dueAt: window.dueAt } });
-
-  const late = now > window.dueAt;
-  // Each club renews with the office that oversees it (lib/offices; none = WSUSA).
-  const umbrella = (await umbrellaOffice()).name;
+  const open = await db.task.findMany({ where: { sourceType: RENEWAL_SOURCE, status: "OPEN" }, select: RENEWAL_TASK_SELECT });
+  const states = window && now >= window.opensAt ? await loadRenewalStates(db, { window, term: at.term, now }) : [];
   for (const s of states) {
     if (s.exemption && !s.renewal) continue;
     result.expected++;
-    if (s.renewal) {
-      result.renewed++;
-      continue;
-    }
-    const people = [...s.presidents, ...s.advisors].filter((p, i, all) => all.findIndex((x) => x.id === p.id) === i && !kept.has(`${s.club.id}:${p.id}`));
-    if (!people.length) continue;
-    const href = renewalHref(s.club.slug);
-    for (const p of people) {
-      await createTask({
-        kind: "REQUIREMENT",
-        title: renewalTaskTitle(s.club.name, window.year),
-        description: RENEWAL_TASK_DESCRIPTION,
-        assignee: { type: "USER", userId: p.id },
-        clubId: s.club.id,
-        href,
-        dueAt: window.dueAt,
-        source: { type: RENEWAL_SOURCE, id: renewalSourceId(s.club.id, window.year) },
-        required: true,
-      });
-    }
-    result.opened += people.length;
-    result.clubs++;
-    await notify({ userIds: people.map((p) => p.id), kind: "club.renewal_due", ...renewalDueNotice(s.club.name, window, late, s.club.office?.name ?? umbrella), href });
+    if (s.renewal) result.renewed++;
+  }
+
+  // Each open task under the club it's about; one that names no club can't be synced, so it's cancelled here.
+  const tasksOf = new Map<string, RenewalTaskRow[]>();
+  const orphans: string[] = [];
+  for (const t of open) {
+    const clubId = renewalSourceClub(t.sourceId);
+    if (!clubId) orphans.push(t.id);
+    else tasksOf.set(clubId, [...(tasksOf.get(clubId) ?? []), t]);
+  }
+  if (orphans.length) result.cancelled += (await db.task.updateMany({ where: { id: { in: orphans }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } })).count;
+
+  // Clubs that aren't on the list (retired, still founding, gone) only have tasks to cancel; syncClubRenewal reads their own state.
+  const stateOf = new Map<string, ClubRenewalState>(states.map((s) => [s.club.id, s]));
+  for (const clubId of new Set([...tasksOf.keys(), ...stateOf.keys()])) {
+    if (isEmptyPlan(renewalTaskPlan(stateOf.get(clubId) ?? null, tasksOf.get(clubId) ?? [], window, now))) continue;
+    const r = await syncClubRenewal(clubId, { now, at });
+    result.opened += r.opened;
+    if (r.opened) result.clubs++;
+    result.closed += r.done;
+    result.cancelled += r.cancelled;
   }
   return result;
 }

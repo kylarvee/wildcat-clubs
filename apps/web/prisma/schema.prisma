@@ -148,62 +148,64 @@ model User {
   /// Private member details (Settings → Member details), entered once and reused for every club.
   details              PersonalDetails?
 
-  majors              UserMajor[]
-  sessions            Session[]
-  pushTokens          PushToken[]
-  experiences         Experience[]
-  educations          Education[]
-  projects            Project[]
-  memberships         Membership[]
-  roleAssignments     RoleAssignment[]       @relation("RoleHolder")
-  rolesAssigned       RoleAssignment[]       @relation("RoleAssigner")
-  attendances         Attendance[]           @relation("Attendee")
-  attendanceRecorded  Attendance[]           @relation("AttendanceRecorder")
-  subscriptions       CalendarSubscription[]
-  reviews             Review[]
-  reviewFlags         ReviewFlag[]
-  notifications       Notification[]
-  tasksAssigned       Task[]                 @relation("TaskAssignee")
-  tasksCreated        Task[]                 @relation("TaskCreator")
-  tasksCompleted      Task[]                 @relation("TaskCompleter")
-  clubsCreated        Club[]                 @relation("ClubCreator")
-  eventsCreated       Event[]
-  filesCreated        FileItem[]             @relation("FileCreator")
-  filesOwned          FileItem[]             @relation("FileOwner")
-  fileGrants          FileGrant[]
-  conversationMembers ConversationMember[]
-  messages            Message[]
-  announcements       Announcement[]
-  policies            Policy[]
-  testsCreated        Test[]
-  testAttempts        TestAttempt[]          @relation("Taker")
-  testGrades          TestAttempt[]          @relation("Grader")
-  testAssignments     TestAssignment[]
-  complaints          Complaint[]
-  complaintNotes      ComplaintNote[]
-  complaintAccess     ComplaintAccessLog[]
-  candidacies         ElectionCandidate[]    @relation("Candidate")
-  nominations         ElectionCandidate[]    @relation("Nominator")
-  votes               Vote[]
-  electionsCreated    Election[]
-  advisorInvitesSent  AdvisorInvite[]        @relation("Inviter")
-  advisorInvites      AdvisorInvite[]        @relation("Invitee")
-  constitutionDrafts  ConstitutionDraft[]
-  clubDocuments       ClubDocument[]         @relation("DocAuthor")
-  budgetItems         BudgetItem[]
-  fundingRequests     FundingRequest[]       @relation("FundingSubmitter")
-  fundingDecisions    FundingRequest[]       @relation("FundingDecider")
-  invoices            Invoice[]
-  aiConversations     AiConversation[]
-  aiUsage             AiUsage[]
-  activity            ActivityLog[]
-  clubDecisions       ClubDecision[]
-  cohostRequests      EventCohost[]          @relation("CohostRequester")
-  cohostDecisions     EventCohost[]          @relation("CohostDecider")
-  clubRenewals        ClubRenewal[]          @relation("ClubRenewalSubmitter")
-  officeMemberships   OfficeMember[]         @relation("OfficeStaff")
-  officeStaffAdded    OfficeMember[]         @relation("OfficeStaffAdder")
-  eventsReviewed      Event[]                @relation("EventReviewer")
+  majors               UserMajor[]
+  sessions             Session[]
+  pushTokens           PushToken[]
+  experiences          Experience[]
+  educations           Education[]
+  projects             Project[]
+  memberships          Membership[]
+  roleAssignments      RoleAssignment[]       @relation("RoleHolder")
+  rolesAssigned        RoleAssignment[]       @relation("RoleAssigner")
+  attendances          Attendance[]           @relation("Attendee")
+  attendanceRecorded   Attendance[]           @relation("AttendanceRecorder")
+  subscriptions        CalendarSubscription[]
+  reviews              Review[]
+  reviewFlags          ReviewFlag[]
+  notifications        Notification[]
+  tasksAssigned        Task[]                 @relation("TaskAssignee")
+  tasksCreated         Task[]                 @relation("TaskCreator")
+  tasksCompleted       Task[]                 @relation("TaskCompleter")
+  clubsCreated         Club[]                 @relation("ClubCreator")
+  eventsCreated        Event[]
+  filesCreated         FileItem[]             @relation("FileCreator")
+  filesOwned           FileItem[]             @relation("FileOwner")
+  fileGrants           FileGrant[]
+  conversationMembers  ConversationMember[]
+  messages             Message[]
+  announcements        Announcement[]
+  policies             Policy[]
+  testsCreated         Test[]
+  testAttempts         TestAttempt[]          @relation("Taker")
+  testGrades           TestAttempt[]          @relation("Grader")
+  testAssignments      TestAssignment[]
+  complaints           Complaint[]
+  complaintNotes       ComplaintNote[]
+  complaintAccess      ComplaintAccessLog[]
+  candidacies          ElectionCandidate[]    @relation("Candidate")
+  nominations          ElectionCandidate[]    @relation("Nominator")
+  votes                Vote[]
+  electionsCreated     Election[]
+  advisorInvitesSent   AdvisorInvite[]        @relation("Inviter")
+  advisorInvites       AdvisorInvite[]        @relation("Invitee")
+  cofounderInvitesSent CofounderInvite[]      @relation("CofounderInviter")
+  cofounderInvites     CofounderInvite[]      @relation("CofounderInvitee")
+  constitutionDrafts   ConstitutionDraft[]
+  clubDocuments        ClubDocument[]         @relation("DocAuthor")
+  budgetItems          BudgetItem[]
+  fundingRequests      FundingRequest[]       @relation("FundingSubmitter")
+  fundingDecisions     FundingRequest[]       @relation("FundingDecider")
+  invoices             Invoice[]
+  aiConversations      AiConversation[]
+  aiUsage              AiUsage[]
+  activity             ActivityLog[]
+  clubDecisions        ClubDecision[]
+  cohostRequests       EventCohost[]          @relation("CohostRequester")
+  cohostDecisions      EventCohost[]          @relation("CohostDecider")
+  clubRenewals         ClubRenewal[]          @relation("ClubRenewalSubmitter")
+  officeMemberships    OfficeMember[]         @relation("OfficeStaff")
+  officeStaffAdded     OfficeMember[]         @relation("OfficeStaffAdder")
+  eventsReviewed       Event[]                @relation("EventReviewer")
 }
 
 model UserMajor {
@@ -395,6 +397,9 @@ model Club {
   websiteUrl                String?
   /// [{ platform: "instagram" | "facebook" | "x" | "tiktok" | "discord" | "linkedin" | "youtube" | "other", url }]
   socialLinks               Json             @default("[]")
+  /// Before approval: shown in the clubs list's "Forming" section, so students can follow it
+  /// and hear when it's approved. The founder turns it on; it means nothing once approved.
+  listedAsForming           Boolean          @default(false)
   /// The office that oversees the club (lib/offices). Null = the umbrella office (WSUSA).
   officeId                  String?
   office                    Office?          @relation(fields: [officeId], references: [id], onDelete: SetNull)
@@ -402,6 +407,7 @@ model Club {
   documents            ClubDocument[]
   decisions            ClubDecision[]
   advisorInvites       AdvisorInvite[]
+  cofounderInvites     CofounderInvite[]
   memberships          Membership[]
   positions            Position[]
   roleAssignments      RoleAssignment[]       @relation("RoleClub")
@@ -577,6 +583,28 @@ model AdvisorInvite {
   invitee     User?        @relation("Invitee", fields: [inviteeId], references: [id])
   createdAt   DateTime     @default(now())
   respondedAt DateTime?
+}
+
+/// A founder's invitation to a fellow student to help start the club, before it's approved.
+/// Accepting makes them a member (source FOUNDER), so a founder can seat them on the founding
+/// org chart. Declined and cancelled invites stay as the record.
+model CofounderInvite {
+  id          String       @id @default(cuid())
+  clubId      String
+  club        Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  token       String       @unique @default(uuid())
+  status      InviteStatus @default(PENDING)
+  invitedById String
+  invitedBy   User         @relation("CofounderInviter", fields: [invitedById], references: [id])
+  inviteeId   String? // set when the email matches an account
+  invitee     User?        @relation("CofounderInvitee", fields: [inviteeId], references: [id])
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+
+  @@index([clubId, status])
+  @@index([inviteeId, status])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

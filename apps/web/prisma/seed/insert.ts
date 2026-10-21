@@ -89,6 +89,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
     joinPolicy: c.def.joinPolicy ?? "OPEN",
     successionMethod: c.def.succession ?? "ADVISOR_PRESIDENT",
     autoApproveCohosts: Boolean(c.def.autoApproveCohosts),
+    listedAsForming: Boolean(c.listedAsForming),
     createdById: c.founderId,
     createdAt: c.createdAt,
     submittedAt: c.def.life === "draft" ? null : c.submittedAt,
@@ -115,6 +116,7 @@ export async function insertAll(db: PrismaClient, ctx: Ctx, ref: RefRows, users:
   await insertMany("Position", positions, (d) => db.position.createMany({ data: d }), log);
   await insertMany("ClubDecision", r.decisions, (d) => db.clubDecision.createMany({ data: d }), log);
   await insertMany("AdvisorInvite", r.invites, (d) => db.advisorInvite.createMany({ data: d }), log);
+  await insertMany("CofounderInvite", r.cofounderInvites, (d) => db.cofounderInvite.createMany({ data: d }), log);
   await insertMany("ConstitutionDraft", r.drafts, (d) => db.constitutionDraft.createMany({ data: d }), log);
   // Folders before their contents.
   const files = [...r.files].sort((a, b) => Number(Boolean(b.isFolder)) - Number(Boolean(a.isFolder)));

@@ -8,6 +8,7 @@ import {
   type DocState,
   type RenewalCheck,
   type RenewalFacts,
+  type RenewalHolder,
   type RenewalStatus,
   type RenewalTerm,
   type RenewalWindow,
@@ -23,7 +24,8 @@ import {
 
 type Client = Pick<PrismaClient, "club" | "roleAssignment" | "clubDocument" | "event" | "eventCohost" | "clubRenewal">;
 
-export type RenewalPerson = { id: string; name: string };
+/** `since`: when they took the seat (their earliest current assignment in it). */
+export type RenewalPerson = { id: string; name: string; since: Date };
 
 export type RenewalRecord = {
   id: string;
@@ -31,15 +33,17 @@ export type RenewalRecord = {
   submittedAt: Date;
   note: string | null;
   checks: Prisma.JsonValue;
-  submittedBy: RenewalPerson | null;
+  submittedBy: { id: string; name: string } | null;
 };
 
 export type ClubRenewalState = {
-  /** `office`: the office the club renews with (lib/offices), null for WSUSA. */
-  club: { id: string; name: string; slug: string; type: ClubType; status: ClubStatus; approvedAt: Date | null; logoUrl: string | null; logoColor: string; office: { name: string } | null };
+  /** `office`/`officeId`: the office the club renews with (lib/offices), null for WSUSA. */
+  club: { id: string; name: string; slug: string; type: ClubType; status: ClubStatus; approvedAt: Date | null; logoUrl: string | null; logoColor: string; officeId: string | null; office: { name: string } | null };
   presidents: RenewalPerson[];
   vicePresidents: RenewalPerson[];
   advisors: RenewalPerson[];
+  /** Who holds the renewal task: the Presidents, then the advisors (lib/renewals/rules renewalTaskPlan). */
+  holders: RenewalHolder[];
   facts: RenewalFacts;
   checks: RenewalCheck[];
   /** Required checks that fail: renewal waits for them. */
@@ -67,6 +71,7 @@ const clubSelect = {
   departmentId: true,
   requestedDepartmentName: true,
   category: true,
+  officeId: true,
   office: { select: { name: true } },
 } satisfies Prisma.ClubSelect;
 
@@ -92,7 +97,7 @@ export async function loadRenewalStates(
     client.roleAssignment.findMany({
       where: { clubId: { in: ids }, endedAt: null, role: { in: ["PRESIDENT", "VP", "ADVISOR"] }, user: { status: { not: "DEACTIVATED" } } },
       orderBy: { startedAt: "asc" },
-      select: { clubId: true, role: true, user: { select: { id: true, name: true } } },
+      select: { clubId: true, role: true, startedAt: true, user: { select: { id: true, name: true } } },
     }),
     client.clubDocument.findMany({
       where: { clubId: { in: ids }, kind: { in: ["CONSTITUTION", "BYLAWS"] }, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } },
@@ -124,9 +129,10 @@ export async function loadRenewalStates(
   const renewalOf = new Map(renewals.map((r) => [r.clubId, r]));
 
   return clubs.map((club) => {
-    const people = (role: "PRESIDENT" | "VP" | "ADVISOR") => {
+    // Oldest seat first, so each person's `since` is when they first took a seat they still hold.
+    const people = (role: "PRESIDENT" | "VP" | "ADVISOR"): RenewalPerson[] => {
       const seen = new Set<string>();
-      return roles.filter((r) => r.clubId === club.id && r.role === role && !seen.has(r.user.id) && seen.add(r.user.id)).map((r) => r.user);
+      return roles.filter((r) => r.clubId === club.id && r.role === role && !seen.has(r.user.id) && seen.add(r.user.id)).map((r) => ({ ...r.user, since: r.startedAt }));
     };
     const docState = (kind: "CONSTITUTION" | "BYLAWS"): DocState => {
       const mine = docs.filter((d) => d.clubId === club.id && d.kind === kind);
@@ -148,18 +154,21 @@ export async function loadRenewalStates(
     const checks = renewalChecks(facts);
     const row = renewalOf.get(club.id);
     const renewal: RenewalRecord | null = row ? { id: row.id, academicYear: row.academicYear, submittedAt: row.submittedAt, note: row.note, checks: row.checks, submittedBy: row.submittedBy } : null;
-    const exemption = renewalExemption(club, opts.window);
+    // Who the club renews with: its office (a null office is WSUSA, the umbrella).
+    const office = club.office?.name ?? "WSUSA";
+    const exemption = renewalExemption(club, opts.window, office);
     return {
-      club: { id: club.id, name: club.name, slug: club.slug, type: club.type, status: club.status, approvedAt: club.approvedAt, logoUrl: club.logoUrl, logoColor: club.logoColor, office: club.office },
+      club: { id: club.id, name: club.name, slug: club.slug, type: club.type, status: club.status, approvedAt: club.approvedAt, logoUrl: club.logoUrl, logoColor: club.logoColor, officeId: club.officeId, office: club.office },
       presidents,
       vicePresidents,
       advisors,
+      holders: [...presidents.map((p) => ({ ...p, role: "PRESIDENT" as const })), ...advisors.map((p) => ({ ...p, role: "ADVISOR" as const }))],
       facts,
       checks,
       blocking: blockingChecks(checks),
       renewal,
       exemption,
-      status: renewalStatus({ window: opts.window, now: opts.now, renewedAt: renewal?.submittedAt ?? null, exemption }),
+      status: renewalStatus({ window: opts.window, now: opts.now, renewedAt: renewal?.submittedAt ?? null, exemption, office }),
     };
   });
 }

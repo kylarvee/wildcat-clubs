@@ -630,6 +630,28 @@ export async function clubHeldEventCount(clubId: string, opts: { to?: Date } = {
   return rows[0]?.n ?? 0;
 }
 
+/** When each club last HELD an event (hosted or co-hosted), up to now: "No events since March". Clubs that never held one are left out. */
+export async function lastHeldEvents(clubIds: string[]): Promise<Map<string, Date>> {
+  if (clubIds.length === 0) return new Map();
+  const rows = await db.$queryRaw<{ club_id: string; last_at: Date }[]>`
+    WITH co AS (${clubOccurrences({ clubs: clubIds, to: requestNow() })})
+    SELECT co.club_id, max(co.starts_at) AS last_at FROM co WHERE ${HAS_CHECKIN(Prisma.sql`co.occurrence_id`)} GROUP BY co.club_id`;
+  return new Map(rows.map((r) => [r.club_id, r.last_at]));
+}
+
+/** REGISTERED MEMBERS a retired club had when it retired: the student memberships its retirement made alumni. */
+export async function membersAtRetirement(clubIds: string[]): Promise<Map<string, number>> {
+  if (clubIds.length === 0) return new Map();
+  const rows = await db.$queryRaw<{ club_id: string; n: number }[]>`
+    SELECT m."clubId" AS club_id, count(*)::int AS n
+      FROM "Membership" m
+      JOIN "Club" c ON c.id = m."clubId" AND c.status = 'RETIRED'
+      JOIN "User" u ON u.id = m."userId" AND u.kind = 'STUDENT'
+     WHERE m."clubId" = ANY(${clubIds}::text[]) AND m.status = 'ALUMNI' AND m."endedAt" = c."retiredAt"
+     GROUP BY m."clubId"`;
+  return new Map(rows.map((r) => [r.club_id, r.n]));
+}
+
 async function rangedAttendance(clubId: string, from: Date | undefined, to: Date): Promise<Map<string, { attended: number; lastAt: Date }>> {
   const rows = await db.$queryRaw<{ user_id: string; attended: number; last_at: Date }[]>`
     WITH co AS (${clubOccurrences({ clubs: [clubId], from, to })})

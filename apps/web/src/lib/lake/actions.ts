@@ -57,6 +57,13 @@ export const ACTIONS = {
   "ambassador.placement_ended": { label: "Ended an ambassador placement", phrase: "ended an ambassador placement", public: false },
   "ambassador.advisor_set": { label: "Named an ambassador program's advisor", phrase: "named the program's advisor", public: false },
 
+  // ─── Co-founders (lib/domain/cofounders) ────────────────────────────────────
+  "cofounder.invited": { label: "Invited a co-founder", phrase: (d) => q(d.name, (n) => `invited ${n} to help found the club`, "invited a co-founder"), public: false },
+  "cofounder.invite_resent": { label: "Resent a co-founder invitation", phrase: "resent a co-founder invitation", public: false },
+  "cofounder.invite_cancelled": { label: "Cancelled a co-founder invitation", phrase: "cancelled a co-founder invitation", public: false },
+  "cofounder.accepted": { label: "Joined a club's founding team", phrase: "joined the founding team", public: false },
+  "cofounder.declined": { label: "Declined to help found a club", phrase: "declined to help found the club", public: false },
+
   // ─── Announcements ─────────────────────────────────────────────────────────
   /** Public only when the announcement is (the call site decides). */
   "announcement.created": { label: "Posted an announcement", phrase: (d) => q(d.title, (t) => `posted “${t}”`, "posted an announcement"), public: false },
@@ -116,6 +123,10 @@ export const ACTIONS = {
     public: true,
   },
   "club.office_changed": { label: "Moved a club to another office", phrase: (d) => q(d.office, (o) => `moved the club to ${o}`, "moved the club to another office"), public: false },
+  "club.forming_set": { label: "Changed a club's forming listing", phrase: (d) => (d.on === false ? "took the club off the forming list" : "listed the club as forming"), public: false },
+  "club.revival_requested": { label: "Asked to bring back a retired club", phrase: "asked to bring the club back", public: false },
+  "club.revival_approved": { label: "Brought back a club someone asked to revive", phrase: "approved a request to bring the club back", public: false },
+  "club.revival_declined": { label: "Declined a request to revive a club", phrase: "declined a request to bring the club back", public: false },
   "club.ambassador_program_started": { label: "Started a college ambassador program", phrase: "started the college's ambassador program", public: true },
 
   // ─── Constitutions ─────────────────────────────────────────────────────────
@@ -283,6 +294,8 @@ export const ACTIONS = {
     phrase: (d) => (d.self === false ? "downloaded someone's involvement record" : "downloaded their involvement record"),
     public: false,
   },
+  /** A club's officers of record letter (lib/domain/officers): by one of its leaders, or an admin or office staff (data.via). Private. */
+  "officers.downloaded": { label: "Downloaded a club's officers of record", phrase: "downloaded the club's officers of record", public: false },
   "device.push_added": { label: "Turned on push notifications on a device", phrase: "turned on push notifications on a device", public: false },
   "device.push_moved": { label: "Moved a device's push notifications to their account", phrase: "moved a device's push notifications to their account", public: false },
   "device.push_removed": { label: "Turned off push notifications on a device", phrase: "turned off push notifications on a device", public: false },

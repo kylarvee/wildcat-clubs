@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { act } from "@/lib/domain/kit";
 import { syncAllRequirementHolders } from "@/lib/domain/requirements";
-import { addDepartmentForClub, decideClub, reinstateClub, setClubGoogleAccountVerified, startAmbassadorProgram } from "@/lib/domain/clubs";
+import { addDepartmentForClub, approveClubRevival, decideClub, declineClubRevival, reinstateClub, setClubGoogleAccountVerified, startAmbassadorProgram } from "@/lib/domain/clubs";
 import { decideCustomDocument } from "@/lib/domain/constitution";
 import { setClubOffice } from "@/lib/domain/offices";
 
@@ -45,6 +45,27 @@ export async function decideDocumentAction(input: { docId: string; approve: bool
 export async function reinstateClubAction(input: { clubId: string; note?: string }) {
   const r = await act((actor) => reinstateClub(actor, input));
   if (r.ok) refresh();
+  return r;
+}
+
+/** A student's request to bring a retired club back: reinstate it with them as President, or decline with a note. */
+export async function approveRevivalAction(input: { clubId: string; note?: string }) {
+  const r = await act((actor) => approveClubRevival(actor, input));
+  if (r.ok) {
+    refresh();
+    revalidatePath("/admin", "layout");
+    revalidatePath("/tasks");
+  }
+  return r;
+}
+
+export async function declineRevivalAction(input: { clubId: string; note: string }) {
+  const r = await act((actor) => declineClubRevival(actor, input));
+  if (r.ok) {
+    refresh();
+    revalidatePath("/admin", "layout");
+    revalidatePath("/tasks");
+  }
   return r;
 }
 

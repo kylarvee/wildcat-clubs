@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getCurrentUser, requireUser, type Actor } from "@/lib/auth/session";
 import { getClubAccess, type Capability, type ClubAccess } from "@/lib/authz";
+import { isFounding } from "@/lib/founding/rules";
 
 /** Basic club row by slug (cached per request). */
 export const getClubBySlug = cache(async (slug: string) =>
@@ -24,13 +25,17 @@ export function clubIsPublic(status: ClubRow["status"]) {
   return status === "APPROVED" || status === "RETIRED";
 }
 
-/** For public club routes: the club + viewer access, or 404 if the viewer may not see it. */
+/**
+ * For public club routes: the club + viewer access, or 404 if the viewer may
+ * not see it. A club being founded is its founding team's (members too:
+ * co-founders before they have a seat), its advisors' and its office's.
+ */
 export async function loadVisibleClub(slug: string): Promise<{ club: ClubRow; user: Actor | null; access: ClubAccess | null }> {
   const club = await getClubBySlug(slug);
   if (!club) notFound();
   const user = await getCurrentUser();
   const access = user ? await getClubAccess(user, club.id) : null;
-  if (!clubIsPublic(club.status) && !access?.isLeader) notFound();
+  if (!clubIsPublic(club.status) && !access?.isLeader && !(access?.isMember && isFounding(club.status))) notFound();
   return { club, user, access };
 }
 

@@ -4,6 +4,7 @@ import { Plus, SearchX, Sparkles } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/authz";
 import { listClubs, shouldPromptForApp } from "@/lib/clubs/queries";
+import { formingClubs } from "@/lib/clubs/founding";
 import { logSearchSoon } from "@/lib/search/log";
 import { INSTITUTION } from "@/lib/institution";
 import { ButtonLink } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { AppPromptProvider } from "@/components/clubs/AppPrompt";
 import { ClubBrowser } from "@/components/clubs/ClubBrowser";
 import { ClubCard } from "@/components/clubs/ClubCard";
 import { ClubTable } from "@/components/clubs/ClubTable";
+import { FormingClubs } from "@/components/clubs/FormingClubs";
 import { clubListHref, hasActiveFilters, parseClubListParams } from "@/components/clubs/list-params";
 
 export const metadata: Metadata = {
@@ -30,7 +32,13 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
   const limit = Number.isFinite(showParam) && showParam > STEP ? Math.min(Math.ceil(showParam / STEP) * STEP, 2000) : STEP;
   // "My clubs" means nothing to a signed-out visitor.
   const params = user ? parsed : { ...parsed, mine: false };
-  const [result, promptForApp] = await Promise.all([listClubs(params, user, { snippets: limit }), user ? shouldPromptForApp(user.id) : Promise.resolve(false)]);
+  // The Forming section is for signed-in accounts on the plain list: forming clubs aren't search results.
+  const showForming = Boolean(user) && !params.archived && !hasActiveFilters(params);
+  const [result, promptForApp, forming] = await Promise.all([
+    listClubs(params, user, { snippets: limit }),
+    user ? shouldPromptForApp(user.id) : Promise.resolve(false),
+    showForming ? formingClubs(user) : Promise.resolve([]),
+  ]);
   const shownItems = result.items.slice(0, limit);
   const signedIn = Boolean(user);
   // One row per search someone ran (words, matches, signed in — no account), so WSUSA sees what students look for.
@@ -73,6 +81,7 @@ export default async function ClubsPage({ searchParams }: { searchParams: Promis
           total={result.total}
           searchMode={result.search?.mode ?? null}
         >
+          <FormingClubs clubs={forming} />
           {result.items.length === 0 ? (
             nothingFound && !params.archived ? (
               <EmptyState

@@ -640,7 +640,7 @@ const assignRoleTool = writeTool({
     }
     const leadership = seat.role === "PRESIDENT" || seat.role === "VP";
     const permissions = leadership ? undefined : (input.permissions ?? (seat.defaultPermissions.filter((p) => p in CAPABILITIES) as Capability[]));
-    const requirements = (await activeRequirements()).filter((r) => r.appliesTo.includes(seat.role));
+    const requirements = (await activeRequirements(club.id)).filter((r) => r.appliesTo.includes(seat.role));
 
     const toolsLine = leadership
       ? seat.role === "PRESIDENT"

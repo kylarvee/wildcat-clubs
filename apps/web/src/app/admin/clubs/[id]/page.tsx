@@ -9,7 +9,10 @@ import { db } from "@/lib/db";
 import { listOffices, officeById } from "@/lib/offices";
 import { fmtLongDate } from "@/lib/time";
 import { fileUrl } from "@/lib/domain/files";
-import { foundingChecklist } from "@/lib/domain/clubs";
+import { foundingChecklist, openRevivalRequest } from "@/lib/domain/clubs";
+import { foundingTeam } from "@/lib/clubs/founding";
+import { isFounding, revivalNote } from "@/lib/founding/rules";
+import { similarClubs } from "@/lib/search/similar";
 import { statedSettings } from "@/lib/domain/constitution";
 import { registeredMemberCount } from "@/lib/metrics";
 import { Avatar, ClubLogo } from "@/components/ui/avatar";
@@ -22,6 +25,8 @@ import { ReviewActions } from "@/components/founding/admin/ReviewActions";
 import { AddDepartmentForm } from "@/components/founding/admin/AddDepartmentForm";
 import { DocumentDecision } from "@/components/founding/admin/DocumentDecision";
 import { ReinstateForm } from "@/components/founding/admin/ReinstateForm";
+import { RevivalDecision } from "@/components/founding/admin/RevivalDecision";
+import { SimilarClubRow } from "@/components/founding/SimilarClubs";
 import { GoogleAccountVerification } from "@/components/founding/admin/GoogleAccountVerification";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
 import { ClubOfficeForm } from "@/components/offices/ClubOfficeForm";
@@ -74,6 +79,16 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
     umbrella ? listOffices() : Promise.resolve([]),
     umbrella ? db.task.count({ where: { clubId: club.id, assigneeType: "ADMINS", status: "OPEN" } }) : Promise.resolve(0),
   ]);
+  // A founding club: the clubs like it (the founders' wizard showed them the same list) and its founding team. A retired one: a student's request to bring it back.
+  const founding = isFounding(club.status);
+  const [similar, team, revival] = await Promise.all([
+    founding ? similarClubs({ name: club.name, description: club.shortDescription, excludeClubId: club.id, viewerId: user.id }) : Promise.resolve([]),
+    founding ? foundingTeam(club.id) : Promise.resolve(null),
+    club.status === "RETIRED" ? openRevivalRequest(club.id) : Promise.resolve(null),
+  ]);
+  // Co-founders (lib/clubs/founding foundingTeam): seated ones are marked in the leaders list; the rest are listed under it.
+  const cofounderIds = new Set(team ? team.members.filter((m) => !m.startedIt).map((m) => m.userId) : []);
+  const unseated = team ? team.members.filter((m) => !m.startedIt && !m.seats.length) : [];
 
   const [check, documents, leaders, invites, decisions, colleges, members, registered, verifier] = await Promise.all([
     foundingChecklist(club.id),
@@ -81,7 +96,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
     db.roleAssignment.findMany({
       where: { clubId: club.id, endedAt: null, role: { not: "MEMBER" } },
       orderBy: [{ startedAt: "asc" }],
-      select: { id: true, role: true, startedAt: true, position: { select: { name: true } }, user: { select: { name: true, email: true, avatarUrl: true, avatarColor: true } } },
+      select: { id: true, role: true, startedAt: true, position: { select: { name: true } }, user: { select: { id: true, name: true, email: true, avatarUrl: true, avatarColor: true } } },
     }),
     db.advisorInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, select: { id: true, name: true, email: true, createdAt: true } }),
     db.clubDecision.findMany({ where: { clubId: club.id }, orderBy: { at: "desc" }, include: { by: { select: { name: true } } } }),
@@ -128,7 +143,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
             {club.submittedAt && club.status === "SUBMITTED" ? ` · submitted ${fmtLongDate(club.submittedAt)}` : ""}
           </p>
         </div>
-        <Link href={`/clubs/${club.slug}/manage`} className={buttonClasses("outline", "sm")}>
+        <Link href={`/clubs/${club.slug}/manage`} className={buttonClasses("outline", "sm", "max-sm:w-full")}>
           Open workspace <ExternalLink className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
@@ -153,6 +168,53 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
 
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-6">
+          {revival?.createdBy ? (
+            <Card className="border-brand-200 ring-1 ring-brand-100">
+              <div id="revival" className="scroll-mt-24" />
+              <CardHeader
+                title="Revival request"
+                description={
+                  <>
+                    {revival.createdBy.name} (
+                    <a href={`mailto:${revival.createdBy.email}`} className="text-brand-600 hover:underline">
+                      {revival.createdBy.email}
+                    </a>
+                    ) asked on {fmtLongDate(revival.createdAt)} to bring {club.name} back, as its President.
+                  </>
+                }
+              />
+              <CardBody className="space-y-4">
+                {revivalNote(revival, revival.createdBy.name) ? (
+                  <blockquote className="whitespace-pre-line rounded-lg border-l-4 border-brand-200 bg-muted/40 px-3 py-2 text-sm text-ink-2">{revivalNote(revival, revival.createdBy.name)}</blockquote>
+                ) : null}
+                <RevivalDecision clubId={club.id} requester={revival.createdBy.name} approvedBefore={Boolean(club.approvedAt)} />
+              </CardBody>
+            </Card>
+          ) : null}
+
+          {founding ? (
+            <Card>
+              <div id="similar" className="scroll-mt-24" />
+              <CardHeader
+                title="Similar clubs"
+                description={
+                  similar.length
+                    ? "Clubs like this one, found the way the founders' wizard showed them. Students could join an approved one, or a retired one could come back."
+                    : "No approved or retired club looks like this one."
+                }
+              />
+              {similar.length ? (
+                <CardBody className="pt-0">
+                  <ul className="divide-y divide-line" aria-label="Similar clubs">
+                    {similar.map((c) => (
+                      <SimilarClubRow key={c.id} club={c} />
+                    ))}
+                  </ul>
+                </CardBody>
+              ) : null}
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader title="Profile" description={check.profile.done ? "Complete" : `Missing: ${check.profile.gaps.join(", ")}`} action={<Badge tone={check.profile.done ? "success" : "warning"}>{check.profile.done ? "Complete" : "Incomplete"}</Badge>} />
             <CardBody className="space-y-4">
@@ -328,6 +390,7 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                         <a href={`mailto:${l.user.email}`} className="block truncate text-ink-3 hover:text-brand">
                           {l.user.email}
                         </a>
+                        {cofounderIds.has(l.user.id) ? <span className="block text-xs text-ink-3">Co-founder</span> : null}
                       </span>
                       <Badge tone={l.role === "ADVISOR" ? "success" : "brand"}>{l.position?.name ?? ROLE_LABEL[l.role]}</Badge>
                     </li>
@@ -336,6 +399,28 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
               ) : (
                 <p className="text-sm text-ink-3">No one holds a role right now.</p>
               )}
+              {unseated.length ? (
+                <div className="border-t border-line pt-3">
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-3">Co-founders without a seat yet</p>
+                  <ul className="space-y-1 text-sm text-ink-2">
+                    {unseated.map((m) => (
+                      <li key={m.userId}>{m.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {team?.pending.length ? (
+                <div className="border-t border-line pt-3">
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-3">Co-founder invitations pending</p>
+                  <ul className="space-y-1 text-sm text-ink-2">
+                    {team.pending.map((p) => (
+                      <li key={p.id}>
+                        {p.name} · {p.email} <span className="text-ink-3">({fmtLongDate(p.createdAt)})</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {invites.length ? (
                 <div className="border-t border-line pt-3">
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-3">Advisor invitations pending</p>
@@ -349,6 +434,12 @@ export default async function AdminClubReviewPage({ params }: { params: Promise<
                 </div>
               ) : null}
               {!check.advisor.done ? <Callout tone="warning">No advisor has accepted yet.</Callout> : null}
+              {/* A plain link: the officers of record letter is built by a route on each download (lib/domain/officers). */}
+              {club.status === "APPROVED" ? (
+                <a href={`/clubs/${club.slug}/manage/org-chart/officers.pdf`} download className="flex items-center gap-1.5 border-t border-line pt-3 text-sm font-medium text-brand-600 hover:underline">
+                  <FileText className="h-4 w-4" aria-hidden /> Download officers of record (PDF)
+                </a>
+              ) : null}
             </CardBody>
           </Card>
 

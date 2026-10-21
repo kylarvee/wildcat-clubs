@@ -77,6 +77,8 @@ export async function grantRole(input: {
   endAssignmentIds?: string[];
   endReason?: RoleEndReason;
   checkSeat?: boolean;
+  /** False when the caller tells the new holder itself, in its own words (an approved revival request: lib/domain/clubs). */
+  notifyHolder?: boolean;
 }) {
   const now = new Date();
   let endedUserIds: string[] = [];
@@ -136,7 +138,7 @@ export async function grantRole(input: {
   if (input.role !== "ADVISOR" && ROLE_RANK[input.role] >= 1) {
     await openRequirementTasks(input.userId, input.role, { clubId: input.clubId, assignmentStartedAt: now, clubApprovedAt: assignment.club.approvedAt });
   }
-  if (input.assignedById && input.assignedById !== input.userId) {
+  if (input.assignedById && input.assignedById !== input.userId && input.notifyHolder !== false) {
     await notify({
       userIds: [input.userId],
       kind: "role.assigned",

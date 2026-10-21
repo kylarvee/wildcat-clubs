@@ -11,10 +11,10 @@ import { FoundIn } from "@/components/search/FoundIn";
 import { Reasons } from "@/components/search/Reasons";
 import { ACTIVITY_SCORE_DAYS, ACTIVITY_SCORE_HINT, noRetentionText } from "@/lib/metrics/pure";
 
-/** "Pilot period" / "Inactive" standing, or "Retired". Shows nothing for active clubs, or until the metrics layer has numbers. */
+/** "Pilot period" / "Inactive" standing, or "Retired". Shows nothing for active clubs, founding ones (standing is for approved clubs) or until the metrics layer has numbers. */
 export function ClubStatusBadge({ club }: { club: Pick<ClubListItem, "status" | "metrics" | "hasMetrics"> }) {
   if (club.status === "RETIRED") return <Badge>{CLUB_STATUS_LABEL.RETIRED}</Badge>;
-  if (!club.hasMetrics) return null;
+  if (club.status !== "APPROVED" || !club.hasMetrics) return null;
   const standing = standingOf(club.metrics);
   if (standing === "active") return null;
   return (

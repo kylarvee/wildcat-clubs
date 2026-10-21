@@ -28,6 +28,7 @@ import { buildFiles } from "./steps/files";
 import { buildInbox } from "./steps/inbox";
 import { buildSearch } from "./steps/search";
 import { buildRenewals } from "./steps/renewals";
+import { buildFoundingStories } from "./steps/founding";
 import { printSummary } from "./summary";
 
 async function truncateAll(db: PrismaClient) {
@@ -72,6 +73,8 @@ async function main() {
     // Events that waited for their office's review: after every step that draws from the generator, so nothing else shifts.
     buildReviewStories(ctx);
     buildOfficeStories(ctx);
+    // Co-founders, the forming list and a revival request: no randomness, after every step that draws from the generator.
+    buildFoundingStories(ctx);
     log(`Built in ${((Date.now() - started) / 1000).toFixed(1)}s — writing…`);
 
     await insertAll(db, ctx, ref, users, log);

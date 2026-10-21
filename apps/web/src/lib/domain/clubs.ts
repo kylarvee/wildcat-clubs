@@ -4,6 +4,9 @@ import { z } from "zod";
 import { db, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/auth/session";
 import { adminScope, getClubAccess } from "@/lib/authz";
+import { canAskToRevive, isFounder } from "@/lib/authz/founding";
+import { CLUB_REVIVAL, COFOUNDER_INVITE, FOUNDING_STATUSES, isFounding, REVIVAL_NOTE_MAX, revivalDefaultDescription, revivalHref } from "@/lib/founding/rules";
+import { INSTITUTION } from "@/lib/institution";
 import { logActivity } from "@/lib/lake/activity";
 import { assertCan, assertCanAdminClub, assertClubCap, assertSignedIn, assertUmbrellaAdmin, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createDefaultPositions, grantRole } from "@/lib/domain/roles";
@@ -21,11 +24,15 @@ import { SOCIAL_PLATFORMS } from "@/components/clubs/labels";
 /**
  * Clubs — founding, the profile, WSUSA review, retirement. The create wizard,
  * profile editor, review queue, settings and admin tools all write through
- * here. Advisor invites live in advisors.ts; constitutions in constitution.ts.
+ * here. Advisor invites live in advisors.ts, co-founder invites in
+ * cofounders.ts, constitutions in constitution.ts.
  *
  * Lifecycle: DRAFT → SUBMITTED → (CHANGES_REQUESTED → SUBMITTED)* → APPROVED
  * | REJECTED; any → RETIRED; RETIRED → APPROVED (reinstated) or DRAFT if the
  * club was never approved. Every step leaves a ClubDecision row (the trail).
+ * While it's being founded, its founders may list it as forming (followers
+ * hear when it's approved), and a student may ask the office to bring a
+ * retired club back with them as President (a revival request).
  */
 
 // ─── Shared helpers (also used by advisors.ts and constitution.ts) ──────────
@@ -179,6 +186,8 @@ const CreateClubInput = z.object({
   focusMajorId: optionalId,
   focusOther: optionalText(120, "Keep the discipline under 120 characters."),
   contactEmail: optionalEmail,
+  /** "List this club as forming" (the clubs list's Forming section). */
+  listedAsForming: z.boolean().default(false),
 });
 
 export type CreateClubInput = z.input<typeof CreateClubInput>;
@@ -222,6 +231,7 @@ export async function createClub(actor: Actor | null, input: unknown): Promise<{
             focusOther: v.focusMajorId ? null : v.focusOther,
             shortDescription: v.shortDescription,
             contactEmail: v.contactEmail,
+            listedAsForming: v.listedAsForming,
             logoColor: LOGO_SEED[Math.floor(Math.random() * LOGO_SEED.length)],
             createdById: actor.id,
             officeId,
@@ -236,7 +246,7 @@ export async function createClub(actor: Actor | null, input: unknown): Promise<{
             data: { clubId: c.id, name: actor.name, email: actor.email.toLowerCase(), status: "ACCEPTED", invitedById: actor.id, inviteeId: actor.id, respondedAt: now },
           });
         }
-        await logActivity({ actorId: actor.id, action: "club.created", entityType: "club", entityId: c.id, clubId: c.id, data: { name: c.name, type: c.type } }, tx);
+        await logActivity({ actorId: actor.id, action: "club.created", entityType: "club", entityId: c.id, clubId: c.id, data: { name: c.name, type: c.type, listedAsForming: c.listedAsForming } }, tx);
         return c;
       });
     } catch (e) {
@@ -476,6 +486,29 @@ export async function setAutoApproveCohosts(actor: Actor | null, input: unknown)
   return club;
 }
 
+/**
+ * "List this club as forming": while it's being founded, its founders (lib/authz
+ * founding isFounder) put it in the clubs list's Forming section, where
+ * signed-in accounts see its name, short description and founders' names and
+ * can follow it, or take it off. Approval and rejection turn it off.
+ */
+export async function setListedAsForming(actor: Actor | null, input: unknown) {
+  assertSignedIn(actor);
+  const v = parseForm(z.object({ clubId: id, on: z.boolean() }), input);
+  const club = await db.club.findUnique({ where: { id: v.clubId }, select: { id: true, status: true, createdById: true, listedAsForming: true } });
+  if (!club) throw notFound("Club");
+  const access = await getClubAccess(actor, club.id);
+  if (!access) throw notFound("Club");
+  if (!isFounding(club.status)) throw conflict("Only clubs that are still being founded can be listed as forming.");
+  if (!isFounder(access, club, actor.id)) throw forbidden("Only the club's founders can list it as forming.");
+  if (club.listedAsForming === v.on) return { on: v.on };
+  // Only while it's still being founded, even if it's decided in the meantime.
+  const claimed = await db.club.updateMany({ where: { id: club.id, status: { in: [...FOUNDING_STATUSES] } }, data: { listedAsForming: v.on } });
+  if (!claimed.count) throw conflict("Only clubs that are still being founded can be listed as forming.");
+  await logActivity({ actorId: actor.id, action: "club.forming_set", entityType: "club", entityId: club.id, clubId: club.id, data: { on: v.on } });
+  return { on: v.on };
+}
+
 // ─── Additional documents on the profile ─────────────────────────────────────
 
 const DOC_EXTENSIONS = /\.(pdf|docx?|pptx?|xlsx?|txt|md|png|jpe?g)$/i;
@@ -683,9 +716,14 @@ export async function decideClub(actor: Actor | null, input: unknown) {
   }
 
   const now = new Date();
+  // Co-founder invitees whose invitation closes with the decision (they hear about an approval like followers do).
+  let closedInvitees: string[] = [];
   await db.$transaction(async (tx) => {
-    // Claim the decision, so two admins deciding at once can't both write one.
-    const claimed = await tx.club.updateMany({ where: { id: club.id, status: "SUBMITTED" }, data: { status: d.status, ...(v.decision === "APPROVE" && !club.approvedAt ? { approvedAt: now } : {}) } });
+    // Claim the decision, so two admins deciding at once can't both write one. A decided club isn't forming anymore.
+    const claimed = await tx.club.updateMany({
+      where: { id: club.id, status: "SUBMITTED" },
+      data: { status: d.status, ...(v.decision === "APPROVE" && !club.approvedAt ? { approvedAt: now } : {}), ...(v.decision !== "CHANGES" ? { listedAsForming: false } : {}) },
+    });
     if (!claimed.count) throw conflict("This club isn't waiting for review — someone may have decided it already.");
     await tx.clubDecision.create({ data: { clubId: club.id, action: d.action, note: v.note, byId: actor.id } });
     await resolveTasks("club", club.id, actor.id, tx);
@@ -694,6 +732,13 @@ export async function decideClub(actor: Actor | null, input: unknown) {
       const pending = await tx.advisorInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, select: { id: true } });
       await tx.advisorInvite.updateMany({ where: { id: { in: pending.map((i) => i.id) }, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
       for (const i of pending) await resolveTasks("advisorInvite", i.id, actor.id, tx, "CANCELLED");
+    }
+    if (v.decision !== "CHANGES") {
+      // Co-founders join while a club is being founded; once it's decided, students join (or not) from its page (inlined: cofounders.ts imports this file).
+      const open = await tx.cofounderInvite.findMany({ where: { clubId: club.id, status: "PENDING" }, select: { id: true, inviteeId: true } });
+      await tx.cofounderInvite.updateMany({ where: { id: { in: open.map((i) => i.id) }, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
+      for (const i of open) await resolveTasks(COFOUNDER_INVITE, i.id, actor.id, tx, "CANCELLED");
+      closedInvitees = open.flatMap((i) => (i.inviteeId ? [i.inviteeId] : []));
     }
     await logActivity({ actorId: actor.id, action: `club.${d.status.toLowerCase()}`, entityType: "club", entityId: club.id, clubId: club.id, data: { note: v.note }, isPublic: v.decision === "APPROVE" }, tx);
   });
@@ -710,14 +755,45 @@ export async function decideClub(actor: Actor | null, input: unknown) {
       : v.decision === "CHANGES"
         ? `${office.name} asked for changes to ${club.name}`
         : `${office.name} didn't approve ${club.name}`;
+  // The founding team: everyone holding a role, and co-founders who don't have a seat yet (they can't open the workspace, so they get the club's page).
+  const leaders = await clubLeaderIds(club.id);
+  const unseated = (await db.membership.findMany({ where: { clubId: club.id, status: "ACTIVE", userId: { notIn: leaders } }, select: { userId: true } })).map((m) => m.userId);
   await notify({
-    userIds: await clubLeaderIds(club.id),
+    userIds: leaders,
     kind: `club.${d.status.toLowerCase()}`,
     title,
     body: v.note ?? "Events, budgets, attendance and the rest of your club tools are now unlocked.",
     href: `/clubs/${club.slug}/manage`,
   });
+  if (v.decision !== "CHANGES" && unseated.length) {
+    await notify({
+      userIds: unseated,
+      kind: `club.${d.status.toLowerCase()}`,
+      title,
+      body: v.note ?? "You're one of its founding members, and its events, members and announcements open up now.",
+      href: `/clubs/${club.slug}`,
+    });
+  }
+  if (v.decision === "APPROVE") await tellFollowersApproved(club, [...leaders, ...unseated], closedInvitees);
   return { status: d.status as ClubStatus };
+}
+
+/**
+ * The approval's news for everyone outside the founding team who wanted it:
+ * followers (who followed it while it was forming) and co-founder invitees
+ * whose invitation just closed. The team heard already.
+ */
+async function tellFollowersApproved(club: Pick<Club, "id" | "name" | "slug">, team: string[], invitees: string[]) {
+  const followers = await db.calendarSubscription.findMany({ where: { clubId: club.id, user: { status: "ACTIVE" } }, select: { userId: true } });
+  const userIds = [...new Set([...followers.map((f) => f.userId), ...invitees])].filter((u) => !team.includes(u));
+  if (!userIds.length) return;
+  await notify({
+    userIds,
+    kind: "club.forming_approved",
+    title: `${club.name} is now an official ${INSTITUTION.shortName} club`,
+    body: "Join it from its club page.",
+    href: `/clubs/${club.slug}`,
+  });
 }
 
 /** Adds the department a founder typed under "Other" (or links an existing one with that name) and links the club. */
@@ -784,7 +860,7 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   const now = new Date();
   await db.$transaction(async (tx) => {
     // Claim the transition first, so a double retire can't write two decisions.
-    const claimed = await tx.club.updateMany({ where: { id: club.id, status: { not: "RETIRED" } }, data: { status: "RETIRED", retiredAt: now, retiredReason: v.reason } });
+    const claimed = await tx.club.updateMany({ where: { id: club.id, status: { not: "RETIRED" } }, data: { status: "RETIRED", retiredAt: now, retiredReason: v.reason, listedAsForming: false } });
     if (!claimed.count) throw conflict("This club is already retired.");
     // endedAt = retiredAt marks who retirement moved, so a reinstatement can bring exactly them back.
     await tx.roleAssignment.updateMany({ where: { OR: [{ clubId: club.id }, { viaClubId: club.id }], endedAt: null }, data: { endedAt: now, endReason: "CLUB_RETIRED" } });
@@ -792,6 +868,7 @@ export async function retireClub(actor: Actor | null, input: unknown) {
     await tx.membership.updateMany({ where: { clubId: club.id, status: "PENDING" }, data: { status: "DECLINED", endedAt: now } });
     await tx.eventOccurrence.updateMany({ where: { event: { clubId: club.id }, status: "SCHEDULED", startsAt: { gt: now } }, data: { status: "CANCELLED", note: "Cancelled — the club retired." } });
     await tx.advisorInvite.updateMany({ where: { clubId: club.id, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
+    await tx.cofounderInvite.updateMany({ where: { clubId: club.id, status: "PENDING" }, data: { status: "CANCELLED", respondedAt: now } });
     // Requests WSUSA hasn't decided close with the club, so nothing gets approved for a retired club.
     await tx.fundingRequest.updateMany({ where: { clubId: club.id, status: "SUBMITTED" }, data: { status: "WITHDRAWN", decidedAt: now, decidedById: null, decisionNote: "The club retired." } });
     await tx.clubDocument.updateMany({ where: { clubId: club.id, status: "PENDING_APPROVAL" }, data: { status: "SUPERSEDED", decidedAt: now } });
@@ -820,16 +897,13 @@ export async function retireClub(actor: Actor | null, input: unknown) {
   return { slug: club.slug };
 }
 
-/** Admins (WSUSA, or the club's office) bring a retired club back: approved clubs return APPROVED, never-approved ones return to DRAFT. */
-export async function reinstateClub(actor: Actor | null, input: unknown) {
-  const v = parseForm(z.object({ clubId: id, note: optionalText(2000, "Keep the note under 2,000 characters.") }), input);
-  const club = await db.club.findUnique({ where: { id: v.clubId } });
-  assertCanAdminClub(actor, "admin.clubs", club ?? { officeId: null });
-  if (!club) throw notFound("Club");
-  if (club.status !== "RETIRED" || !club.retiredAt) throw conflict("Only retired clubs can be reinstated.");
-  const retiredAt = club.retiredAt;
-  const status: ClubStatus = club.approvedAt ? "APPROVED" : "DRAFT";
-
+/**
+ * What reinstating a club gives back: the roles its retirement ended (for an
+ * ambassador org, also its placements in clubs that are still running, when
+ * the ambassador is still a member there) and the memberships it made alumni,
+ * for people whose accounts are still active.
+ */
+async function reinstatementPlan(club: Pick<Club, "id">, retiredAt: Date) {
   const [ended, memberships] = await Promise.all([
     // The club's own roles, plus (for an ambassador org) its placements in clubs that are still running.
     db.roleAssignment.findMany({
@@ -844,11 +918,28 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
     ? await db.membership.findMany({ where: { status: "ACTIVE", OR: placements.map((r) => ({ userId: r.userId, clubId: r.clubId })) }, select: { userId: true, clubId: true } })
     : [];
   const roles = ended.filter((r) => r.clubId === club.id || stillMembers.some((m) => m.userId === r.userId && m.clubId === r.clubId));
+  return { roles, memberships };
+}
+
+/**
+ * Brings a retired club back (reinstateClub, and an approved revival
+ * request): approved clubs return APPROVED, never-approved ones DRAFT.
+ * Reinstating gives former leaders their seats back; a revival is a fresh
+ * start under the student who asked (`revivedBy`), so it brings the members
+ * back but none of the old seats (the new President can re-seat anyone).
+ * Returns who was told (members whose membership came back).
+ */
+async function reinstate(actor: Actor, club: Club, note: string | null, opts: { revivedBy?: string } = {}) {
+  if (club.status !== "RETIRED" || !club.retiredAt) throw conflict("Only retired clubs can be reinstated.");
+  const status: ClubStatus = club.approvedAt ? "APPROVED" : "DRAFT";
+  const plan = await reinstatementPlan(club, club.retiredAt);
+  const memberships = plan.memberships;
+  const roles = opts.revivedBy ? [] : plan.roles;
   await db.$transaction(async (tx) => {
     const claimed = await tx.club.updateMany({ where: { id: club.id, status: "RETIRED" }, data: { status, retiredAt: null, retiredReason: null } });
     if (!claimed.count) throw conflict("Only retired clubs can be reinstated.");
     await tx.membership.updateMany({ where: { id: { in: memberships.map((m) => m.id) } }, data: { status: "ACTIVE", endedAt: null } });
-    await tx.clubDecision.create({ data: { clubId: club.id, action: "REINSTATED", note: v.note, byId: actor.id } });
+    await tx.clubDecision.create({ data: { clubId: club.id, action: "REINSTATED", note, byId: actor.id } });
     await logActivity({ actorId: actor.id, action: "club.reinstated", entityType: "club", entityId: club.id, clubId: club.id, data: { status, restoredRoles: roles.length, restoredMembers: memberships.length }, isPublic: true }, tx);
   });
   reindexClubSoon(club.id);
@@ -856,14 +947,180 @@ export async function reinstateClub(actor: Actor | null, input: unknown) {
   for (const r of roles) {
     await grantRole({ clubId: r.clubId, userId: r.userId, role: r.role, positionId: r.positionId, permissions: r.permissions, viaClubId: r.viaClubId, assignedById: actor.id });
   }
+  const told = memberships.map((m) => m.userId).filter((u) => !roles.some((r) => r.clubId === club.id && r.userId === u));
+  const officeName = (await officeForClub(club.id)).name;
   await notify({
-    userIds: memberships.map((m) => m.userId).filter((u) => !roles.some((r) => r.clubId === club.id && r.userId === u)),
+    userIds: told,
     kind: "club.reinstated",
     title: `${club.name} is back`,
-    body: v.note ?? `${(await officeForClub(club.id)).name} reinstated the club, and your membership is active again.`,
+    body:
+      note ??
+      (opts.revivedBy
+        ? `${officeName} brought the club back with ${opts.revivedBy} as President, and your membership is active again. You can leave from the club page anytime.`
+        : `${officeName} reinstated the club, and your membership is active again.`),
     href: `/clubs/${club.slug}`,
   });
+  return { status, told };
+}
+
+/** Admins (WSUSA, or the club's office) bring a retired club back: approved clubs return APPROVED, never-approved ones return to DRAFT. */
+export async function reinstateClub(actor: Actor | null, input: unknown) {
+  const v = parseForm(z.object({ clubId: id, note: optionalText(2000, "Keep the note under 2,000 characters.") }), input);
+  const club = await db.club.findUnique({ where: { id: v.clubId } });
+  assertCanAdminClub(actor, "admin.clubs", club ?? { officeId: null });
+  if (!club) throw notFound("Club");
+  const { status, told } = await reinstate(actor, club, v.note);
+  // A student's open request to bring it back is answered by this too.
+  const request = await openRevivalRequest(club.id);
+  if (request) {
+    await resolveTasks(CLUB_REVIVAL, club.id, actor.id, db, "CANCELLED");
+    if (request.createdById && !told.includes(request.createdById)) {
+      const office = await officeForClub(club.id);
+      await notify({
+        userIds: [request.createdById],
+        kind: "club.reinstated",
+        title: `${club.name} is back`,
+        body: `${office.name} reinstated the club, so your request to bring it back is closed. ${status === "APPROVED" ? "Register on its page to join." : "It's back with its founders as a draft."}`,
+        href: `/clubs/${club.slug}`,
+      });
+    }
+  }
   return { status };
+}
+
+// ─── Reviving a retired club (a student's request) ───────────────────────────
+
+/** The open request to bring a retired club back, if there is one (one at a time). */
+export function openRevivalRequest(clubId: string) {
+  return db.task.findFirst({
+    where: { sourceType: CLUB_REVIVAL, sourceId: clubId, status: "OPEN" },
+    select: { id: true, createdAt: true, description: true, createdById: true, createdBy: { select: { id: true, name: true, email: true, kind: true, status: true } } },
+  });
+}
+
+const RevivalRequestInput = z.object({ clubId: id, note: optionalText(REVIVAL_NOTE_MAX, `Keep the note under ${REVIVAL_NOTE_MAX.toLocaleString("en-US")} characters.`) });
+
+/**
+ * "Ask to revive it": a student asks the club's office to bring a retired
+ * club back, with them as its President. One open request per club: an
+ * APPROVAL task in the office's queue (sourceType clubRevival, routed by
+ * createTask), and the office's staff are told. The office approves
+ * (approveClubRevival) or declines with a note (declineClubRevival).
+ */
+export async function requestClubRevival(actor: Actor | null, input: unknown) {
+  assertSignedIn(actor);
+  const v = parseForm(RevivalRequestInput, input);
+  if (!canAskToRevive(actor)) throw forbidden(actor.kind === "STUDENT" ? "Alumni accounts can't lead clubs." : "Only students can ask to bring a club back, since its new President has to be a student.");
+  const club = await db.club.findUnique({ where: { id: v.clubId }, select: { id: true, name: true, status: true, type: true } });
+  if (!club) throw notFound("Club");
+  if (club.status !== "RETIRED") throw conflict(`${club.name} isn't retired, so there's nothing to bring back.`);
+  if (club.type === "COLLEGE_AMBASSADORS") throw invalid("WSUSA restarts college ambassador programs. Contact WSUSA if you'd like this one back.");
+  const office = await officeForClub(club.id);
+  const note = v.note;
+  // One request at a time, checked under a lock on the club so two students asking at once can't both file one.
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Club" WHERE id = ${club.id} FOR UPDATE`;
+    const open = await tx.task.findFirst({ where: { sourceType: CLUB_REVIVAL, sourceId: club.id, status: "OPEN" }, select: { createdById: true } });
+    if (open) throw conflict(open.createdById === actor.id ? `You already asked to bring ${club.name} back. ${office.name} will let you know.` : `Someone already asked to bring ${club.name} back, and ${office.name} is deciding.`);
+    await createTask(
+      {
+        kind: "APPROVAL",
+        title: `${actor.name} asked to bring back ${club.name}`,
+        description: note ?? revivalDefaultDescription(actor.name),
+        assignee: { type: "ADMINS" },
+        clubId: club.id,
+        href: revivalHref(club.id),
+        source: { type: CLUB_REVIVAL, id: club.id },
+        createdById: actor.id,
+      },
+      tx,
+    );
+    await logActivity({ actorId: actor.id, action: "club.revival_requested", entityType: "club", entityId: club.id, clubId: club.id, data: { note } }, tx);
+  });
+  await notifyOffice(
+    { clubId: club.id },
+    {
+      kind: "club.revival_requested",
+      title: `${actor.name} asked to bring back ${club.name}`,
+      body: note ?? `Bringing it back makes ${actor.name} its President.`,
+      href: revivalHref(club.id),
+      exceptUserId: actor.id,
+    },
+  );
+  return { office: office.name };
+}
+
+const RevivalDecisionInput = z.object({ clubId: id, note: optionalText(2000, "Keep the note under 2,000 characters.") });
+
+/** The open request, for the office deciding it (another office's club is not found). */
+async function revivalToDecide(actor: Actor | null, clubId: string) {
+  const club = await db.club.findUnique({ where: { id: clubId } });
+  assertCanAdminClub(actor, "admin.clubs", club ?? { officeId: null });
+  if (!club) throw notFound("Club");
+  const request = await openRevivalRequest(club.id);
+  if (!request?.createdBy) throw conflict("This request was already decided.");
+  return { club, request, requester: request.createdBy };
+}
+
+/** Closes the request only while it's open, so two staff deciding at once can't both act on it. */
+async function claimRevival(taskId: string, actorId: string, status: "DONE" | "CANCELLED") {
+  const claimed = await db.task.updateMany({ where: { id: taskId, status: "OPEN" }, data: { status, completedAt: new Date(), completedById: actorId } });
+  if (!claimed.count) throw conflict("This request was already decided.");
+}
+
+/**
+ * The office approves a revival request: the club is reinstated (the same
+ * path as reinstateClub) and the student who asked takes its President seat
+ * through the Org Chart's write path (roles.grantRole), told once.
+ */
+export async function approveClubRevival(actor: Actor | null, input: unknown) {
+  const v = parseForm(RevivalDecisionInput, input);
+  const { club, request, requester } = await revivalToDecide(actor, v.clubId);
+  if (club.status !== "RETIRED" || !club.retiredAt) throw conflict("Only retired clubs can be brought back.");
+  if (requester.kind !== "STUDENT" || requester.status !== "ACTIVE") {
+    throw invalid(`${requester.name} can't lead a club now: their account isn't an active student account. Decline the request with a note, or reinstate the club below.`);
+  }
+  const seat = await db.position.findFirst({ where: { clubId: club.id, role: "PRESIDENT", archivedAt: null }, orderBy: { sortOrder: "asc" }, select: { id: true } });
+  await claimRevival(request.id, actor!.id, "DONE");
+  let status: ClubStatus;
+  try {
+    // A fresh start: the members come back, the old seats don't, and the student who asked leads it.
+    ({ status } = await reinstate(actor!, club, v.note, { revivedBy: requester.name }));
+  } catch (e) {
+    // Nothing changed, so the request is still waiting.
+    await db.task.update({ where: { id: request.id }, data: { status: "OPEN", completedAt: null, completedById: null } });
+    throw e;
+  }
+  await grantRole({ clubId: club.id, userId: requester.id, role: "PRESIDENT", positionId: seat?.id ?? null, assignedById: actor!.id, checkSeat: Boolean(seat), notifyHolder: false });
+  await logActivity({ actorId: actor!.id, action: "club.revival_approved", entityType: "club", entityId: club.id, clubId: club.id, data: { userId: requester.id, note: v.note } });
+  const office = await officeForClub(club.id);
+  await notify({
+    userIds: [requester.id],
+    kind: "club.revival_approved",
+    title: `${office.name} brought ${club.name} back, with you as President`,
+    body: v.note ?? (status === "APPROVED" ? "It's an approved club again. Open its workspace to invite members and plan a first event." : "It's back as a draft. Finish its founding checklist and send it in."),
+    href: `/clubs/${club.slug}/manage`,
+  });
+  return { status, president: requester.name };
+}
+
+/** The office declines a revival request with a note; the student who asked hears why. */
+export async function declineClubRevival(actor: Actor | null, input: unknown) {
+  const v = parseForm(
+    z.object({ clubId: id, note: z.string({ error: "Add a note so the student knows why." }).trim().min(3, "Add a note so the student knows why.").max(2000, "Keep the note under 2,000 characters.") }),
+    input,
+  );
+  const { club, request, requester } = await revivalToDecide(actor, v.clubId);
+  await claimRevival(request.id, actor!.id, "CANCELLED");
+  await logActivity({ actorId: actor!.id, action: "club.revival_declined", entityType: "club", entityId: club.id, clubId: club.id, data: { userId: requester.id, note: v.note } });
+  const office = await officeForClub(club.id);
+  await notify({
+    userIds: [requester.id],
+    kind: "club.revival_declined",
+    title: `${office.name} isn't bringing ${club.name} back right now`,
+    body: v.note,
+    href: `/clubs/${club.slug}`,
+  });
 }
 
 // ─── College Ambassadors programs (admin) ────────────────────────────────────

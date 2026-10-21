@@ -12,10 +12,12 @@ import { campusDate, fmtDate, fmtLongDate, TZ } from "@/lib/time";
  *
  * Timing: the window opens on the first day of the academic year's first term
  * (lib/terms) and renewal is due `renewal.dueDays` days later (system config),
- * at the end of that campus day. Clubs approved after the window opened start
- * renewing the next year, and College Ambassadors programs (WSUSA's own) don't
- * renew. Missing the deadline changes nothing on its own: no pausing, no
- * retiring. WSUSA decides what to do.
+ * at the end of that campus day. It's one window for every club, whatever its
+ * bylaws say about terms of office: a President who takes office mid-window
+ * picks up the club's renewal as it stands (renewalTaskPlan). Clubs approved
+ * after the window opened start renewing the next year, and College
+ * Ambassadors programs (WSUSA's own) don't renew. Missing the deadline changes
+ * nothing on its own: no pausing, no retiring. WSUSA decides what to do.
  */
 
 // ─── Names shared with tasks and the activity log ───────────────────────────
@@ -23,10 +25,24 @@ import { campusDate, fmtDate, fmtLongDate, TZ } from "@/lib/time";
 /** Task source for renewal tasks. sourceId = renewalSourceId(clubId, year). */
 export const RENEWAL_SOURCE = "clubRenewal";
 export const renewalSourceId = (clubId: string, year: string) => `${clubId}:${year}`;
+/** The club a renewal task is about, from its sourceId; null for one that doesn't name a club. */
+export function renewalSourceClub(sourceId: string | null): string | null {
+  const at = (sourceId ?? "").indexOf(":");
+  return at > 0 ? sourceId!.slice(0, at) : null;
+}
 /** "Renew RC Wrecker Bots Club for 2026–27" */
 export const renewalTaskTitle = (clubName: string, year: string) => `Renew ${clubName} for ${year}`;
-export const RENEWAL_TASK_DESCRIPTION =
-  "WSUSA re-registers every club once a year. Check the club's details on its workspace Overview and confirm it will be active this academic year.";
+/**
+ * The task's description, naming who the club renews with (the office that
+ * oversees it). Someone who took the seat after renewal opened hears that
+ * it's theirs to finish now.
+ */
+export function renewalTaskDescription(office: string, tookOffice = false): string {
+  const how = "Check the club's details on its workspace Overview and confirm it will be active this academic year.";
+  return tookOffice
+    ? `You took office after renewal opened, and the club hasn't re-registered with ${office} yet, so it's yours to finish. ${how}`
+    : `${office} re-registers every club once a year. ${how}`;
+}
 /** The one thing nothing can compute: the person renewing confirms it. */
 export const activeConfirmation = (clubName: string) => `${clubName} will be active this academic year.`;
 export const RENEWAL_NOTE_MAX = 1000;
@@ -65,20 +81,31 @@ export function renewalTerm<T extends RenewalTerm>(terms: T[], now: Date): T | n
 }
 
 /** Why a club isn't asked to renew in this window, as a sentence about it, or null when it is asked. */
-export function renewalExemption(club: { status: string; type: string; approvedAt: Date | null }, window: RenewalWindow | null): string | null {
+export function renewalExemption(club: { status: string; type: string; approvedAt: Date | null }, window: RenewalWindow | null, office = "WSUSA"): string | null {
   if (!window) return "Renewal opens once the academic calendar has terms.";
   if (club.type === "COLLEGE_AMBASSADORS") return "College ambassador programs don't renew: WSUSA runs them.";
-  if (club.status !== "APPROVED") return "Only approved clubs renew with WSUSA.";
+  if (club.status !== "APPROVED") return `Only approved clubs renew with ${office}.`;
   if (club.approvedAt && club.approvedAt >= window.opensAt) return "It was approved this academic year, so it renews starting next year.";
   return null;
 }
 
 /**
- * The bell when someone's renewal task opens (lib/jobs/renewals and the seed).
- * `late`: it opened after the due date. `office`: who the club renews with
- * (the office that oversees it, lib/offices).
+ * The bell when someone's renewal task opens (lib/domain/renewals
+ * syncClubRenewal and the seed). `late`: it opened after the due date.
+ * `office`: who the club renews with (the office that oversees it,
+ * lib/offices). `tookOffice`: they took the seat after renewal opened, so
+ * the club's renewal is news to them and theirs to finish.
  */
-export function renewalDueNotice(clubName: string, window: RenewalWindow, late: boolean, office = "WSUSA"): { title: string; body: string } {
+export function renewalDueNotice(clubName: string, window: RenewalWindow, late: boolean, office = "WSUSA", tookOffice?: Pick<RenewalHolder, "role" | "since"> | null): { title: string; body: string } {
+  if (tookOffice) {
+    const as = tookOffice.role === "ADVISOR" ? "its advisor" : "President";
+    return {
+      title: `${clubName} still needs to renew for ${window.year}`,
+      body: late
+        ? `It was due ${fmtLongDate(window.dueAt)}${tookOffice.since > window.dueAt ? ", before you took office" : ""}, and it's yours to finish as ${as}. Check the club's details and renew with ${office} when you can.`
+        : `It's yours to finish as ${as}: check the club's details and renew with ${office} by ${fmtDate(window.dueAt, "MMM d")}.`,
+    };
+  }
   return {
     title: `Time to renew ${clubName} for ${window.year}`,
     body: late
@@ -113,10 +140,10 @@ export const RENEWAL_STATUS_TONE = {
   renewed: "brand",
 } as const satisfies Record<RenewalStatusKind, LabelTone>;
 
-export function renewalStatus(input: { window: RenewalWindow | null; now: Date; renewedAt: Date | null; exemption: string | null }): RenewalStatus {
+export function renewalStatus(input: { window: RenewalWindow | null; now: Date; renewedAt: Date | null; exemption: string | null; office?: string }): RenewalStatus {
   const { window, now } = input;
   const make = (kind: RenewalStatusKind, label: string, hint: string): RenewalStatus => ({ kind, label, hint, tone: RENEWAL_STATUS_TONE[kind] });
-  if (window && input.renewedAt) return make("renewed", `Re-registered ${window.year}`, `Renewed with WSUSA on ${fmtLongDate(input.renewedAt)}.`);
+  if (window && input.renewedAt) return make("renewed", `Re-registered ${window.year}`, `Renewed with ${input.office ?? "WSUSA"} on ${fmtLongDate(input.renewedAt)}.`);
   if (!window) return make("upcoming", "Not open yet", input.exemption ?? "Renewal opens once the academic calendar has terms.");
   if (input.exemption) return make("upcoming", "Not open yet", input.exemption);
   if (now < window.opensAt) return make("upcoming", "Not open yet", `Renewal for ${window.year} opens ${fmtLongDate(window.opensAt)}.`);
@@ -269,3 +296,95 @@ export function renewerBlocker(a: RenewerAccess, clubName: string): string | nul
   if (a.suspended && (a.role === "PRESIDENT" || a.role === "VP")) return "Your leadership permissions are paused until you finish your overdue WSUSA requirement. Your advisor can renew in the meantime.";
   return `Only the President, a Vice President, an advisor or WSUSA can renew ${clubName}.`;
 }
+
+// ─── Whose task it is ────────────────────────────────────────────────────────
+
+/** A current President or advisor: the seats that hold a club's renewal task. `since`: when they took the seat. */
+export type RenewalHolder = { id: string; name: string; role: "PRESIDENT" | "ADVISOR"; since: Date };
+
+/** They took the seat after renewal opened, so the club's renewal wasn't theirs when the window started. */
+export function tookOfficeDuringWindow(holder: Pick<RenewalHolder, "since">, window: RenewalWindow): boolean {
+  return holder.since > window.opensAt;
+}
+
+/**
+ * The renewal card's first lines (lib/domain/renewals renewalView): what
+ * renewing is, or, for a President or advisor who took the seat after
+ * renewal opened, that the club hasn't renewed and it's theirs to finish.
+ */
+export function renewalCardIntro(clubName: string, office: string, window: RenewalWindow, tookOffice?: Pick<RenewalHolder, "role" | "since"> | null): string {
+  const finish = "Once the required checks are green, confirm the club will be active and you're done.";
+  if (!tookOffice) return `${office} re-registers its clubs once a year. ${finish}`;
+  const seat = tookOffice.role === "ADVISOR" ? `${clubName}'s advisor` : "President";
+  return `You became ${seat} on ${fmtLongDate(tookOffice.since)}, after renewal opened, and the club hasn't re-registered with ${office} for ${window.year} yet, so it's yours to finish. ${finish}`;
+}
+
+/** The line beside the Renew button: the status's hint, saying so when it was due before they took office. */
+export function renewalCardHint(status: RenewalStatus, window: RenewalWindow, tookOffice?: Pick<RenewalHolder, "since"> | null): string {
+  if (tookOffice && status.kind === "overdue" && tookOffice.since > window.dueAt) return `It was due ${fmtLongDate(window.dueAt)}, before you took office. Renew as soon as you can.`;
+  return status.hint;
+}
+
+// ─── The tasks ───────────────────────────────────────────────────────────────
+
+/** An open renewal task, as the sync reads it. */
+export type RenewalTaskRow = { id: string; sourceId: string | null; assigneeId: string | null; dueAt: Date | null; officeId: string | null; title: string };
+
+/** What the plan reads about a club (lib/renewals/facts ClubRenewalState has it). */
+export type RenewalTaskState = {
+  /** `officeId`: the office the club renews with, which its tasks name ("Required by Campus Rec"); null for WSUSA. */
+  club: { id: string; name: string; officeId: string | null };
+  exemption: string | null;
+  renewal: { submittedAt: Date } | null;
+  holders: RenewalHolder[];
+};
+
+export type RenewalTaskPlan = {
+  /** Current Presidents and advisors without a task: theirs opens now. */
+  open: RenewalHolder[];
+  /** The club renewed: these close as done. */
+  done: string[];
+  /** No longer theirs: they left the seat, renewal isn't open, the club isn't asked, or it's an earlier year's. Cancelled. */
+  cancel: string[];
+  /** Still theirs, but the due date, the club's office or its name changed: brought in line. */
+  update: string[];
+};
+
+/**
+ * One club's renewal tasks against where it stands: the plan the "Club
+ * renewals" job and every role change apply (lib/domain/renewals
+ * syncClubRenewal). While renewal is open, a club that's asked and hasn't
+ * renewed has one open task per current President and advisor, due when the
+ * window is; once it renews they close as done; anything else is cancelled.
+ * `state` is null when the club no longer exists.
+ */
+export function renewalTaskPlan(state: RenewalTaskState | null, tasks: RenewalTaskRow[], window: RenewalWindow | null, now: Date): RenewalTaskPlan {
+  const plan: RenewalTaskPlan = { open: [], done: [], cancel: [], update: [] };
+  if (!state || !window || now < window.opensAt || state.exemption) {
+    plan.cancel = tasks.map((t) => t.id);
+    return plan;
+  }
+  const current = renewalSourceId(state.club.id, window.year);
+  const title = renewalTaskTitle(state.club.name, window.year);
+  const kept = new Set<string>();
+  for (const t of tasks) {
+    if (t.sourceId !== current) plan.cancel.push(t.id);
+    else if (state.renewal) plan.done.push(t.id);
+    else if (!t.assigneeId || kept.has(t.assigneeId) || !state.holders.some((h) => h.id === t.assigneeId)) plan.cancel.push(t.id);
+    else {
+      kept.add(t.assigneeId);
+      if (t.dueAt?.getTime() !== window.dueAt.getTime() || (t.officeId ?? null) !== state.club.officeId || t.title !== title) plan.update.push(t.id);
+    }
+  }
+  if (!state.renewal) {
+    for (const h of state.holders) {
+      if (kept.has(h.id)) continue;
+      kept.add(h.id);
+      plan.open.push(h);
+    }
+  }
+  return plan;
+}
+
+/** Nothing to do: the club's tasks are already what renewalTaskPlan wants. */
+export const isEmptyPlan = (p: RenewalTaskPlan) => !p.open.length && !p.done.length && !p.cancel.length && !p.update.length;

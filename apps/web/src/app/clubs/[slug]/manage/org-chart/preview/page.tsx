@@ -11,7 +11,7 @@ export default async function OrgChartPreviewPage({ params }: { params: Promise<
   const { club } = await loadClubWorkspace(slug);
   return (
     <div>
-      <ToolHeader slug={club.slug} clubName={club.name} />
+      <ToolHeader slug={club.slug} clubName={club.name} officersLetter={club.status === "APPROVED"} />
       <Callout tone="info" className="mb-6">
         This is what members and visitors see on {club.name}&apos;s page. &ldquo;Training pending&rdquo; notes show only to club leaders.
       </Callout>

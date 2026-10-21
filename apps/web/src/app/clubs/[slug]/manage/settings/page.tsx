@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/authz";
+import { isFounder } from "@/lib/authz/founding";
 import { INSTITUTION } from "@/lib/institution";
 import { fmtLongDate } from "@/lib/time";
 import { loadClubWorkspace } from "@/lib/clubs/context";
@@ -11,7 +12,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { KeyValue, PageHeader } from "@/components/ui/layout";
 import { AdvisorPanel } from "@/components/founding/AdvisorPanel";
 import { RetireClubDialog } from "@/components/founding/RetireClubDialog";
-import { CohostToggle, ContactEmailForm, LeaveClubButton } from "@/components/founding/SettingsControls";
+import { CohostToggle, ContactEmailForm, FormingToggle, LeaveClubButton } from "@/components/founding/SettingsControls";
 import { JOIN_LABEL, SUCCESSION_LABEL } from "@/components/founding/copy";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -83,6 +84,22 @@ export default async function ClubSettingsPage({ params }: { params: Promise<{ s
           />
         </CardBody>
       </Card>
+
+      {founding ? (
+        <Card>
+          <CardHeader title="Forming list" action={club.listedAsForming ? <Badge tone="brand">Listed</Badge> : null} />
+          <CardBody className="space-y-2">
+            <FormingToggle clubId={club.id} on={club.listedAsForming} disabled={!isFounder(access, club, user.id)} />
+            {!isFounder(access, club, user.id) ? (
+              <p className="text-xs text-ink-3">Only the club&apos;s founders can change this: its President, or whoever started it.</p>
+            ) : club.listedAsForming ? (
+              <Link href={`/clubs/${club.slug}?preview=forming`} className="inline-block text-sm font-medium text-brand-600 hover:underline">
+                See what students see
+              </Link>
+            ) : null}
+          </CardBody>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader title="Co-hosted events" />

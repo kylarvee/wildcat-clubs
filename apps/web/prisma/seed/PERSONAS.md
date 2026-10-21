@@ -46,9 +46,11 @@ Check-in codes are fixed: **HERE26** (live now), **LATER7** (later today),
 ## Sam Rivera — new student
 
 **Where Sam stands:** account created minutes before the seed ran. No majors,
-clubs, check-ins, tasks or notifications.
+clubs or check-ins. One thing waits for him: Frank invited him to help start
+Wildcat Beekeeping Society (a task in Tasks, a bell and the email).
 
-1. Sign in — the dashboard should feel empty and point Sam to the clubs list.
+1. Sign in — the dashboard points Sam to the clubs list, with Frank's
+   co-founder invitation in Tasks.
 2. Open **Clubs**: all 290 approved clubs on the real list (plus the two
    college ambassador orgs). Switch grid/list, filter by category, sort by
    rating, activity, attending members, retention, college or type. Most clubs
@@ -72,6 +74,14 @@ clubs, check-ins, tasks or notifications.
    open, so the check-in also makes Sam a member.
 7. Try to review a club — it stays locked until Sam has attended three events.
 8. **Report a concern** anonymously and keep the case code.
+9. **Tasks → *Frank Okafor invited you to help start Wildcat Beekeeping
+   Society***: open it (`/cofounder/…`) and **Accept**. Sam joins the founding
+   team (a member, source FOUNDER) and lands on the club's private page. Then,
+   as Frank, give him a seat on the org chart (Treasurer, say). Or **Decline**,
+   and Frank hears.
+10. **Clubs → Forming** (signed in only, on the plain list): Frank's two
+    clubs, with their founders' names and **Follow**. A forming club's page is
+    just that: name, short description, founders and Follow.
 
 ## Maya Chen — club member
 
@@ -374,6 +384,25 @@ The club runs its own *Event Safety Quiz*.
     too; reseed afterwards, since the club's story uses Advisor & President).
     A custom upload asks only what the document governs: bylaws ask the
     succession method, a constitution how students join.
+14. **Officers of record** (Org chart → **Download officers of record
+    (PDF)**): a one-page letter for a bank, a room booking or a sponsor. It
+    names the club, *Overseen by WSUSA* with WSUSA's office, hours, email and
+    phone, *Recognized since …* and *2026–27 renewal: Not yet re-registered*
+    (it was due September 30), then its officers in pipeline order (Priya
+    first, as President since May 1, 2026) and Dr. Alvarez as advisor, each
+    with a start date, and the date issued. No student's email or phone is
+    on it.
+    Its footer's QR code and `/verify/or.…` link open the officers as they
+    stand today, signed in or not. Every officer can download their club's
+    (Oscar can, for Wildcat Investors); a member like Maya can't. **Try
+    it:** after renewing (item 11), download it again: it reads
+    *Re-registered* with today's date, and so does the first letter's link.
+15. **Hand off and the renewal follows** (try last, then reseed): hand the
+    presidency to Vanessa (a member of the club) from the org chart. As
+    Vanessa, Tasks has *Renew RC Wrecker Bots Club for 2026–27* at once, the
+    bell says *RC Wrecker Bots Club still needs to renew for 2026–27*, and
+    the Overview's renewal card reads *You became President on …, after
+    renewal opened … so it's yours to finish*; Priya's task is cancelled.
 
 ## Amir Haddad — college ambassador
 
@@ -396,10 +425,13 @@ Association (WEA).
 - **Wildcat Beekeeping Society** — DRAFT, started about nine days before
   seeding. The profile is half-finished (no short description, an unfinished
   About), a constitution draft is started, and his advisor invitation to
-  Prof. Nathan Reed is pending.
+  Prof. Nathan Reed is pending. An invented student accepted his co-founder
+  invitation and sits in the Vice President seat; his invitation to Sam is
+  waiting. It's listed as forming, with six followers.
 - **Wildcat Puzzle Society** — SUBMITTED about five days before seeding.
   Advisor accepted (after an earlier invitee declined); constitution and bylaws
-  adopted with the builder. Waiting on WSUSA.
+  adopted with the builder. Waiting on WSUSA. Listed as forming, with four
+  followers.
 
 Both are new clubs, so they're fictional, and their names don't overlap any
 club on the real list.
@@ -410,6 +442,20 @@ club on the real list.
    and office; profile, org chart, constitution and files are still editable.
 3. Full loop: sign in as **Nathan** to accept, back as Frank to submit, then as
    **Alex** to approve.
+4. **Start a club** and type a name: *Similar clubs already exist* appears as
+   you type (the club search on the name and short description). "Hiking
+   Club" finds the Hiking and Outdoors Club (Active, its members and last
+   event) with **Join instead**; "Photography Club" finds the retired
+   Photographic Society, which says someone already asked to bring it back
+   ("Ballroom Dance" finds the retired Ballroom and Hip Hop Club with **Ask to
+   revive it**). Nothing blocks creating the draft. **List this club as
+   forming** is a checkbox there too.
+5. Beekeeping's Overview → **Your founding team**: the co-founder in the Vice
+   President seat, Sam's invitation (Resend, Cancel), and **Invite a
+   co-founder** by name and @mail.weber.edu email. A staff address is
+   refused, and at most eight invitations wait at once.
+6. Beekeeping's **Settings → Forming list**: the switch (founders only) and
+   **See what students see**.
 
 ## Gwen Torres — alumni
 
@@ -457,7 +503,17 @@ Beekeeping Society (task, notification, and a mocked email in the outbox).
 ## Alex Morgan — WSUSA administrator
 
 **Queues waiting for Alex:**
-- **Club review:** Wildcat Puzzle Society.
+- **Club review:** Wildcat Puzzle Society. Its review page has **Similar
+  clubs**, the list the founders' wizard showed (none look like this one, so
+  it says so; try the wizard for a full list), and marks its seated
+  co-founders. It's listed as forming: approving it turns that off and tells
+  its followers it's official (as Maya, follow it from **Clubs → Forming**
+  first, and her bell gets *Wildcat Puzzle Society is now an official Weber
+  State club*).
+- **Revival request:** an invented student asked to bring back Photographic
+  Society (retired 2025), as its President: Club approvals → **Revival
+  requests** (and its row in the queue). **Bring it back** reinstates it with
+  them in the President seat, and they hear once; **Decline** needs a note.
 - **Department request:** "Aviation Technology" for Aviation Club (changes
   requested, with a note).
 - **Custom bylaws:** Associated Artists of the Theatre (AAT)'s uploaded bylaws
@@ -572,7 +628,15 @@ about a real club.
   clubs have nobody in either seat. **Renewed** shows who renewed, when and
   any note, and **Download CSV** exports the list. Nothing pauses or retires
   on its own. The Overview's *Where clubs stand* has the count. The three
-  clubs approved this fall renew starting next year.
+  clubs approved this fall renew starting next year. Every club has the one
+  window, whatever its bylaws say about terms. Military-Affiliated Club's
+  President handed off about three weeks into the fall term, before the club
+  re-registered: **Not renewed** lists its new President, whose renewal task
+  opened the moment they took office (*… still needs to renew for 2026–27*
+  on their bell); the outgoing President's was cancelled the same moment.
+- **Officers of record:** Club approvals → any approved club → **Download
+  officers of record (PDF)** (under *Advisor & founders*): the same letter
+  the club's org chart offers. Each download is logged privately.
 
 - **Service hours:** People → Maya Chen → **Involvement record (PDF)** downloads
   her record (each download is logged, privately, as *Downloaded an
@@ -626,7 +690,10 @@ Reports, Review moderation, Announcements, Trainings, Offices and System are
 - **A club missing a leader:** Cornhole Club's only President stepped down two
   days ago, so Campus Rec has *Cornhole Club has no President*, and Rowan got
   the notice in-app and by email. Assign a President in its org chart and the
-  task closes.
+  task closes. Cornhole Club hasn't re-registered, so the new President's
+  *Renew Cornhole Club for 2026–27* task (marked *Required by Campus Rec*)
+  opens at the same moment, beside its advisor's; the old President's was
+  cancelled when they stepped down.
 - **Funding:** the Hiking and Outdoors Club's *Avalanche awareness course*,
   past Campus Rec's review time: an urgent row. Decide it like any request.
 - **Renewals** (Club approvals → Renewals): the sport clubs that haven't
@@ -668,6 +735,11 @@ staff*. The daily digest covers Campus Rec's queue only.
   and four fictional new clubs: Frank's draft and submitted clubs, Aviation
   Club (changes requested) and Campus Poker League (rejected, with the
   reason). Real clubs get no rating below 3★, no flags and no reports.
+- **Founding.** Frank's two clubs are listed as forming (six and four
+  invented followers), Beekeeping has a co-founder who accepted and sits in
+  its Vice President seat plus Sam's invitation waiting, and the retired
+  Photographic Society has one request to bring it back, from an invented
+  student, in WSUSA's queue (`steps/founding`, no randomness).
 - **Story clubs.** About 40 of the real clubs carry the walkthroughs above and
   keep their story's size and history (the RC Wrecker Bots Club has ~90
   members, though its real roster is smaller). They keep a stable key in
@@ -729,8 +801,11 @@ staff*. The daily digest covers Campus Rec's queue only.
   (busiest in the first week and the last few days), mostly by their
   President, sometimes by a VP or the advisor, a few with a note for WSUSA.
   Every club that hasn't renewed has a required *Renew <club> for 2026–27*
-  task for each current President and advisor, the way the *Club renewals*
-  job opens them.
+  task for each current President and advisor, marked as required by the
+  club's office: the history the renewal sync leaves (the *Club renewals*
+  job, and every role change). A President or advisor seated since Aug 31 got
+  theirs the moment they took the seat; one who left before the club renewed
+  had theirs cancelled that day; renewing closed the rest as done.
 
 All policy text is sample text and says so at the top. People, memberships,
 events and reviews are fictional even where the club is real; reports and

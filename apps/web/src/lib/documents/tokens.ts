@@ -2,9 +2,10 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * VERIFICATION LINKS for the documents the platform issues (the involvement
- * record today). A token names the kind of document, whose it is and when it
- * was issued, signed with an HMAC-SHA256 under a server secret:
+ * VERIFICATION LINKS for the documents the platform issues: a person's
+ * involvement record (subject: the user) and a club's officers of record
+ * (subject: the club). A token names the kind of document, whose it is and
+ * when it was issued, signed with an HMAC-SHA256 under a server secret:
  *
  *   <kind>.<subject id>.<issued at, base-36 ms>.<signature, base64url>
  *
@@ -16,7 +17,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 
 /** Short codes keep the QR small. Retiring a code retires its links. */
-export const DOCUMENT_KINDS = { involvement: "ir" } as const;
+export const DOCUMENT_KINDS = { involvement: "ir", officers: "or" } as const;
 export type DocumentKind = keyof typeof DOCUMENT_KINDS;
 
 export type DocumentClaim = { kind: DocumentKind; subjectId: string; issuedAt: Date };

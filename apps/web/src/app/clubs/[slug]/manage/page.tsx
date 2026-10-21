@@ -24,7 +24,7 @@ export default async function ClubOverviewPage({ params, searchParams }: { param
     case "CHANGES_REQUESTED":
       return <FoundingOverview club={club} access={access} justCreated={sp.created === "1" && club.status === "DRAFT"} />;
     case "SUBMITTED":
-      return <InReview club={club} />;
+      return <InReview club={club} access={access} />;
     case "REJECTED":
       return <NotApproved club={club} />;
     case "RETIRED":

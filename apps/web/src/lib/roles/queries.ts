@@ -175,10 +175,11 @@ export async function trainingStatusFor(holders: ChartHolder[], clubApprovedAt: 
 
 export type RequirementSummary = Pick<RoleRequirement, "id" | "name" | "description" | "kind" | "graceDays" | "renewal"> & { appliesTo: ClubRole[] };
 
-/** Active officer requirements (tests/trainings) — what a new role brings with it. */
-export async function activeRequirements(): Promise<RequirementSummary[]> {
+/** Active officer requirements (tests/trainings) — what a new role in this club brings with it: WSUSA's, plus its own office's. */
+export async function activeRequirements(clubId: string): Promise<RequirementSummary[]> {
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { officeId: true } });
   return db.roleRequirement.findMany({
-    where: { active: true },
+    where: { active: true, OR: [{ officeId: null }, ...(club?.officeId ? [{ officeId: club.officeId }] : [])] },
     orderBy: { name: "asc" },
     select: { id: true, name: true, description: true, kind: true, graceDays: true, renewal: true, appliesTo: true },
   });

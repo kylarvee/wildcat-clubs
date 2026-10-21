@@ -58,6 +58,8 @@ const QUEUES: {
   whenAny?: true;
 }[] = [
   { key: "club", sources: ["club"], label: "Club submissions", detail: "New clubs asking for recognition", href: "/admin/clubs", section: "clubs" },
+  // lib/domain/clubs requestClubRevival: a student asking to bring a retired club back, as its President.
+  { key: "clubRevival", sources: ["clubRevival"], label: "Revival requests", detail: "Students asking to bring a retired club back", href: "/admin/clubs?tab=revivals", section: "clubs" },
   // The other engineer's event review (lib/domain/events): flagged events wait here before they're published.
   { key: "eventReview", sources: ["eventReview"], label: "Events to review", detail: "Events with something flagged, waiting for the office", href: "/admin/events", section: "events" },
   { key: "departmentRequest", sources: ["departmentRequest"], label: "Department requests", detail: "Departments to add for Sponsored clubs", href: "/admin/clubs?tab=departments", section: "clubs" },

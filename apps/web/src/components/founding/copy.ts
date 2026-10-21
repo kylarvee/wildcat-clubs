@@ -40,6 +40,10 @@ export const JOIN_LABEL = JOIN_POLICY_LABEL;
 /** The four ways to fill a seat — one wording everywhere (lib/roles/labels). */
 export const SUCCESSION_LABEL: Record<SuccessionMethod, string> = ROLE_SUCCESSION_LABEL;
 
+/** What "List this club as forming" makes visible, said the same way in the wizard and in Settings. */
+export const FORMING_NOTE =
+  "Signed-in students see its name, short description and founders' names in a Forming section on the clubs list, and can follow it to hear when it's approved. You can turn this off anytime.";
+
 /** Curated club colors: Weber purple first, then tones that hold white text at AA contrast. */
 export const LOGO_PALETTE: { value: string; name: string }[] = [
   { value: "#492365", name: "Weber purple" },

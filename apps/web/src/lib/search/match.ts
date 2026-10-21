@@ -56,7 +56,8 @@ async function hitsFor(client: Client, tsq: Prisma.Sql, signedIn: boolean, names
 const VOCAB_TTL_MS = 10 * 60_000;
 const vocabCache = new Map<string, { at: number; words: Promise<Map<string, number>> }>();
 
-function vocabulary(client: Client, signedIn: boolean): Promise<Map<string, number>> {
+/** The index's words (lexemes from names, labels, about and events: weights A–C) with how many documents have each. Shared with lib/search/similar. */
+export function vocabulary(client: Client, signedIn: boolean): Promise<Map<string, number>> {
   const key = signedIn ? "campus" : "public";
   const hit = vocabCache.get(key);
   if (hit && Date.now() - hit.at < VOCAB_TTL_MS) return hit.words;

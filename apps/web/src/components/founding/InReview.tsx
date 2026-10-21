@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { Hourglass, XCircle } from "lucide-react";
 import type { Club } from "@prisma/client";
+import type { ClubAccess } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { officeForClub } from "@/lib/offices";
 import { DAY_MS, fmtLongDate } from "@/lib/time";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Callout } from "@/components/ui/layout";
 import { ClubOfficeContacts } from "@/components/founding/ClubOfficeContacts";
+import { FoundingTeam } from "@/components/founding/FoundingTeam";
 
 const nextSteps = (office: string) => [
   { title: "A reviewer reads your submission", body: "Your profile, constitution and bylaws, and who your founders are." },
@@ -18,9 +20,9 @@ const nextSteps = (office: string) => [
 /**
  * SUBMITTED: what the club's office (lib/offices: WSUSA, or the office its
  * scope and category sent it to) does next, how long its reviews take, and
- * who to contact.
+ * who to contact. The founding team keeps growing while it waits.
  */
-export async function InReview({ club }: { club: Club }) {
+export async function InReview({ club, access }: { club: Club; access: ClubAccess }) {
   const office = await officeForClub(club.id);
   const days = office.reviewDays;
   const submitted = club.submittedAt ?? club.createdAt;
@@ -48,6 +50,7 @@ export async function InReview({ club }: { club: Club }) {
         </CardBody>
       </Card>
       <ClubOfficeContacts clubId={club.id} description="Questions about your review? Reach out anytime." />
+      <FoundingTeam club={club} access={access} />
       <Card>
         <CardHeader title="While you wait" />
         <CardBody className="text-sm text-ink-2">

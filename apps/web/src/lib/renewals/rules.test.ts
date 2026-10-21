@@ -5,19 +5,30 @@ import {
   blockedMessage,
   blockingChecks,
   checkFix,
+  isEmptyPlan,
   joinNames,
   mayRenew,
   readSnapshot,
+  renewalCardHint,
+  renewalCardIntro,
   renewalChecks,
+  renewalDueNotice,
   renewalExemption,
+  renewalSourceClub,
   renewalSourceId,
   renewalStatus,
+  renewalTaskDescription,
+  renewalTaskPlan,
   renewalTaskTitle,
   renewalTerm,
   renewalWindow,
   renewerBlocker,
   snapshotChecks,
+  tookOfficeDuringWindow,
   type RenewalFacts,
+  type RenewalHolder,
+  type RenewalTaskRow,
+  type RenewalTaskState,
   type RenewalTerm,
 } from "./rules";
 
@@ -209,7 +220,103 @@ describe("who renews", () => {
 describe("names", () => {
   it("keeps task sources, titles and the confirmation in one place", () => {
     expect(renewalSourceId("c1", "2026–27")).toBe("c1:2026–27");
+    expect(renewalSourceClub("c1:2026–27")).toBe("c1");
+    expect([renewalSourceClub(null), renewalSourceClub("c1"), renewalSourceClub(":2026–27")]).toEqual([null, null, null]);
     expect(renewalTaskTitle("RC Wrecker Bots Club", "2026–27")).toBe("Renew RC Wrecker Bots Club for 2026–27");
     expect(activeConfirmation("SWE")).toBe("SWE will be active this academic year.");
+  });
+});
+
+describe("renewalTaskPlan (the per-club sync the job and every role change apply)", () => {
+  const window = renewalWindow(TERMS, OCT_18, 30)!;
+  const year = window.year;
+  const ana: RenewalHolder = { id: "ana", name: "Ana Lee", role: "PRESIDENT", since: campusDate(2026, 5, 1) };
+  const ben: RenewalHolder = { id: "ben", name: "Ben Ruiz", role: "PRESIDENT", since: campusDate(2026, 10, 14, 18) };
+  const elena: RenewalHolder = { id: "elena", name: "Dr. Elena Alvarez", role: "ADVISOR", since: campusDate(2022, 9, 1) };
+  const club = (over: Partial<RenewalTaskState> = {}): RenewalTaskState => ({ club: { id: "c1", name: "Chess Club", officeId: null }, exemption: null, renewal: null, holders: [ana, elena], ...over });
+  const task = (id: string, assigneeId: string | null, over: Partial<RenewalTaskRow> = {}): RenewalTaskRow => ({
+    id,
+    sourceId: renewalSourceId("c1", year),
+    assigneeId,
+    dueAt: window.dueAt,
+    officeId: null,
+    title: renewalTaskTitle("Chess Club", year),
+    ...over,
+  });
+  const inLine = [task("t-ana", "ana"), task("t-elena", "elena")];
+
+  it("gives a new President the task at once and cancels the outgoing President's", () => {
+    const plan = renewalTaskPlan(club({ holders: [ben, elena] }), inLine, window, OCT_18);
+    expect(plan.open.map((h) => h.id)).toEqual(["ben"]);
+    expect(plan.cancel).toEqual(["t-ana"]);
+    expect(plan).toMatchObject({ done: [], update: [] });
+  });
+
+  it("opens one task per current President and advisor the day renewal opens, and then has nothing to do", () => {
+    expect(renewalTaskPlan(club(), [], window, window.opensAt).open.map((h) => h.id)).toEqual(["ana", "elena"]);
+    expect(isEmptyPlan(renewalTaskPlan(club(), inLine, window, OCT_18))).toBe(true);
+    // A co-President takes office: only the new one gets a task.
+    expect(renewalTaskPlan(club({ holders: [ana, ben, elena] }), inLine, window, OCT_18).open.map((h) => h.id)).toEqual(["ben"]);
+  });
+
+  it("does nothing outside the window: before it opens, or with no academic calendar", () => {
+    const early = campusDate(2026, 8, 30);
+    expect(isEmptyPlan(renewalTaskPlan(club({ holders: [ben, elena] }), [], window, early))).toBe(true);
+    expect(isEmptyPlan(renewalTaskPlan(club({ holders: [ben, elena] }), [], null, OCT_18))).toBe(true);
+    // Anything left open then is cancelled.
+    expect(renewalTaskPlan(club(), inLine, window, early).cancel).toEqual(["t-ana", "t-elena"]);
+  });
+
+  it("does nothing once the club renewed, beyond closing what's still open as done", () => {
+    const renewed = club({ holders: [ben, elena], renewal: { submittedAt: campusDate(2026, 9, 20) } });
+    expect(isEmptyPlan(renewalTaskPlan(renewed, [], window, OCT_18))).toBe(true);
+    expect(renewalTaskPlan(renewed, inLine, window, OCT_18)).toMatchObject({ open: [], done: ["t-ana", "t-elena"], cancel: [] });
+  });
+
+  it("cancels the tasks of clubs that aren't asked or are gone, earlier years' tasks and duplicates", () => {
+    expect(renewalTaskPlan(club({ exemption: "It was approved this academic year, so it renews starting next year." }), inLine, window, OCT_18).cancel).toEqual(["t-ana", "t-elena"]);
+    expect(renewalTaskPlan(null, inLine, window, OCT_18).cancel).toEqual(["t-ana", "t-elena"]);
+    const plan = renewalTaskPlan(club(), [...inLine, task("t-old", "ana", { sourceId: renewalSourceId("c1", "2025–26") }), task("t-twice", "ana"), task("t-nobody", null)], window, OCT_18);
+    expect(plan.cancel).toEqual(["t-old", "t-twice", "t-nobody"]);
+    expect(plan.open).toEqual([]);
+  });
+
+  it("keeps one window for every club: open tasks follow its due date, the club's office and its name", () => {
+    const later = renewalWindow(TERMS, OCT_18, 45)!;
+    expect(renewalTaskPlan(club(), inLine, later, OCT_18).update).toEqual(["t-ana", "t-elena"]);
+    expect(renewalTaskPlan(club({ club: { id: "c1", name: "Chess Club", officeId: "campus-rec" } }), inLine, window, OCT_18).update).toEqual(["t-ana", "t-elena"]);
+    expect(renewalTaskPlan(club({ club: { id: "c1", name: "Wildcat Chess", officeId: null } }), inLine, window, OCT_18).update).toEqual(["t-ana", "t-elena"]);
+  });
+});
+
+describe("wording for a President or advisor who took office mid-window", () => {
+  const window = renewalWindow(TERMS, OCT_18, 30)!;
+  const since = campusDate(2026, 10, 14, 18);
+  const status = renewalStatus({ window, now: OCT_18, renewedAt: null, exemption: null });
+
+  it("knows who took the seat after renewal opened", () => {
+    expect(tookOfficeDuringWindow({ since }, window)).toBe(true);
+    expect(tookOfficeDuringWindow({ since: campusDate(2026, 5, 1) }, window)).toBe(false);
+    expect(tookOfficeDuringWindow({ since: window.opensAt }, window)).toBe(false);
+  });
+
+  it("tells them the club hasn't renewed and it's theirs to finish, on the card, the task and the bell", () => {
+    expect(renewalCardIntro("Chess Club", "Campus Recreation", window, { role: "PRESIDENT", since })).toBe(
+      "You became President on Oct 14, 2026, after renewal opened, and the club hasn't re-registered with Campus Recreation for 2026–27 yet, so it's yours to finish. Once the required checks are green, confirm the club will be active and you're done.",
+    );
+    expect(renewalCardIntro("Chess Club", "WSUSA", window, { role: "ADVISOR", since })).toMatch(/^You became Chess Club's advisor on Oct 14, 2026/);
+    expect(renewalCardIntro("Chess Club", "WSUSA", window)).toBe("WSUSA re-registers its clubs once a year. Once the required checks are green, confirm the club will be active and you're done.");
+    expect(renewalCardHint(status, window, { since })).toBe("It was due Sep 30, 2026, before you took office. Renew as soon as you can.");
+    expect(renewalCardHint(status, window, { since: campusDate(2026, 9, 10) })).toBe(status.hint);
+    expect(renewalTaskDescription("Campus Recreation", true)).toMatch(/^You took office after renewal opened, and the club hasn't re-registered with Campus Recreation yet/);
+    expect(renewalTaskDescription("WSUSA")).toMatch(/^WSUSA re-registers every club once a year/);
+    expect(renewalDueNotice("Chess Club", window, true, "WSUSA", { role: "PRESIDENT", since })).toEqual({
+      title: "Chess Club still needs to renew for 2026–27",
+      body: "It was due Sep 30, 2026, before you took office, and it's yours to finish as President. Check the club's details and renew with WSUSA when you can.",
+    });
+    expect(renewalDueNotice("Chess Club", window, false, "WSUSA", { role: "ADVISOR", since: campusDate(2026, 9, 10) }).body).toBe(
+      "It's yours to finish as its advisor: check the club's details and renew with WSUSA by Sep 30.",
+    );
+    expect(renewalDueNotice("Chess Club", window, false).title).toBe("Time to renew Chess Club for 2026–27");
   });
 });

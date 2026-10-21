@@ -14,7 +14,20 @@ import { evaluateClubActivity } from "@/lib/metrics/pure";
 import { serviceLine, summarizeService } from "@/lib/metrics/service";
 import { unanimousChoice } from "@/lib/roles/pipeline";
 import { loadRenewalStates } from "@/lib/renewals/facts";
-import { isRequiredCheck, readSnapshot, RENEWAL_SOURCE, renewalSourceId, renewalTaskTitle, renewalTerm, renewalWindow } from "@/lib/renewals/rules";
+import {
+  isEmptyPlan,
+  isRequiredCheck,
+  readSnapshot,
+  RENEWAL_SOURCE,
+  renewalSourceClub,
+  renewalSourceId,
+  renewalTaskPlan,
+  renewalTaskTitle,
+  renewalTerm,
+  renewalWindow,
+  tookOfficeDuringWindow,
+} from "@/lib/renewals/rules";
+import { loadOfficersRecord } from "@/lib/documents/officers";
 import { fmtLongDate } from "@/lib/time";
 import { COST_CATEGORIES } from "@/lib/events/labels";
 import { listWindow, shortcutRange } from "@/lib/events/browse-params";
@@ -26,6 +39,8 @@ import { lineCents } from "@/lib/funding/math";
 import { followUpKeys, INVOICE_DUE_DAYS, pastReviewTime } from "@/lib/funding/review";
 import { ORPHAN_REQUEST_DAYS, ORPHAN_REQUESTS_SOURCE, parseStaffingSourceId, seatApproves, STAFFING_SOURCE } from "@/lib/staffing/rules";
 import { OFFICE_KEYS, officeKeyForClub, routeAdminTask, storedOfficeId } from "@/lib/offices/rules";
+import { CLUB_REVIVAL, COFOUNDER_INVITE, COFOUNDER_PENDING_CAP, isFounding } from "@/lib/founding/rules";
+import { emailKind } from "@/lib/institution";
 import { CLUBS, DEMO_CLUB_KEYS, DIRECTORY, clubByKey } from "./data/clubs";
 import { DIGEST_KINDS, digestOn, NOTIFICATION_KINDS, readPrefs, resolveDelivery } from "@/components/notifications/catalog";
 import { fmtDate } from "@/lib/time";
@@ -488,20 +503,48 @@ async function renewalChecks() {
     `${logs.length} rows for ${rows.length} renewals`,
   );
 
-  // The tasks are what the "Club renewals" job keeps (lib/jobs/renewals): one per current President and advisor until the club renews.
-  const tasks = await db.task.findMany({ where: { sourceType: RENEWAL_SOURCE }, include: { club: { select: { name: true } } } });
-  const offShape = tasks.filter((t) => t.kind !== "REQUIREMENT" || !t.required || t.dueAt?.getTime() !== window.dueAt.getTime() || t.sourceId !== renewalSourceId(t.clubId ?? "", window.year) || t.title !== renewalTaskTitle(t.club?.name ?? "", window.year));
-  check(tasks.length > 0 && offShape.length === 0, `Every renewal task is a required REQUIREMENT, "Renew <club> for ${window.year}", due ${fmtLongDate(window.dueAt)}`, `${offShape.length} of ${tasks.length} off`);
-  const wrong: string[] = [];
-  for (const s of states) {
-    const open = tasks.filter((t) => t.clubId === s.club.id && t.status === "OPEN").map((t) => t.assigneeId ?? "").sort();
-    const want = s.renewal || s.exemption ? [] : [...new Set([...s.presidents, ...s.advisors].map((p) => p.id))].sort();
-    if (open.join() !== want.join()) wrong.push(s.club.name);
-    else if (s.renewal && tasks.some((t) => t.clubId === s.club.id && t.status !== "DONE")) wrong.push(`${s.club.name} (renewed, task not done)`);
-  }
-  check(wrong.length === 0, "Clubs that haven't renewed have one open task per current President and advisor; renewed clubs' tasks are done", wrong.slice(0, 5).join(", "));
+  // The tasks are what the renewal sync keeps (lib/domain/renewals syncClubRenewal, run by the job and every role change).
+  const tasks = await db.task.findMany({ where: { sourceType: RENEWAL_SOURCE }, include: { club: { select: { name: true, officeId: true } } } });
+  const offShape = tasks.filter(
+    (t) =>
+      t.kind !== "REQUIREMENT" ||
+      !t.required ||
+      t.dueAt?.getTime() !== window.dueAt.getTime() ||
+      t.sourceId !== renewalSourceId(t.clubId ?? "", window.year) ||
+      t.title !== renewalTaskTitle(t.club?.name ?? "", window.year) ||
+      (t.officeId ?? null) !== (t.club?.officeId ?? null),
+  );
+  check(
+    tasks.length > 0 && offShape.length === 0,
+    `Every renewal task is a required REQUIREMENT, "Renew <club> for ${window.year}", due ${fmtLongDate(window.dueAt)}, marked as required by the club's office`,
+    `${offShape.length} of ${tasks.length} off`,
+  );
+  const openOf = (clubId: string) => tasks.filter((t) => t.status === "OPEN" && renewalSourceClub(t.sourceId) === clubId);
+  const outOfLine = states.filter((s) => !isEmptyPlan(renewalTaskPlan(s, openOf(s.club.id), window, NOW))).map((s) => s.club.name);
+  const offList = tasks.filter((t) => t.status === "OPEN" && !states.some((s) => s.club.id === renewalSourceClub(t.sourceId)));
+  check(
+    outOfLine.length === 0 && offList.length === 0,
+    "Every club's open renewal tasks are exactly what the sync keeps: one per current President and advisor until the club renews (the next run changes nothing)",
+    [...outOfLine, ...offList.map((t) => t.club?.name ?? "?")].slice(0, 5).join(", "),
+  );
+  // History: a task closed as done when the club renewed, or was cancelled the moment its holder left the seat before that.
+  const ended = await db.roleAssignment.findMany({
+    where: { clubId: { in: [...new Set(tasks.map((t) => t.clubId ?? ""))] }, role: { in: ["PRESIDENT", "ADVISOR"] }, endedAt: { not: null } },
+    select: { clubId: true, userId: true, endedAt: true },
+  });
+  const badHistory = tasks.filter((t) => {
+    const s = states.find((x) => x.club.id === t.clubId);
+    if (t.status === "DONE") return !s?.renewal || t.completedAt?.getTime() !== s.renewal.submittedAt.getTime();
+    if (t.status === "CANCELLED") return !ended.some((a) => a.clubId === t.clubId && a.userId === t.assigneeId && a.endedAt!.getTime() === t.completedAt?.getTime()) || (s?.renewal ? t.completedAt! >= s.renewal.submittedAt : false);
+    return t.status !== "OPEN";
+  });
+  check(badHistory.length === 0, "Closed renewal tasks closed as done at the club's renewal, or were cancelled the moment their holder left the seat before it", `${badHistory.length} of ${tasks.length}`);
   const unstaffed = asked.filter((s) => !s.renewal && !s.presidents.length && !s.advisors.length);
-  check(unstaffed.length >= 150 && unstaffed.every((s) => !tasks.some((t) => t.clubId === s.club.id)), "Approved clubs with nobody in the President's or advisor's seat get no task, and show as not renewed", `${unstaffed.length} clubs`);
+  check(
+    unstaffed.length >= 150 && unstaffed.every((s) => !openOf(s.club.id).length),
+    "Approved clubs with nobody in the President's or advisor's seat have no open task, and show as not renewed",
+    `${unstaffed.length} clubs`,
+  );
   const exempt = states.filter((s) => s.exemption);
   check(exempt.every((s) => !s.renewal && !tasks.some((t) => t.clubId === s.club.id)), "Clubs approved this academic year aren't asked to renew until next year", exempt.map((s) => s.club.name).join(", "));
 
@@ -524,6 +567,55 @@ async function renewalChecks() {
     Boolean(micro) && !micro!.renewal && micro!.presidents.length > 0 && micro!.blocking.map((c) => c.key).join() === "advisor",
     `${micro?.club.name ?? "Microbiology Club"} can't renew: it has a President but no advisor (the blocking check)`,
   );
+  // A President who took office mid-window holds the club's task; the outgoing President's was cancelled when they left (steps/renewals names the club).
+  const handover = states.find((s) => {
+    if (s.renewal || s.exemption) return false;
+    const fresh = s.presidents.find((p) => tookOfficeDuringWindow(p, window) && openOf(s.club.id).some((t) => t.assigneeId === p.id));
+    return Boolean(fresh && tasks.some((t) => t.clubId === s.club.id && t.status === "CANCELLED" && t.assigneeId !== fresh.id && !s.presidents.some((p) => p.id === t.assigneeId)));
+  });
+  const newPres = handover?.presidents.find((p) => tookOfficeDuringWindow(p, window));
+  check(
+    Boolean(handover && newPres),
+    `${handover?.club.name ?? "A club"}'s President changed after renewal opened: ${newPres?.name ?? "the new President"} (since ${newPres ? fmtLongDate(newPres.since) : "?"}) holds its open renewal task, and the outgoing President's was cancelled when they left`,
+  );
+  const handoverTask = handover && newPres ? openOf(handover.club.id).find((t) => t.assigneeId === newPres.id) : undefined;
+  check(Boolean(handoverTask?.description?.startsWith("You took office after renewal opened")), "…and their task says it's theirs to finish because they took office after renewal opened");
+}
+
+/**
+ * The officers of record letter (lib/documents/officers, lib/domain/officers):
+ * Priya can download RC Wrecker Bots Club's, it lists her as President with
+ * Dr. Alvarez as advisor and WSUSA's public contacts, it carries no student's
+ * contact details, a member (Maya, in Psi Chi) can't download one, and a
+ * Campus Rec club's letter names Campus Recreation.
+ */
+async function officersChecks() {
+  const terms = await db.term.findMany({ orderBy: { startsOn: "asc" } });
+  const window = renewalWindow(terms, NOW, 30);
+  const [priya, elena, maya] = await Promise.all([user("priya"), user("elena"), user("maya")]);
+  const robotics = await club("robotics");
+  // Who may download: whoever opens the club's workspace (lib/authz isLeader: Ambassador and up, advisors, admins and office staff).
+  const leads = (userId: string, clubId: string) => db.roleAssignment.count({ where: { userId, clubId, endedAt: null, role: { not: "MEMBER" } } });
+  check(robotics.status === "APPROVED" && (await leads(priya.id, robotics.id)) > 0, `Priya leads ${robotics.name}, so she can download its officers of record (Org chart → Download officers of record)`);
+  const letter = await loadOfficersRecord(db, robotics.id, { window, now: NOW });
+  check(
+    letter?.officers[0]?.role === "PRESIDENT" && letter.officers[0].name === priya.name && letter.advisors.some((a) => a.name === elena.name),
+    `…and it lists ${priya.name} first, as ${letter?.officers[0]?.title ?? "President"} since ${letter?.officers[0] ? fmtLongDate(letter.officers[0].since) : "?"}, with ${elena.name} as advisor`,
+    `${letter?.officers.length ?? 0} officers, ${letter?.advisors.length ?? 0} ${letter?.advisors.length === 1 ? "advisor" : "advisors"}`,
+  );
+  check(letter?.office.name === "WSUSA" && Boolean(letter.office.email) && letter.renewal.kind === "overdue", "…overseen by WSUSA with its public contacts, and not yet re-registered for this year");
+  const students = await db.user.findMany({ where: { kind: "STUDENT", OR: [{ roleAssignments: { some: { clubId: robotics.id, endedAt: null } } }] }, select: { email: true, details: { select: { phone: true } } } });
+  const text = JSON.stringify(letter);
+  const leaked = students.filter((s) => text.includes(s.email) || (s.details?.phone && text.includes(s.details.phone)));
+  check(students.length > 0 && leaked.length === 0 && !/@mail\.weber\.edu/.test(text), "…with no student's email or phone anywhere on it", `${leaked.length} leaked`);
+  const psych = await club("psych");
+  const mayaSeats = await leads(maya.id, psych.id);
+  const mayaMember = await db.membership.count({ where: { userId: maya.id, clubId: psych.id, status: "ACTIVE" } });
+  check(mayaMember === 1 && mayaSeats === 0 && maya.platformRole === "USER", `Maya is a member of ${psych.name} with no leader seat, so she can't download its officers of record`);
+  const rec = await db.office.findUnique({ where: { key: OFFICE_KEYS.campusRec } });
+  const climbing = await club("climbing");
+  const recLetter = await loadOfficersRecord(db, climbing.id, { window, now: NOW });
+  check(Boolean(rec) && climbing.officeId === rec!.id && recLetter?.office.name === rec!.name && recLetter.office.email === rec!.email, `${climbing.name}'s letter says it's overseen by ${rec?.name ?? "Campus Recreation"}, with that office's contacts`);
 }
 
 /**
@@ -1011,6 +1103,9 @@ async function main() {
   console.log("Renewals");
   await renewalChecks();
 
+  console.log("Officers of record");
+  await officersChecks();
+
   console.log("Notifications");
   await notificationChecks();
   await deliveryChecks();
@@ -1032,6 +1127,9 @@ async function main() {
 
   console.log("Event reviews");
   await eventReviewChecks();
+
+  console.log("Founding: co-founders, the forming list, revival requests");
+  await foundingChecks();
 
   console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
   await db.$disconnect();
@@ -1322,6 +1420,71 @@ async function eventReviewChecks() {
   const history = await db.event.count({ where: { reviewStatus: "APPROVED", riskFlags: { isEmpty: false }, startsAt: { lt: NOW } } });
   check(history >= 3, "A few past events carry flags, reviewed before they happened", `${history} events`);
   check((await db.attendance.count({ where: { occurrence: { event: { reviewStatus: { in: [...UNDER_REVIEW] } } } } })) === 0, "Nothing under review has attendance");
+}
+
+/**
+ * Founding (lib/domain/cofounders, clubs; steps/founding): Frank's draft has
+ * a co-founder who accepted his invitation and sits in the Vice President
+ * seat, and an invitation waiting for Sam (a task and a bell). It and his
+ * club in review are listed as forming, with followers who aren't members
+ * (Maya isn't one yet), nothing decided is listed, and forming clubs stay out
+ * of search. WSUSA has one request to bring a retired club back, from an
+ * invented student.
+ */
+async function foundingChecks() {
+  const [frank, sam, maya, bee, puzzle, photo] = await Promise.all([user("frank"), user("sam"), user("maya"), club("beekeeping"), club("boardgames"), club("photo")]);
+
+  const accepted = await db.cofounderInvite.findMany({ where: { clubId: bee.id, status: "ACCEPTED" } });
+  const cofounderId = accepted[0]?.inviteeId ?? "";
+  const [membership, vp] = await Promise.all([
+    db.membership.findUnique({ where: { userId_clubId: { userId: cofounderId, clubId: bee.id } } }),
+    db.roleAssignment.findFirst({ where: { clubId: bee.id, userId: cofounderId, endedAt: null, role: "VP" } }),
+  ]);
+  check(
+    accepted.length === 1 && accepted[0].invitedById === frank.id && membership?.status === "ACTIVE" && membership.source === "FOUNDER" && Boolean(vp),
+    `${bee.name}: one co-founder accepted Frank's invitation and sits in the Vice President seat (a FOUNDER member)`,
+  );
+  const samInvite = await db.cofounderInvite.findFirst({ where: { clubId: bee.id, status: "PENDING", inviteeId: sam.id, invitedById: frank.id } });
+  const samTask = samInvite ? await db.task.count({ where: { assigneeId: sam.id, sourceType: COFOUNDER_INVITE, sourceId: samInvite.id, status: "OPEN", href: `/cofounder/${samInvite.token}` } }) : 0;
+  const samBell = await db.notification.count({ where: { userId: sam.id, kind: "cofounder.invited", readAt: null } });
+  check(Boolean(samInvite) && samTask === 1 && samBell === 1, "Sam has Frank's co-founder invitation waiting: an open task linking to it and an unread bell");
+  const pending = await db.cofounderInvite.findMany({ where: { status: "PENDING" }, select: { clubId: true, email: true, club: { select: { status: true } } } });
+  const perClub = new Map<string, number>();
+  for (const p of pending) perClub.set(p.clubId, (perClub.get(p.clubId) ?? 0) + 1);
+  check(
+    pending.every((p) => emailKind(p.email) === "STUDENT" && isFounding(p.club.status)) && Math.max(0, ...perClub.values()) <= COFOUNDER_PENDING_CAP,
+    `Waiting co-founder invitations are for students, at clubs still being founded, at most ${COFOUNDER_PENDING_CAP} per club`,
+    `${pending.length} waiting`,
+  );
+
+  const forming = await db.club.findMany({ where: { listedAsForming: true }, select: { id: true, name: true, status: true } });
+  check(
+    forming.length === 2 && forming.every((c) => isFounding(c.status)) && forming.some((c) => c.id === bee.id && c.status === "DRAFT") && forming.some((c) => c.id === puzzle.id && c.status === "SUBMITTED"),
+    "Two clubs are listed as forming, both still being founded: Frank's draft and his club in review",
+    forming.map((c) => `${c.name} (${c.status})`).join(", "),
+  );
+  const [beeFollowers, beeMembers] = await Promise.all([
+    db.calendarSubscription.findMany({ where: { clubId: bee.id }, select: { userId: true } }),
+    db.membership.findMany({ where: { clubId: bee.id, status: "ACTIVE" }, select: { userId: true } }),
+  ]);
+  const followerIds = beeFollowers.map((f) => f.userId).filter((id) => !beeMembers.some((m) => m.userId === id));
+  check(followerIds.length >= 5, `${bee.name} has about six followers who aren't members`, `${followerIds.length}`);
+  const puzzleFollowers = await db.calendarSubscription.count({ where: { clubId: puzzle.id } });
+  const mayaFollows = await db.calendarSubscription.count({ where: { clubId: puzzle.id, userId: maya.id } });
+  check(puzzleFollowers >= 3 && mayaFollows === 0, `${puzzle.name} has followers, and Maya isn't one yet (she follows it in the walkthrough)`, `${puzzleFollowers} followers`);
+  check((await db.clubSearchDoc.count({ where: { clubId: { in: forming.map((c) => c.id) } } })) === 0, "Forming clubs stay out of search");
+
+  const revivals = await db.task.findMany({
+    where: { sourceType: CLUB_REVIVAL, status: "OPEN" },
+    select: { sourceId: true, clubId: true, assigneeType: true, officeId: true, kind: true, club: { select: { status: true } }, createdBy: { select: { email: true, kind: true, status: true } } },
+  });
+  const personaEmails = new Set(PERSONAS.map((p) => p.email));
+  const r = revivals[0];
+  check(
+    revivals.length === 1 && r.sourceId === photo.id && r.clubId === photo.id && r.club?.status === "RETIRED" && r.kind === "APPROVAL" && r.assigneeType === "ADMINS" && r.officeId === null && r.createdBy?.kind === "STUDENT" && r.createdBy.status === "ACTIVE" && !personaEmails.has(r.createdBy.email),
+    `${photo.name} has one open revival request, in WSUSA's queue, from an invented student`,
+  );
+  check((await db.notification.count({ where: { kind: "club.revival_requested", user: { email: "alex.morgan@weber.edu" } } })) === 1, "…and Alex has the bell for it");
 }
 
 main().catch(async (e) => {

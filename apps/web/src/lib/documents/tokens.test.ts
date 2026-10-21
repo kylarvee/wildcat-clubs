@@ -50,6 +50,24 @@ describe("document tokens", () => {
   });
 });
 
+describe("officers of record tokens", () => {
+  const officers = { kind: "officers" as const, subjectId: "crobotics00000000000000001", issuedAt };
+
+  it("name the club and round-trip like the involvement record's", () => {
+    const token = signDocumentToken(officers, SECRET);
+    expect(token).toMatch(/^or\.crobotics00000000000000001\.[0-9a-z]+\.[A-Za-z0-9_-]{24}$/);
+    expect(readDocumentToken(token, SECRET, later)).toEqual(officers);
+    expect(token.length).toBeLessThan(70);
+  });
+
+  it("can't be turned into the other kind: the kind is signed with the rest", () => {
+    const [, subject, issued, sig] = signDocumentToken(officers, SECRET).split(".");
+    expect(readDocumentToken(["ir", subject, issued, sig].join("."), SECRET, later)).toBeNull();
+    const [, s2, i2, sig2] = signDocumentToken(claim, SECRET).split(".");
+    expect(readDocumentToken(["or", s2, i2, sig2].join("."), SECRET, later)).toBeNull();
+  });
+});
+
 describe("the server secret", () => {
   afterEach(() => vi.unstubAllEnvs());
 

@@ -5,6 +5,7 @@ import { newCalendarToken } from "@/lib/auth/accounts";
 import type { Actor } from "@/lib/auth/session";
 import { getClubAccess, ROLE_RANK } from "@/lib/authz";
 import { logActivity } from "@/lib/lake/activity";
+import { isListedForming } from "@/lib/founding/rules";
 import { assertClubCap, assertSignedIn, conflict, forbidden, invalid, notFound } from "@/lib/domain/kit";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notify, notifyClubCapability } from "@/lib/domain/notify";
@@ -146,11 +147,15 @@ async function subscribeInternal(userId: string, clubId: string) {
   await db.calendarSubscription.upsert({ where: { userId_clubId: { userId, clubId } }, create: { userId, clubId }, update: {} });
 }
 
-/** Subscribe to a club's calendar without joining (any signed-in user, any approved club). */
+/**
+ * Follow a club (its calendar) without joining: any signed-in user, any
+ * approved club, or a club listed as forming (followers hear when it's
+ * approved: lib/domain/clubs decideClub).
+ */
 export async function subscribeCalendar(actor: Actor | null, clubId: string) {
   assertSignedIn(actor);
-  const club = await db.club.findUnique({ where: { id: clubId }, select: { status: true } });
-  if (!club || club.status !== "APPROVED") throw notFound("Club");
+  const club = await db.club.findUnique({ where: { id: clubId }, select: { status: true, listedAsForming: true } });
+  if (!club || !(club.status === "APPROVED" || isListedForming(club))) throw notFound("Club");
   await subscribeInternal(actor.id, clubId);
   await logActivity({ actorId: actor.id, action: "calendar.subscribed", entityType: "club", entityId: clubId, clubId });
 }

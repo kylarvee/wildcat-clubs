@@ -90,6 +90,9 @@ function pinsFor(ctx: Ctx): Map<string, Pin[]> {
   return pins;
 }
 
+/** The story club whose President hands off mid-way through this year's renewal (history(), steps/renewals). */
+const MID_WINDOW_HANDOFF = "veterans";
+
 function periodsFor(club: ClubM) {
   const hs: Date[] = [];
   for (let y = 2023; y <= 2031; y++) {
@@ -290,6 +293,24 @@ function history(ctx: Ctx, club: ClubM, pins: Pin[]) {
       }
     }
   });
+
+  // A President change mid-way through this year's renewal (steps/renewals): about three weeks into the fall term the President hands
+  // off to a long-standing member, before the club re-registers, so the new President holds its renewal task and the outgoing one's
+  // was cancelled. Worked out without the random generator, so nothing else in the data shifts.
+  if (def.key === MID_WINDOW_HANDOFF) {
+    const fall = fallStartDate(2026);
+    const at = minDate(addDays(fall, 20.4), addDays(NOW, -4.2));
+    const outgoing = at > addDays(fall, 1) ? liveIn("President").find((a) => a.startedAt < addDays(fall, -30)) : undefined;
+    const incoming = outgoing
+      ? club.members
+          .filter((m) => okAt(m.userId, at, 120) && !live.some((a) => a.userId === m.userId) && !formerPresidents.has(m.userId) && !pinnedHolder(m.userId, at))
+          .sort((a, b) => a.joinedAt!.getTime() - b.joinedAt!.getTime() || a.userId.localeCompare(b.userId))[0]
+      : undefined;
+    if (outgoing && incoming) {
+      end(outgoing, at, "SUCCEEDED");
+      make("President", incoming.userId, at);
+    }
+  }
 
   // Retired clubs close every seat.
   if (club.retiredAt) for (const a of [...live]) end(a, club.retiredAt, "CLUB_RETIRED");

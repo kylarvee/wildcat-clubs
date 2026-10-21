@@ -11,6 +11,7 @@ import { Stars } from "@/components/ui/misc";
 import { CLUB_SCOPE_LABEL, CLUB_TYPE_HINT, CLUB_TYPE_LABEL, CLUB_TYPE_TONE, JOIN_POLICY_LABEL, safeHex } from "@/components/clubs/labels";
 import { ClubStatusBadge } from "@/components/clubs/ClubCard";
 import { MemberMenu, RegisterButton, SubscribeToggle } from "@/components/clubs/MembershipControls";
+import { isFounding } from "@/lib/founding/rules";
 
 /**
  * The club page hero: who the club is, how to join, and its calendar.
@@ -37,6 +38,8 @@ export function ClubHero({
   const member = Boolean(access?.isMember);
   const pending = Boolean(access?.isPendingMember);
   const leader = Boolean(access?.isLeader);
+  // A co-founder without a seat yet: a member of a club still being founded, who can leave it from here.
+  const unseatedCofounder = member && !leader && isFounding(club.status);
   const placement = club.scope === "COLLEGE" && club.college ? club.college.name : CLUB_SCOPE_LABEL[club.scope];
   const focus = club.focusMajor?.name ?? club.focusOther;
 
@@ -112,7 +115,7 @@ export function ClubHero({
               ) : null}
             </ul>
 
-            {approved || leader ? (
+            {approved || leader || unseatedCofounder ? (
               <div className="mt-6 flex flex-wrap items-center gap-2">
                 {approved ? (
                   <RegisterButton
@@ -137,7 +140,7 @@ export function ClubHero({
                     <MessageSquare className="h-4 w-4" aria-hidden="true" /> Club chat
                   </ButtonLink>
                 ) : null}
-                {approved ? <MemberMenu clubId={club.id} clubName={club.name} member={member} pending={pending} /> : null}
+                {approved || unseatedCofounder ? <MemberMenu clubId={club.id} clubName={club.name} member={member} pending={pending} /> : null}
               </div>
             ) : null}
             {approved ? (

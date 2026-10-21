@@ -29,13 +29,13 @@ export const NOTIFICATION_CATEGORIES = [
     hint: "Cancellations, moves and reminders for events at clubs you're in or follow, check-ins a leader adds for you, co-hosting, and your club's event reviews.",
     adminHint: "Events sent to your office for review come in your daily digest.",
   },
-  { key: "membership", label: "Membership", hint: "Join requests and their answers, and to-dos your clubs give you." },
+  { key: "membership", label: "Membership", hint: "Join requests and their answers, to-dos your clubs give you, and forming clubs you follow being approved." },
   {
     key: "leadership",
     label: "Leadership & elections",
-    hint: "Your roles and elections, advisors and ambassadors, and WSUSA's decisions on your club.",
+    hint: "Your roles and elections, co-founders, advisors and ambassadors, and WSUSA's decisions on your club.",
     note: "Always sent: a club you lead losing its last President, advisor or member who approves join requests.",
-    adminHint: "Club submissions and custom documents come in your daily digest.",
+    adminHint: "Club submissions, revival requests and custom documents come in your daily digest.",
   },
   { key: "requirements", label: "WSUSA requirements", hint: "Requirements, trainings, tests and forms to finish, their due dates, and your club's yearly renewal." },
   { key: "funding", label: "Funding", hint: "Funding requests and invoices for the clubs whose budget you help run.", adminHint: "New funding requests come in your daily digest." },
@@ -87,6 +87,8 @@ export const NOTIFICATION_REGISTRY = {
   "club.approved": { category: "leadership", email: true, push: true },
   "club.changes_requested": { category: "leadership", email: true, push: true },
   "club.department_added": { category: "leadership", email: false, push: true },
+  // Followers of a club that was forming (and co-founder invitees whose invitation closed) hear it's official (lib/domain/clubs decideClub).
+  "club.forming_approved": { category: "membership", email: true, push: true },
   "club.google_account_verified": { category: "leadership", email: false, push: true },
   // WSUSA moved the club to another office (lib/domain/offices): its leaders hear who oversees it now.
   "club.office_changed": { category: "leadership", email: true, push: true },
@@ -95,8 +97,18 @@ export const NOTIFICATION_REGISTRY = {
   "club.renewal_due": { category: "requirements", email: true, push: true },
   "club.renewed": { category: "requirements", email: false, push: true },
   "club.retired": { category: "leadership", email: true, push: true },
+  // The student who asked to bring a retired club back hears the office's answer.
+  "club.revival_approved": { category: "leadership", email: true, push: true },
+  "club.revival_declined": { category: "leadership", email: true, push: true },
+  // A request to bring a retired club back, for its office's staff (notifyOffice); in the admins' digest.
+  "club.revival_requested": { category: "leadership", email: false, push: true, admins: "digest" },
   // The founders' copy stays in-app; WSUSA's comes in the digest.
   "club.submitted": { category: "leadership", email: false, push: true, admins: "digest" },
+  // Co-founder invitations (lib/domain/cofounders): the invitee with an account, and the founders hearing back.
+  "cofounder.accepted": { category: "leadership", email: false, push: true },
+  "cofounder.declined": { category: "leadership", email: false, push: true },
+  // Someone without an account gets the invitation by email instead (it has no kind).
+  "cofounder.invited": { category: "leadership", email: true, push: true },
   // A report of concern reaches WSUSA right away (never with its content).
   "complaint.new": { category: "reviews", email: true, push: true },
   "complaint.received": { category: "reviews", email: false, push: false },

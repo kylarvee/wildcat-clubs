@@ -8,7 +8,42 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/form";
 import { useFormSubmit } from "@/components/founding/useFormSubmit";
 import { Switch, toast } from "@/components/ui/misc";
+import { FORMING_NOTE } from "@/components/founding/copy";
+import { setListedAsFormingAction } from "@/components/founding/actions";
 import { leaveClubAction, setAutoApproveCohostsAction, setContactEmailAction } from "@/app/clubs/[slug]/manage/settings/actions";
+
+/** "List this club as forming" (founders, while the club is being founded). */
+export function FormingToggle({ clubId, on, disabled }: { clubId: string; on: boolean; disabled?: boolean }) {
+  const router = useRouter();
+  const [value, setValue] = useState(on);
+  const [pending, start] = useTransition();
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <label htmlFor="list-forming" className="text-sm">
+        <span className="block font-medium text-ink">List this club as forming</span>
+        <span className="block text-ink-3">{FORMING_NOTE}</span>
+      </label>
+      <Switch
+        id="list-forming"
+        checked={value}
+        disabled={disabled || pending}
+        onCheckedChange={(next) => {
+          setValue(next);
+          start(async () => {
+            const r = await setListedAsFormingAction(clubId, next);
+            if (!r.ok) {
+              setValue(!next);
+              toast.error(r.error);
+            } else {
+              toast.success(next ? "Listed as forming: students can find and follow it" : "Taken off the forming list");
+              router.refresh();
+            }
+          });
+        }}
+      />
+    </div>
+  );
+}
 
 export function CohostToggle({ clubId, on, disabled }: { clubId: string; on: boolean; disabled?: boolean }) {
   const router = useRouter();

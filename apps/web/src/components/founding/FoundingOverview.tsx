@@ -15,6 +15,7 @@ import { Callout, ProgressBar } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { PolicyNotices } from "@/components/policies/PolicyNotices";
 import { AdvisorPanel } from "@/components/founding/AdvisorPanel";
+import { FoundingTeam } from "@/components/founding/FoundingTeam";
 import { SubmitForReview } from "@/components/founding/SubmitForReview";
 
 function Step({ n, done, waiting, title, icon, summary, children }: { n: number; done: boolean; waiting?: boolean; title: string; icon: ReactNode; summary: ReactNode; children?: ReactNode }) {
@@ -165,6 +166,8 @@ export async function FoundingOverview({ club, access, justCreated }: { club: Cl
           </ButtonLink>
         ) : null}
       </Step>
+
+      <FoundingTeam club={club} access={access} />
 
       <Card className={cn(check.ready && "border-brand-200 ring-1 ring-brand-100")}>
         <CardBody className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

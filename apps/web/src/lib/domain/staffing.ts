@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { clubCapabilityHolders } from "@/lib/authz/people";
 import { logActivity } from "@/lib/lake/activity";
 import { notify } from "@/lib/domain/notify";
+import { renewalAfterRoleChange } from "@/lib/domain/renewals";
 import { createTask, resolveTasks } from "@/lib/domain/tasks";
 import { notifyOffice, officeForClub } from "@/lib/offices";
 import { clubRules } from "@/lib/constitution/club-rules";
@@ -127,7 +128,10 @@ export async function checkClubStaffing(clubId: string, opts: StaffingCheck = {}
 /**
  * For write paths, right after a role change: checks each club it touched.
  * Never throws: the change has already happened, so a failed check is logged
- * and the scheduled job's re-check closes whatever it missed.
+ * and the scheduled job's re-check closes whatever it missed. The club's
+ * yearly renewal follows the same seats, so its tasks are synced here too: a
+ * new President gets the club's renewal task at once and the outgoing one's
+ * is cancelled (lib/domain/renewals, which never throws either).
  */
 export async function staffingAfterRoleChange(clubIds: Iterable<string>, opts: StaffingCheck): Promise<Map<string, StaffingResult>> {
   const out = new Map<string, StaffingResult>();
@@ -137,6 +141,7 @@ export async function staffingAfterRoleChange(clubIds: Iterable<string>, opts: S
     } catch (e) {
       console.error(`[staffing] couldn't check club ${clubId} after a role change`, e);
     }
+    await renewalAfterRoleChange(clubId);
   }
   return out;
 }

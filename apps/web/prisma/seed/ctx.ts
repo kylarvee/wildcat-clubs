@@ -157,6 +157,8 @@ export type ClubM = {
   assignments: Assignment[];
   events: Ev[];
   advisorIds: string[];
+  /** "List this club as forming" (steps/founding). */
+  listedAsForming?: boolean;
 };
 
 /** A seeded office (steps/offices). Only non-umbrella ids are ever stored on rows: the umbrella is null (lib/offices/rules). */
@@ -216,6 +218,8 @@ export class Ctx {
     projectFiles: [] as Prisma.ProjectFileCreateManyInput[],
     decisions: [] as Prisma.ClubDecisionCreateManyInput[],
     invites: [] as Prisma.AdvisorInviteCreateManyInput[],
+    /** Co-founder invitations (steps/founding). */
+    cofounderInvites: [] as Prisma.CofounderInviteCreateManyInput[],
     drafts: [] as Prisma.ConstitutionDraftCreateManyInput[],
     files: [] as Prisma.FileItemCreateManyInput[],
     documents: [] as Prisma.ClubDocumentCreateManyInput[],

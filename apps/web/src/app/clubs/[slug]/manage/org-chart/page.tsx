@@ -8,6 +8,7 @@ import { activeRequirements, activeStudentMembers, orgChartData, trainingStatusF
 import { selectionSetup } from "@/lib/roles/selection-setup";
 import { fmtMonthRange } from "@/lib/roles/history";
 import { inClubPipeline } from "@/lib/roles/pipeline";
+import { isFounder } from "@/lib/authz/founding";
 import { TIERS } from "@/lib/roles/labels";
 import { fmtLongDate } from "@/lib/time";
 import { SeatCard } from "@/components/roles/SeatCard";
@@ -45,7 +46,7 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
   const [data, people, requirements, setup] = await Promise.all([
     orgChartData(club.id),
     canAssignAny ? activeStudentMembers(club.id) : Promise.resolve([]),
-    canAssignAny ? activeRequirements() : Promise.resolve([]),
+    canAssignAny ? activeRequirements(club.id) : Promise.resolve([]),
     selectionSetup(club.id),
   ]);
   const holders = data.seats.flatMap((s) => s.holders);
@@ -114,6 +115,7 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
       <ToolHeader
         slug={club.slug}
         clubName={club.name}
+        officersLetter={club.status === "APPROVED"}
         actions={
           canEditSeats && data.seats.length > 0 ? (
             <>
@@ -136,6 +138,17 @@ export default async function OrgChartToolPage({ params }: { params: Promise<{ s
             {club.type === "COLLEGE_AMBASSADORS"
               ? "As Vice President you can assign officers and ambassadors. Presidents and vice presidents are named by the President or the advisor."
               : "As Vice President you can assign officers and set the permissions of a college ambassador placed here. Presidents and vice presidents are named by the President or the advisor, and only the college's ambassador program fills the College Ambassador seat."}
+          </Callout>
+        ) : null}
+
+        {/* Founding a club: seats go to members, and co-founders become members by accepting an invitation (lib/domain/cofounders). */}
+        {isFounder(access, club, user.id) ? (
+          <Callout tone="brand" title="Seats go to your founding team">
+            Invite fellow students as co-founders from{" "}
+            <Link href={`/clubs/${club.slug}/manage`} className="font-medium underline underline-offset-2">
+              your Overview
+            </Link>
+            . Once they accept, they&apos;re members, and you can give them a seat here before the club is approved.
           </Callout>
         ) : null}
 

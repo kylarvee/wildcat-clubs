@@ -10,7 +10,9 @@ import { RenewButton } from "@/components/renewals/RenewButton";
 /**
  * The workspace overview's renewal card (lib/domain/renewals renewalView):
  * the checks and "Renew for 2026–27" while renewal is due or late, then one
- * line once the club renewed. Nothing while it isn't open.
+ * line once the club renewed. Nothing while it isn't open. A President or
+ * advisor who took the seat after renewal opened reads that the club hasn't
+ * renewed and it's theirs to finish.
  */
 export function RenewalCard({ view }: { view: RenewalView }) {
   const { window, status } = view;
@@ -30,7 +32,7 @@ export function RenewalCard({ view }: { view: RenewalView }) {
     );
   }
 
-  const reason = view.whyNot ?? status.hint;
+  const reason = view.whyNot ?? view.hint;
   return (
     <Card id="renewal" className={cn("scroll-mt-24", view.canRenew && "border-brand-200 ring-1 ring-brand-100")}>
       {/* Not CardHeader: on a phone the status wraps under the title instead of squeezing the description. */}
@@ -41,7 +43,7 @@ export function RenewalCard({ view }: { view: RenewalView }) {
           </h2>
           <Badge tone={status.tone}>{status.label}</Badge>
         </div>
-        <p className="mt-1 text-sm text-ink-3">{view.office} re-registers its clubs once a year. Once the required checks are green, confirm the club will be active and you&apos;re done.</p>
+        <p className="mt-1 text-sm text-ink-3">{view.intro}</p>
       </div>
       <CardBody className="space-y-4">
         <CheckList title="Needed to renew" checks={view.checks.filter((c) => c.required)} />

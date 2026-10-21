@@ -20,24 +20,41 @@ import {
   isRequiredCheck,
   RENEWAL_NOTE_MAX,
   RENEWAL_SOURCE,
+  renewalCardHint,
+  renewalCardIntro,
+  renewalDueNotice,
+  renewalHref,
   renewalSourceId,
+  renewalTaskDescription,
+  renewalTaskPlan,
+  renewalTaskTitle,
   renewalTerm,
   renewalWindow,
   renewedNotice,
   renewerBlocker,
   snapshotChecks,
+  tookOfficeDuringWindow,
   type RenewalCheck,
+  type RenewalHolder,
   type RenewalStatus,
+  type RenewalTerm,
   type RenewalWindow,
 } from "@/lib/renewals/rules";
 
 /**
  * Yearly club renewal with the club's office (WSUSA, or the office that
- * oversees it: lib/offices): the write path for ClubRenewal, and the reads
- * the workspace overview, the club page and Admin → Club approvals →
- * Renewals use. The rules (window, checks, status names, who renews) are pure
- * in lib/renewals/rules; the "Club renewals" scheduled job that opens and
- * closes the tasks is lib/jobs/renewals.
+ * oversees it: lib/offices): the write path for ClubRenewal and for the
+ * renewal tasks, and the reads the workspace overview, the club page and
+ * Admin → Club approvals → Renewals use. The rules (window, checks, status
+ * names, who renews, which tasks a club should have) are pure in
+ * lib/renewals/rules.
+ *
+ * The tasks: syncClubRenewal brings one club's tasks in line with where it
+ * stands. The "Club renewals" scheduled job (lib/jobs/renewals) runs it for
+ * every club that's out of line, and every role change runs it for its club
+ * (renewalAfterRoleChange, from lib/domain/staffing), so a President who
+ * takes office while the club hasn't renewed has "Renew … for 2026–27" at
+ * once and the outgoing President's task is cancelled.
  *
  * Renewing is the club's own act, not a review. It writes the ClubRenewal
  * with the checks as they stood, logs club.renewed (public), closes the
@@ -47,9 +64,101 @@ import {
  */
 
 /** This academic year's window (null without terms), and the term "an event this term" reads. */
-export async function currentRenewalWindow(now: Date = new Date()) {
+export async function currentRenewalWindow(now: Date = new Date()): Promise<{ window: RenewalWindow | null; term: RenewalTerm | null }> {
   const [terms, cfg] = await Promise.all([getTerms(), getConfig()]);
   return { window: renewalWindow(terms, now, cfg["renewal.dueDays"]), term: renewalTerm(terms, now) };
+}
+
+// ─── The tasks ───────────────────────────────────────────────────────────────
+
+/** What renewalTaskPlan reads of a task. */
+export const RENEWAL_TASK_SELECT = { id: true, sourceId: true, assigneeId: true, dueAt: true, officeId: true, title: true } satisfies Prisma.TaskSelect;
+
+/** A club's open renewal tasks, any year (sourceId "<clubId>:<year>"). */
+const openRenewalTasks = (clubId: string) => ({ sourceType: RENEWAL_SOURCE, status: "OPEN" as const, sourceId: { startsWith: `${clubId}:` } });
+
+export type RenewalSyncResult = { opened: number; done: number; cancelled: number; updated: number };
+
+/**
+ * THE RENEWAL SYNC: one club's renewal tasks, made to match
+ * lib/renewals/rules renewalTaskPlan. While renewal is open and the club
+ * hasn't renewed, each current President and advisor has one required
+ * "Renew {club} for 2026–27" task, due when the window is (one window for
+ * every club) and marked as required by the club's office; whoever took the
+ * seat after renewal opened is told it's theirs to finish. A renewal closes
+ * them as done; someone leaving the seat, the window closing or the club
+ * leaving the list cancels theirs. Runs under a per-club lock with the facts
+ * read inside it, so the job and a role change can't both open a task.
+ * `at` skips re-reading the window (the job passes it once for every club).
+ */
+export async function syncClubRenewal(clubId: string, opts: { now?: Date; at?: { window: RenewalWindow | null; term: RenewalTerm | null } } = {}): Promise<RenewalSyncResult> {
+  const now = opts.now ?? new Date();
+  const { window, term } = opts.at ?? (await currentRenewalWindow(now));
+  const umbrella = (await umbrellaOffice()).name;
+  const r = await db.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${RENEWAL_SOURCE}:${clubId}`}))`;
+      const [[state], tasks] = await Promise.all([
+        loadRenewalStates(tx, { window, term, now, clubIds: [clubId] }),
+        tx.task.findMany({ where: openRenewalTasks(clubId), select: RENEWAL_TASK_SELECT }),
+      ]);
+      const plan = renewalTaskPlan(state ?? null, tasks, window, now);
+      const office = state?.club.office?.name ?? umbrella;
+      const out = { club: state?.club ?? null, office, opened: plan.open, cancelled: 0, done: 0, updated: plan.update.length };
+      if (plan.cancel.length) out.cancelled = (await tx.task.updateMany({ where: { id: { in: plan.cancel }, status: "OPEN" }, data: { status: "CANCELLED", completedAt: now } })).count;
+      const renewal = state?.renewal;
+      if (plan.done.length && renewal) {
+        out.done = (await tx.task.updateMany({ where: { id: { in: plan.done }, status: "OPEN" }, data: { status: "DONE", completedAt: renewal.submittedAt, completedById: renewal.submittedBy?.id ?? null } })).count;
+      }
+      if (!state || !window || !(plan.update.length || plan.open.length)) return out;
+      const title = renewalTaskTitle(state.club.name, window.year);
+      if (plan.update.length) await tx.task.updateMany({ where: { id: { in: plan.update } }, data: { dueAt: window.dueAt, officeId: state.club.officeId, title } });
+      // Written here rather than through createTask, which names an office only on ADMINS tasks: a required task names who requires it.
+      await tx.task.createMany({
+        data: plan.open.map((h) => ({
+          kind: "REQUIREMENT" as const,
+          title,
+          description: renewalTaskDescription(office, tookOfficeDuringWindow(h, window)),
+          assigneeType: "USER" as const,
+          assigneeId: h.id,
+          clubId: state.club.id,
+          href: renewalHref(state.club.slug),
+          dueAt: window.dueAt,
+          required: true,
+          sourceType: RENEWAL_SOURCE,
+          sourceId: renewalSourceId(state.club.id, window.year),
+          officeId: state.club.officeId,
+        })),
+      });
+      return out;
+    },
+    { timeout: 15_000 },
+  );
+
+  // Whoever's task just opened hears about it: someone new to the seat that it's theirs to finish, everyone else that it's time.
+  if (r.club && window && r.opened.length) {
+    const late = now > window.dueAt;
+    const href = renewalHref(r.club.slug);
+    const fresh = r.opened.filter((h) => tookOfficeDuringWindow(h, window));
+    for (const h of fresh) await notify({ userIds: [h.id], kind: "club.renewal_due", ...renewalDueNotice(r.club.name, window, late, r.office, h), href });
+    const rest = r.opened.filter((h) => !fresh.includes(h)).map((h) => h.id);
+    if (rest.length) await notify({ userIds: rest, kind: "club.renewal_due", ...renewalDueNotice(r.club.name, window, late, r.office), href });
+  }
+  return { opened: r.opened.length, done: r.done, cancelled: r.cancelled, updated: r.updated };
+}
+
+/**
+ * For write paths, right after a role change (lib/domain/staffing
+ * staffingAfterRoleChange runs it for every club a change touched). Never
+ * throws: the change has already happened, so a failed sync is logged and
+ * the "Club renewals" job brings the tasks in line on its next run.
+ */
+export async function renewalAfterRoleChange(clubId: string): Promise<void> {
+  try {
+    await syncClubRenewal(clubId);
+  } catch (e) {
+    console.error(`[renewals] couldn't sync club ${clubId}'s renewal tasks after a role change`, e);
+  }
 }
 
 export type RenewalCheckRow = RenewalCheck & { required: boolean; fix: { label: string; href: string } };
@@ -76,6 +185,12 @@ export type RenewalView = {
   canRenew: boolean;
   /** Why the Renew button is off, in plain words; null when it's on or the club already renewed. */
   whyNot: string | null;
+  /** The card's first lines (lib/renewals/rules renewalCardIntro). */
+  intro: string;
+  /** The line beside the Renew button while it's on (lib/renewals/rules renewalCardHint). */
+  hint: string;
+  /** The viewer is a President or advisor who took the seat after renewal opened, while the club hasn't renewed. */
+  tookOffice: { role: RenewalHolder["role"]; since: Date } | null;
 };
 
 /** The renewal card for a club's leaders (anyone who can open its workspace). */
@@ -96,16 +211,24 @@ export async function renewalView(actor: Actor | null, clubId: string, now: Date
         : state.blocking.length
           ? blockedMessage(state.club.name, state.blocking)
           : renewerBlocker(access, state.club.name);
+  const office = state.club.office?.name ?? (await umbrellaOffice()).name;
+  // A President or advisor who took the seat mid-window picks up the renewal as it stands (one window for every club), so the card says so.
+  const mine = state.holders.find((h) => h.id === actor.id);
+  const open = status.kind === "due" || status.kind === "overdue";
+  const tookOffice = window && mine && open && tookOfficeDuringWindow(mine, window) ? { role: mine.role, since: mine.since } : null;
   return {
     club: { id: state.club.id, name: state.club.name, slug: state.club.slug },
-    office: state.club.office?.name ?? (await umbrellaOffice()).name,
+    office,
     window,
     status,
     checks: checkRows(state.club.slug, state.checks),
     renewal: done(state),
     showCard: status.kind !== "upcoming",
-    canRenew: whyNot === null && (status.kind === "due" || status.kind === "overdue"),
+    canRenew: whyNot === null && open,
     whyNot,
+    intro: window ? renewalCardIntro(state.club.name, office, window, tookOffice) : "",
+    hint: window ? renewalCardHint(status, window, tookOffice) : status.hint,
+    tookOffice,
   };
 }
 

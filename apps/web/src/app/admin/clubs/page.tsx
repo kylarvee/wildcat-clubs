@@ -10,6 +10,7 @@ import { listOffices, type OfficeInfo } from "@/lib/offices";
 import { DAY_MS, fmtLongDate } from "@/lib/time";
 import { fileUrl } from "@/lib/domain/files";
 import { statedSettings } from "@/lib/domain/constitution";
+import { CLUB_REVIVAL, revivalHref, revivalNote } from "@/lib/founding/rules";
 import { ClubLogo } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export const metadata: Metadata = { title: "Club approvals" };
 /** `umbrella`: WSUSA's alone. Department requests (the directory) and the college ambassador programs are platform-wide. */
 const TABS = [
   { key: "submissions", label: "Submissions" },
+  { key: "revivals", label: "Revival requests" },
   { key: "departments", label: "Department requests", umbrella: true },
   { key: "documents", label: "Custom documents" },
   { key: "renewals", label: "Renewals" },
@@ -59,12 +61,13 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
   const offices = umbrella ? await listOffices() : [];
 
   const deptWhere: Prisma.ClubWhereInput = { ...LIVE, requestedDepartmentName: { not: null }, departmentId: null };
-  const [subCount, deptCount, docCount] = await Promise.all([
+  const [subCount, deptCount, docCount, revivalCount] = await Promise.all([
     db.club.count({ where: { AND: [scope, { status: "SUBMITTED" }] } }),
     umbrella ? db.club.count({ where: deptWhere }) : Promise.resolve(0),
     db.clubDocument.count({ where: { status: "PENDING_APPROVAL", club: { AND: [LIVE, scope] } } }),
+    db.task.count({ where: revivalWhere(scope) }),
   ]);
-  const counts: Partial<Record<TabKey, number>> = { submissions: subCount, departments: deptCount, documents: docCount };
+  const counts: Partial<Record<TabKey, number>> = { submissions: subCount, departments: deptCount, documents: docCount, revivals: revivalCount };
 
   return (
     <div>
@@ -91,6 +94,8 @@ export default async function AdminClubsPage({ searchParams }: { searchParams: P
       </nav>
       {tab === "submissions" ? (
         <Submissions scope={scope} offices={offices} />
+      ) : tab === "revivals" ? (
+        <RevivalRequests scope={scope} offices={offices} />
       ) : tab === "departments" ? (
         <DepartmentRequests where={deptWhere} />
       ) : tab === "documents" ? (
@@ -166,6 +171,90 @@ async function Submissions({ scope, offices }: { scope: Prisma.ClubWhereInput; o
               <TD className="text-right">
                 <Link href={`/admin/clubs/${c.id}`} className={buttonClasses("primary", "sm")}>
                   Review
+                </Link>
+              </TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </Table>
+  );
+}
+
+/** Open requests to bring a retired club back (lib/domain/clubs requestClubRevival), for the viewer's clubs. */
+const revivalWhere = (scope: Prisma.ClubWhereInput): Prisma.TaskWhereInput => ({ sourceType: CLUB_REVIVAL, status: "OPEN", club: { is: { AND: [scope, { status: "RETIRED" }] } } });
+
+async function RevivalRequests({ scope, offices }: { scope: Prisma.ClubWhereInput; offices: OfficeInfo[] }) {
+  const requests = await db.task.findMany({
+    where: revivalWhere(scope),
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      createdAt: true,
+      description: true,
+      club: { select: { id: true, name: true, logoUrl: true, logoColor: true, officeId: true, retiredAt: true } },
+      createdBy: { select: { name: true, email: true } },
+    },
+  });
+  if (!requests.length) return <EmptyState title="No revival requests" description="When a student asks to bring a retired club back, with them as President, it shows up here, oldest first." />;
+  return (
+    <Table>
+      <THead>
+        <tr>
+          <TH>Club</TH>
+          <TH className="hidden sm:table-cell">Asked by</TH>
+          <TH className="hidden md:table-cell">Their note</TH>
+          <TH className="hidden sm:table-cell">Waiting</TH>
+          <TH>
+            <span className="sr-only">Decide</span>
+          </TH>
+        </tr>
+      </THead>
+      <TBody>
+        {requests.map((r) => {
+          const days = Math.floor((Date.now() - r.createdAt.getTime()) / DAY_MS);
+          const club = r.club!;
+          const note = r.createdBy ? revivalNote(r, r.createdBy.name) : r.description;
+          return (
+            <TR key={r.id}>
+              <TD>
+                <div className="flex items-center gap-3">
+                  <ClubLogo name={club.name} src={club.logoUrl} color={club.logoColor} size="sm" />
+                  <div className="min-w-0">
+                    <p className="font-medium">{club.name}</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-ink-3">
+                      {club.retiredAt ? `Retired ${fmtLongDate(club.retiredAt)}` : "Retired"}
+                      <OfficeTag officeId={club.officeId} offices={offices} />
+                    </div>
+                    <p className="mt-0.5 text-xs text-ink-2 sm:hidden">
+                      {r.createdBy ? `Asked by ${r.createdBy.name} · ` : ""}
+                      {days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}
+                    </p>
+                  </div>
+                </div>
+              </TD>
+              <TD className="hidden text-ink-2 sm:table-cell">
+                {r.createdBy ? (
+                  <>
+                    <span className="block">{r.createdBy.name}</span>
+                    <a href={`mailto:${r.createdBy.email}`} className="block truncate text-xs text-ink-3 hover:text-brand">
+                      {r.createdBy.email}
+                    </a>
+                  </>
+                ) : (
+                  "—"
+                )}
+              </TD>
+              <TD className="hidden max-w-xs md:table-cell">
+                <span className="line-clamp-2 text-sm text-ink-2">{note ?? <span className="text-ink-3">No note</span>}</span>
+              </TD>
+              <TD className="hidden whitespace-nowrap sm:table-cell">
+                <span className={cn(days >= 10 ? "font-medium text-warning" : "text-ink-2")}>{days === 0 ? "Today" : `${days} day${days === 1 ? "" : "s"}`}</span>
+                <span className="block text-xs text-ink-3">{fmtLongDate(r.createdAt)}</span>
+              </TD>
+              <TD className="text-right">
+                <Link href={revivalHref(club.id)} className={buttonClasses("primary", "sm")}>
+                  Decide
                 </Link>
               </TD>
             </TR>

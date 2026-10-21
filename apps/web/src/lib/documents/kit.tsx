@@ -284,9 +284,10 @@ export function QrCode({ text, size }: { text: string; size: number }) {
 
 /**
  * The footer on every page: the verification QR code and link, what they
- * do, and the page number. `url` is the document's /verify link.
+ * do, and the page number. `url` is the document's /verify link; `heading`
+ * names what it verifies ("Verify this letter").
  */
-export function VerifyFooter({ url, note }: { url: string; note: string }) {
+export function VerifyFooter({ url, note, heading = "Verify this record" }: { url: string; note: string; heading?: string }) {
   return (
     <>
       <View style={s.footRule} fixed />
@@ -294,7 +295,7 @@ export function VerifyFooter({ url, note }: { url: string; note: string }) {
         <QrCode text={url} size={50} />
       </View>
       <View style={s.footText} fixed>
-        <Txt style={[TYPE.strong, { fontSize: 8, color: COLORS.ink }]}>Verify this record</Txt>
+        <Txt style={[TYPE.strong, { fontSize: 8, color: COLORS.ink }]}>{heading}</Txt>
         <Link src={url} style={[TYPE.link, { fontSize: 7.2, marginTop: 1.5 }]}>
           {url}
         </Link>
