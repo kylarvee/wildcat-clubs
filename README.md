@@ -7,7 +7,7 @@ Advisors and WSUSA administrators review clubs, set policy, run officer training
 analytics for every club.
 
 * `apps/web` — the web app and the API (Next.js + Postgres)
-* `apps/mobile` — the simplified mobile app (Expo): QR check-in, notifications, clubs, calendar
+* `apps/mobile` — the simplified mobile app (Expo): QR check-in, notifications, clubs, events
 * `ARCHITECTURE.md` — principles, permission hierarchy, who-inputs-what, definitions, decisions
 * `docs/spec.md` — the product spec
 
@@ -41,8 +41,9 @@ Open http://localhost:3100 and sign in as any **test persona** (new student, mem
 president, ambassador, founder, alumni, advisor, invited advisor, admin, sysadmin). Each is a seeded
 account with real history — see `apps/web/prisma/seed/PERSONAS.md` for what to try with each.
 
-`db:reset` wipes the database and re-seeds the full mock data set (~46 clubs, ~500 people, two years
-of events and attendance). Run it any time to start user testing fresh.
+`db:reset` wipes the database and re-seeds the full mock data set: about 300 clubs (the names on
+Weber State's public club list), about 1,100 invented people, and two years of events and
+check-ins. Every person in it is made up. Run it any time to start user testing fresh.
 
 Test personas need no password, so they exist only in development. A production build
 (`next build && next start`) offers Google sign-in only, whatever `AUTH_MODE` says, unless
